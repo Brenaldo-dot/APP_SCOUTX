@@ -1,0 +1,250 @@
+import { useEffect, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { api } from '../api/client.js'
+import EmptyState from '../components/EmptyState.jsx'
+import StatCard from '../components/StatCard.jsx'
+import Pagination from '../components/Pagination.jsx'
+import { ClassificationBadge, DuplicateBadge, ScalingBadge, StatusBadge, SupplierIdTag } from '../components/Badges.jsx'
+import QuickPreview from '../components/QuickPreview.jsx'
+
+const PAGE_SIZE = 100
+
+// Mesmo mapeamento de services/competitor_service.py:country_for_operation
+// no backend — os links "abrir na ferramenta oficial" tinham CO fixo,
+// levando concorrente do México pra biblioteca do país errado igual o bug
+// original do scan automático.
+const OPERATION_COUNTRY = { colombia: 'CO', mexico: 'MX', equador: 'EC', guatemala: 'GT' }
+
+function metaAdsLibraryUrl(domain, country) {
+  const params = new URLSearchParams({
+    active_status: 'active',
+    ad_type: 'all',
+    country,
+    q: domain,
+    search_type: 'keyword_unordered',
+  })
+  return `https://www.facebook.com/ads/library/?${params.toString()}`
+}
+
+function tiktokCreativeCenterUrl(domain, country) {
+  const params = new URLSearchParams({ keyword: domain, region: country, period: '30' })
+  return `https://ads.tiktok.com/business/creativecenter/inspiration/topads/pc/en?${params.toString()}`
+}
+
+function googleAdsTransparencyUrl(domain, country) {
+  const params = new URLSearchParams({ region: country, domain })
+  return `https://adstransparency.google.com/?${params.toString()}`
+}
+
+export default function CompetitorDetail() {
+  const { id } = useParams()
+  const [competitor, setCompetitor] = useState(null)
+  const [products, setProducts] = useState(null)
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [error, setError] = useState(null)
+  const [previewProduct, setPreviewProduct] = useState(null)
+
+  useEffect(() => {
+    setCompetitor(null)
+    setPage(1)
+    api.getCompetitor(id).then(setCompetitor).catch((e) => setError(e.message))
+  }, [id])
+
+  useEffect(() => {
+    api
+      .listProducts({ competitor_id: id, page, limit: PAGE_SIZE })
+      .then(({ items, total }) => {
+        setProducts(items)
+        setTotal(total)
+      })
+      .catch((e) => setError(e.message))
+  }, [id, page])
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const country = competitor ? OPERATION_COUNTRY[competitor.operation] || 'CO' : 'CO'
+
+  if (error) return <EmptyState title="Não deu pra carregar o concorrente" subtitle={error} />
+  if (!competitor) return <p className="text-sm text-gray-500">Carregando…</p>
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <Link to="/concorrentes" className="text-sm text-brand-600 hover:underline">
+          ← Concorrentes
+        </Link>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <h2 className="text-xl font-semibold">{competitor.name}</h2>
+          <StatusBadge status={competitor.status} />
+          <ClassificationBadge classification={competitor.classification} />
+        </div>
+        <p className="text-sm text-gray-500">{competitor.domain}</p>
+        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+          <a
+            href={`https://${competitor.domain}/`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block text-sm text-brand-600 hover:underline"
+          >
+            🏬 Abrir loja em nova aba ↗
+          </a>
+          <a
+            href={metaAdsLibraryUrl(competitor.domain, country)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block text-sm text-brand-600 hover:underline"
+          >
+            🔍 Ver anúncios ao vivo na Meta Ads Library ↗
+          </a>
+          <a
+            href={tiktokCreativeCenterUrl(competitor.domain, country)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block text-sm text-brand-600 hover:underline"
+          >
+            🔍 Ver no TikTok Creative Center ↗
+          </a>
+          <a
+            href={googleAdsTransparencyUrl(competitor.domain, country)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block text-sm text-brand-600 hover:underline"
+          >
+            🔍 Ver no Google Ads Transparency Center ↗
+          </a>
+        </div>
+        <p className="mt-0.5 text-xs text-gray-500">
+          Abre a busca por "{competitor.domain}" direto na fonte — funciona mesmo se a raspagem automática falhar ou
+          não achar nada, porque quem navega é você. O TikTok é limitado por natureza da ferramenta deles: a
+          biblioteca pública só cobre países da União Europeia (exigência regulatória local, testado ao vivo — o
+          seletor de país nem lista Colômbia), então não existe uma forma pública de confirmar anúncio de TikTok pra
+          loja colombiana nenhuma, não é falha da raspagem. Já o Google cobre Colômbia normalmente — pode aparecer
+          bem mais anúncio ali do que os que a raspagem automática mostra na aba Anúncios.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <StatCard label="Produtos" value={competitor.total_products} />
+        <StatCard label="Fornecedores únicos" value={competitor.vendor_count} />
+        <StatCard
+          label="Faixa de preço"
+          value={
+            competitor.price_min != null
+              ? `${competitor.price_min} – ${competitor.price_max}`
+              : '—'
+          }
+        />
+        <StatCard
+          label="Volume médio/dia"
+          value={competitor.avg_daily_volume ?? 'aguardando dado'}
+          hint="Baseado em queda de estoque (2+ pontos de dado)"
+        />
+      </div>
+
+      <div>
+        <h3 className="mb-3 text-base font-semibold">Stack tecnológica detectada</h3>
+        {competitor.tech_stack.filter((t) => t.active).length === 0 ? (
+          <EmptyState
+            title="Nada detectado ainda"
+            subtitle="A stack é coletada no raio-x inicial e atualizada toda semana."
+          />
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {competitor.tech_stack
+              .filter((t) => t.active)
+              .map((t) => (
+                <span
+                  key={t.name}
+                  className="rounded-full border border-[#2d3148] bg-[#1c1f2e] px-3 py-1 text-xs text-gray-400"
+                  title={t.external_id ? `ID: ${t.external_id}` : undefined}
+                >
+                  {t.name}
+                  {t.external_id && <span className="ml-1 text-gray-500">· {t.external_id}</span>}
+                </span>
+              ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <h3 className="mb-3 text-base font-semibold">Produtos{total > 0 ? ` (${total})` : ''}</h3>
+        {!products || products.length === 0 ? (
+          <EmptyState title="Nenhum produto encontrado ainda" />
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-[#2d3148] bg-[#1c1f2e]">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-[#161824] text-xs uppercase text-gray-500">
+                <tr>
+                  <th className="px-4 py-3">Produto</th>
+                  <th className="px-4 py-3">Fornecedor</th>
+                  <th className="px-4 py-3">Cód. fornecedor</th>
+                  <th className="px-4 py-3">Preço</th>
+                  <th className="px-4 py-3">Variações</th>
+                  <th className="px-4 py-3">Sinais</th>
+                  <th className="px-4 py-3">Ver na loja</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#2d3148]">
+                {products.map((p) => {
+                  const url = `https://${competitor.domain}/products/${p.handle}`
+                  return (
+                    <tr key={p.id} className="hover:bg-[#161824]">
+                      <td className="px-4 py-3 font-medium text-gray-200">{p.title}</td>
+                      <td className="px-4 py-3 text-gray-500">{p.vendor || '—'}</td>
+                      <td className="px-4 py-3">
+                        <SupplierIdTag supplierId={p.supplier_id} />
+                      </td>
+                      <td className="px-4 py-3">
+                        {p.price_min != null
+                          ? `${p.price_min}${p.price_max && p.price_max !== p.price_min ? ` – ${p.price_max}` : ''}`
+                          : '—'}
+                      </td>
+                      <td className="px-4 py-3">{p.variant_count}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          <DuplicateBadge duplicateCount={p.duplicate_count} duplicateOf={p.duplicate_of} />
+                          <ScalingBadge scaling={p.scaling} />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2 whitespace-nowrap">
+                          <button
+                            onClick={() => setPreviewProduct(p)}
+                            className="text-brand-600 hover:underline"
+                            title="Prévia rápida sem sair da página"
+                          >
+                            👁 Ver
+                          </button>
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-brand-600 hover:underline"
+                            title="Abrir em aba normal"
+                          >
+                            ↗
+                          </a>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {products && products.length > 0 && (
+          <Pagination page={page} totalPages={totalPages} total={total} onChange={setPage} />
+        )}
+      </div>
+
+      {previewProduct && (
+        <QuickPreview
+          product={previewProduct}
+          url={`https://${competitor.domain}/products/${previewProduct.handle}`}
+          onClose={() => setPreviewProduct(null)}
+        />
+      )}
+    </div>
+  )
+}
