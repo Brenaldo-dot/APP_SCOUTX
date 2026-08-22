@@ -65,12 +65,12 @@ export default function BuscarBarcode() {
   return (
     <div className="max-w-xl space-y-6">
       <div>
-        <h2 className="text-xl font-semibold">Buscar Barcode</h2>
-        <p className="text-sm text-gray-500">Cole a URL de um produto concorrente pra achar o barcode/SKU dele.</p>
+        <h2 className="text-xl font-semibold">Buscar Fornecedor</h2>
+        <p className="text-sm text-[var(--text-muted)]">Cole a URL de um produto concorrente pra achar o fornecedor/ID dele.</p>
       </div>
 
-      <div className="rounded-xl border border-[#2d3148] bg-[#1c1f2e] p-5">
-        <label className="mb-2 block text-sm text-gray-300">Cole a URL do produto concorrente:</label>
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
+        <label className="mb-2 block text-sm text-[var(--text-secondary)]">Cole a URL do produto concorrente:</label>
         <input
           type="text"
           value={url}
@@ -78,13 +78,9 @@ export default function BuscarBarcode() {
           onKeyDown={(e) => e.key === 'Enter' && buscar()}
           placeholder="https://loja-concorrente.com/products/nome-do-produto"
           autoComplete="off"
-          className="w-full rounded-lg border border-[#2d3148] bg-[#161824] px-3 py-2.5 text-sm text-gray-100 placeholder:text-gray-600 focus:border-brand-500 focus:outline-none"
+          className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
         />
-        <button
-          onClick={buscar}
-          disabled={loading}
-          className="mt-4 w-full rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70"
-        >
+        <button onClick={buscar} disabled={loading} className="btn-primary mt-4 w-full py-2.5">
           {loading ? 'Buscando…' : 'Buscar'}
         </button>
 
@@ -95,13 +91,13 @@ export default function BuscarBarcode() {
         {result && (
           <div className="mt-4 rounded-lg border border-emerald-900 bg-emerald-950/30 px-3 py-2.5">
             <p className="text-sm font-medium text-emerald-400">Encontrado: {result.value}</p>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
               {result.source === 'sku' ? 'Barcode vazio — exibindo SKU' : 'Barcode'}
               {result.productTitle ? ` · ${result.productTitle}` : ''}
             </p>
             <button
               onClick={copiar}
-              className="mt-3 rounded-md bg-[#2d3148] px-3 py-1.5 text-xs text-gray-100 hover:bg-[#374151]"
+              className="mt-3 rounded-md bg-[var(--border)] px-3 py-1.5 text-xs text-[var(--text-primary)] hover:bg-[var(--hover-secondary)]"
             >
               {copied ? 'Copiado!' : 'Copiar Resultado'}
             </button>
@@ -111,14 +107,14 @@ export default function BuscarBarcode() {
 
       {history.length > 0 && (
         <div>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Últimas buscas</h3>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Últimas buscas</h3>
           <ul className="flex flex-col gap-1.5">
             {history.map((item, i) => (
               <li
                 key={i}
-                className="flex items-center justify-between gap-2 rounded-lg border border-[#2d3148] bg-[#1c1f2e] px-3 py-2 text-xs"
+                className="flex items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-xs"
               >
-                <span className="truncate text-gray-500">{item.loja}</span>
+                <span className="truncate text-[var(--text-muted)]">{item.loja}</span>
                 <span className="shrink-0 font-medium text-emerald-400">{item.codigo}</span>
               </li>
             ))}

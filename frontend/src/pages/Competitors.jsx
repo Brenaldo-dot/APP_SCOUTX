@@ -6,6 +6,29 @@ import { ClassificationBadge, StatusBadge } from '../components/Badges.jsx'
 import { formatDateTime } from '../utils/date.js'
 import { operationLabel, useOperation } from '../context/OperationContext.jsx'
 
+// Sem campo de logo no backend — puxa o favicon direto do domínio via
+// serviço do Google (sem chave, funciona pra qualquer site). Se falhar
+// (loja bloqueia hotlink, favicon não existe etc.), cai pra um avatar com a
+// inicial do nome, nunca deixa buraco vazio no card.
+function CompetitorLogo({ domain, name }) {
+  const [failed, setFailed] = useState(false)
+  if (failed || !domain) {
+    return (
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-500/15 text-sm font-bold text-brand-500">
+        {(name || domain || '?').charAt(0).toUpperCase()}
+      </span>
+    )
+  }
+  return (
+    <img
+      src={`https://www.google.com/s2/favicons?sz=64&domain=${domain}`}
+      alt=""
+      onError={() => setFailed(true)}
+      className="h-9 w-9 shrink-0 rounded-xl border border-[var(--border)] bg-white object-contain p-1"
+    />
+  )
+}
+
 export default function Competitors() {
   const { operation } = useOperation()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -103,13 +126,13 @@ export default function Competitors() {
     <div className="space-y-8">
       <div>
         <h2 className="text-xl font-semibold">Concorrentes</h2>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-[var(--text-muted)]">
           Lojas Shopify monitoradas diariamente — operação {operationLabel(operation)}
         </p>
       </div>
 
       {asUserId && (
-        <div className="flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3">
+        <div className="flex items-center justify-between rounded-2xl border border-amber-500/30 bg-amber-500/5 px-4 py-3">
           <p className="text-sm text-amber-400">
             👁️ Vendo a lista do usuário #{asUserId} (modo auditoria, só leitura).
           </p>
@@ -125,48 +148,44 @@ export default function Competitors() {
       {!asUserId && (
         <form
           onSubmit={handleSubmit}
-          className="flex flex-wrap items-end gap-3 rounded-xl border border-[#2d3148] bg-[#1c1f2e] p-4"
+          className="flex flex-wrap items-end gap-3 rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-4"
         >
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-500">Domínio *</label>
+            <label className="text-xs font-medium text-[var(--text-muted)]">Domínio *</label>
             <input
               required
               placeholder="lojaexemplo.com"
               value={form.domain}
               onChange={(e) => setForm({ ...form, domain: e.target.value })}
-              className="w-56 rounded-lg border border-[#2d3148] bg-[#161824] px-3 py-2 text-sm text-gray-100 placeholder:text-gray-600 focus:border-brand-500 focus:outline-none"
+              className="w-56 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-500">Nome</label>
+            <label className="text-xs font-medium text-[var(--text-muted)]">Nome</label>
             <input
               placeholder="Opcional"
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
-              className="w-48 rounded-lg border border-[#2d3148] bg-[#161824] px-3 py-2 text-sm text-gray-100 placeholder:text-gray-600 focus:border-brand-500 focus:outline-none"
+              className="w-48 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-500">Nicho</label>
+            <label className="text-xs font-medium text-[var(--text-muted)]">Nicho</label>
             <input
               placeholder="Opcional"
               value={form.niche}
               onChange={(e) => setForm({ ...form, niche: e.target.value })}
-              className="w-40 rounded-lg border border-[#2d3148] bg-[#161824] px-3 py-2 text-sm text-gray-100 placeholder:text-gray-600 focus:border-brand-500 focus:outline-none"
+              className="w-40 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
             />
           </div>
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-          >
+          <button type="submit" disabled={submitting} className="btn-primary">
             {submitting ? 'Adicionando…' : '+ Adicionar concorrente'}
           </button>
           {formError && <p className="w-full text-sm text-red-600">{formError}</p>}
         </form>
       )}
 
-      {rescoreMessage && <p className="text-xs text-gray-500">{rescoreMessage}</p>}
+      {rescoreMessage && <p className="text-xs text-[var(--text-muted)]">{rescoreMessage}</p>}
 
       {error && <EmptyState title="Não deu pra carregar os concorrentes" subtitle={error} />}
 
@@ -178,73 +197,76 @@ export default function Competitors() {
       )}
 
       {competitors && competitors.length > 0 && (
-        <div className="overflow-x-auto rounded-xl border border-[#2d3148] bg-[#1c1f2e]">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-[#161824] text-xs uppercase text-gray-500">
-              <tr>
-                <th className="px-4 py-3">Loja</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Classificação</th>
-                <th className="px-4 py-3">Produtos</th>
-                <th className="px-4 py-3">Volume médio/dia</th>
-                <th className="px-4 py-3">Última verificação</th>
-                <th className="px-4 py-3"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#2d3148]">
-              {competitors.map((c) => (
-                <tr key={c.id} className="hover:bg-[#161824]">
-                  <td className="px-4 py-3">
-                    <Link to={`/concorrentes/${c.id}`} className="font-medium text-brand-500 hover:underline">
-                      {c.name}
-                    </Link>
-                    <p className="text-xs text-gray-500">{c.domain}</p>
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={c.status} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <ClassificationBadge classification={c.classification} />
-                  </td>
-                  <td className="px-4 py-3">{c.total_products}</td>
-                  <td className="px-4 py-3">
-                    {c.avg_daily_volume != null ? (
-                      c.avg_daily_volume
-                    ) : (
-                      <span className="text-xs text-gray-500">aguardando dado</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-gray-500">
-                    {formatDateTime(c.last_checked_at)}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    {!asUserId && (
-                      <div className="flex items-center justify-end gap-3">
-                        {c.status !== 'checking' && (
-                          <button
-                            onClick={() => handleRescore(c)}
-                            disabled={rescoringId === c.id || c.status !== 'active'}
-                            title="Recalcula o score de todos os produtos agora, sem esperar o snapshot diário (6h)"
-                            className="text-xs font-medium text-gray-500 hover:text-brand-500 disabled:opacity-50"
-                          >
-                            {rescoringId === c.id ? 'Recalculando…' : '📊 Recalcular score'}
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleDelete(c)}
-                          disabled={deletingId === c.id}
-                          title="Excluir concorrente (apaga produtos, anúncios e alertas dele)"
-                          className="text-xs font-medium text-gray-500 hover:text-red-400 disabled:opacity-50"
-                        >
-                          {deletingId === c.id ? 'Excluindo…' : '🗑️ Excluir'}
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {competitors.map((c) => (
+            <div
+              key={c.id}
+              className="group relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border-2 border-[var(--border)] bg-[var(--bg-surface)] p-3.5 transition-colors hover:border-brand-500/50"
+            >
+              <div className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full bg-gradient-to-br from-brand-500/20 to-transparent blur-2xl transition-opacity group-hover:opacity-90" />
+
+              <div className="relative flex items-center gap-2.5">
+                <CompetitorLogo domain={c.domain} name={c.name} />
+                <div className="min-w-0 flex-1">
+                  <Link to={`/concorrentes/${c.id}`} className="block truncate text-sm font-semibold text-[var(--text-primary)] hover:text-brand-500">
+                    {c.name}
+                  </Link>
+                  <p className="truncate text-xs text-[var(--text-muted)]">{c.domain}</p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                <StatusBadge status={c.status} />
+                <ClassificationBadge classification={c.classification} />
+              </div>
+
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-xl bg-[var(--bg-surface-2)] p-2.5 text-xs">
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-[var(--text-faint)]">Produtos</p>
+                  <p className="font-semibold text-[var(--text-primary)]">{c.total_products}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-[var(--text-faint)]">🔥 Quentes</p>
+                  <p className={`font-semibold ${c.hot_products > 0 ? 'text-orange-400' : 'text-[var(--text-primary)]'}`}>
+                    {c.hot_products}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-[var(--text-faint)]">Volume/dia</p>
+                  <p className="font-semibold text-[var(--text-primary)]">
+                    {c.avg_daily_volume != null ? c.avg_daily_volume : <span className="text-[11px] font-normal text-[var(--text-muted)]">—</span>}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-[var(--text-faint)]">Verificado</p>
+                  <p className="text-[11px] text-[var(--text-secondary)]">{formatDateTime(c.last_checked_at)}</p>
+                </div>
+              </div>
+
+              {!asUserId && (
+                <div className="mt-auto flex items-center justify-end gap-2.5 pt-0.5">
+                  {c.status !== 'checking' && (
+                    <button
+                      onClick={() => handleRescore(c)}
+                      disabled={rescoringId === c.id || c.status !== 'active'}
+                      title="Recalcula o score de todos os produtos agora, sem esperar o snapshot diário (6h)"
+                      className="text-[11px] font-medium text-[var(--text-muted)] hover:text-brand-500 disabled:opacity-50"
+                    >
+                      {rescoringId === c.id ? 'Recalculando…' : '📊 Recalcular'}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleDelete(c)}
+                    disabled={deletingId === c.id}
+                    title="Excluir concorrente (apaga produtos, anúncios e alertas dele)"
+                    className="text-[11px] font-medium text-[var(--text-muted)] hover:text-red-400 disabled:opacity-50"
+                  >
+                    {deletingId === c.id ? 'Excluindo…' : '🗑️ Excluir'}
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

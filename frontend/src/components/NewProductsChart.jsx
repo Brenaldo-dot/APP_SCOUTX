@@ -17,9 +17,9 @@ function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
   const count = payload[0].value
   return (
-    <div className="rounded-lg border border-[#2d3148] bg-[#1c1f2e] px-3 py-2 text-xs shadow-sm">
-      <p className="text-gray-500">{formatDay(label)}</p>
-      <p className="font-semibold text-gray-200">
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-xs shadow-lg">
+      <p className="text-[var(--text-muted)]">{formatDay(label)}</p>
+      <p className="font-semibold text-[var(--text-primary)]">
         {count} produto{count === 1 ? '' : 's'} novo{count === 1 ? '' : 's'}
       </p>
     </div>
@@ -37,8 +37,8 @@ export default function NewProductsChart({ competitorId, operation, range }) {
       .catch((e) => setError(e.message))
   }, [competitorId, operation, range])
 
-  if (error) return <p className="py-8 text-center text-sm text-gray-500">Não deu pra carregar o gráfico.</p>
-  if (!data) return <p className="py-8 text-center text-sm text-gray-500">Carregando…</p>
+  if (error) return <p className="py-8 text-center text-sm text-[var(--text-muted)]">Não deu pra carregar o gráfico.</p>
+  if (!data) return <p className="py-8 text-center text-sm text-[var(--text-muted)]">Carregando…</p>
 
   const total = data.reduce((sum, d) => sum + d.count, 0)
 
@@ -52,17 +52,17 @@ export default function NewProductsChart({ competitorId, operation, range }) {
               <stop offset="100%" stopColor={BRAND} stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid vertical={false} stroke="#2d3148" />
+          <CartesianGrid vertical={false} stroke="var(--border)" />
           <XAxis
             dataKey="date"
             tickFormatter={formatDay}
-            tick={{ fill: '#6b7280', fontSize: 11 }}
-            axisLine={{ stroke: '#2d3148' }}
+            tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
+            axisLine={{ stroke: 'var(--border)' }}
             tickLine={false}
             minTickGap={24}
           />
-          <YAxis allowDecimals={false} tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} width={28} />
-          <Tooltip content={<ChartTooltip />} cursor={{ stroke: '#2d3148', strokeWidth: 1 }} />
+          <YAxis allowDecimals={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} width={28} />
+          <Tooltip content={<ChartTooltip />} cursor={{ stroke: 'var(--border)', strokeWidth: 1 }} />
           <Area
             type="monotone"
             dataKey="count"
@@ -70,12 +70,12 @@ export default function NewProductsChart({ competitorId, operation, range }) {
             strokeWidth={2}
             fill="url(#newProductsFill)"
             dot={false}
-            activeDot={{ r: 4, fill: BRAND, stroke: '#0f1117', strokeWidth: 2 }}
+            activeDot={{ r: 4, fill: BRAND, stroke: 'var(--bg-page)', strokeWidth: 2 }}
           />
         </AreaChart>
       </ResponsiveContainer>
       {total === 0 && (
-        <p className="mt-1 text-center text-xs text-gray-500">
+        <p className="mt-1 text-center text-xs text-[var(--text-muted)]">
           Nenhum produto novo detectado nesse período ainda — o catálogo atual entrou todo de uma vez no cadastro; o
           sinal aparece a partir de agora, conforme os snapshots diários forem rodando.
         </p>

@@ -4,7 +4,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import CurrentUser, get_current_user, resolve_target_user
 from app.database import get_db
@@ -43,6 +43,9 @@ def list_ads(
         .join(Competitor, Competitor.id == Ad.competitor_id)
         .join(CompetitorTracker, CompetitorTracker.competitor_id == Competitor.id)
         .filter(CompetitorTracker.user_id == target_user)
+        # product_image_url/product_title (AdOut) leem ad.product — sem isso
+        # vira 1 query extra POR anúncio da página (até `limit`=500).
+        .options(selectinload(Ad.product))
     )
     if competitor_id:
         query = query.filter(Ad.competitor_id == competitor_id)

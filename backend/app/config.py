@@ -39,6 +39,16 @@ class Settings(BaseSettings):
 
     frontend_origin: str = "http://localhost:5173"
 
+    # Revisão de segurança (Módulo 9): o proxy Node manda X-User-Id/
+    # X-User-Is-Admin sem assinatura nenhuma (api/deps.py) — até agora a
+    # única proteção era esse serviço não ter domínio público, o que se
+    # mostrou frágil. Esse segredo compartilhado (mesmo valor configurado no
+    # Node) é a segunda camada: requisição sem ele (ou com valor errado) é
+    # rejeitada quando essa variável está configurada. Vazio por padrão só
+    # pra não quebrar `run_local.sh` (sem Node na frente em dev local) — em
+    # produção sempre deve vir preenchida.
+    internal_api_secret: str = ""
+
     @property
     def proxy_list(self) -> list[str]:
         return [p.strip() for p in self.scraper_proxies.split(",") if p.strip()]

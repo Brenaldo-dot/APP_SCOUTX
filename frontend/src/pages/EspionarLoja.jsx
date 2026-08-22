@@ -107,11 +107,11 @@ export default function EspionarLoja() {
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold">Espionar Loja</h2>
-        <p className="text-sm text-gray-500">Analisa o catálogo público de uma loja concorrente inteira.</p>
+        <p className="text-sm text-[var(--text-muted)]">Analisa o catálogo público de uma loja concorrente inteira.</p>
       </div>
 
-      <div className="rounded-xl border border-[#2d3148] bg-[#1c1f2e] p-5">
-        <label className="mb-2 block text-sm text-gray-300">Cole a URL da loja ou de um produto do concorrente:</label>
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
+        <label className="mb-2 block text-sm text-[var(--text-secondary)]">Cole a URL da loja ou de um produto do concorrente:</label>
         <div className="flex items-end gap-3">
           <input
             type="text"
@@ -120,17 +120,13 @@ export default function EspionarLoja() {
             onKeyDown={(e) => e.key === 'Enter' && analisar()}
             placeholder="https://loja-concorrente.com"
             autoComplete="off"
-            className="flex-1 rounded-lg border border-[#2d3148] bg-[#161824] px-3 py-2.5 text-sm text-gray-100 placeholder:text-gray-600 focus:border-brand-500 focus:outline-none"
+            className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
           />
-          <button
-            onClick={analisar}
-            disabled={loading}
-            className="shrink-0 whitespace-nowrap rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70"
-          >
+          <button onClick={analisar} disabled={loading} className="btn-primary shrink-0 whitespace-nowrap py-2.5">
             {loading ? 'Analisando… (pode levar até 1-2 min em lojas grandes)' : 'Analisar Loja'}
           </button>
         </div>
-        <p className="mt-3 text-xs text-gray-500">
+        <p className="mt-3 text-xs text-[var(--text-muted)]">
           Só usa dados públicos da loja (catálogo, coleções, datas). Não existe forma pública de saber vendas/faturamento
           reais. Pra pegar o ID Fornecedor certo, a ferramenta busca a página de cada produto individualmente, então
           lojas grandes demoram mais. Quando o produto realmente não tem barcode/SKU cadastrado, o campo fica em "—".
@@ -144,19 +140,19 @@ export default function EspionarLoja() {
         <>
           <div className="flex flex-wrap gap-3">
             {STATS.map((s) => (
-              <div key={s.key} className="min-w-[140px] rounded-lg border border-[#2d3148] bg-[#1c1f2e] px-4 py-3">
-                <div className="text-xl font-semibold text-gray-100">{s.fn ? s.fn(data) : data[s.key]}</div>
-                <div className="mt-0.5 text-[11px] text-gray-500">{s.label}</div>
+              <div key={s.key} className="min-w-[140px] rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-3">
+                <div className="text-xl font-semibold text-[var(--text-primary)]">{s.fn ? s.fn(data) : data[s.key]}</div>
+                <div className="mt-0.5 text-[11px] text-[var(--text-muted)]">{s.label}</div>
               </div>
             ))}
           </div>
 
           <div>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
               🔥 Maior sinal de destaque (provável escalando)
             </h3>
             {top.length === 0 ? (
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-[var(--text-muted)]">
                 Nenhum sinal forte encontrado — a loja não expõe coleções de mais-vendidos ou datas recentes publicamente.
               </p>
             ) : (
@@ -164,7 +160,7 @@ export default function EspionarLoja() {
                 {top.map((p, i) => (
                   <div
                     key={i}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-[#2d3148] bg-[#1c1f2e] px-3.5 py-2.5"
+                    className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3.5 py-2.5"
                   >
                     <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-brand-400 hover:underline">
                       {p.title}
@@ -183,20 +179,20 @@ export default function EspionarLoja() {
 
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Catálogo completo</h3>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Catálogo completo</h3>
               <button
                 onClick={() => exportCsv(data)}
-                className="rounded-md bg-[#2d3148] px-3 py-1.5 text-xs font-medium text-gray-100 hover:bg-[#374151]"
+                className="rounded-md bg-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--hover-secondary)]"
               >
                 Exportar CSV
               </button>
             </div>
-            <div className="max-h-[420px] overflow-auto rounded-lg border border-[#2d3148]">
+            <div className="max-h-[420px] overflow-auto rounded-lg border border-[var(--border)]">
               <table className="w-full text-left text-xs">
-                <thead className="sticky top-0 bg-[#161824] text-gray-500">
+                <thead className="sticky top-0 bg-[var(--bg-surface-2)] text-[var(--text-muted)]">
                   <tr>
                     {['Produto', 'Fornecedor', 'ID Fornecedor', 'Preço', 'Variantes', 'Imagens', 'Criado há', 'Coleção destaque', 'Páginas duplicadas', 'Score'].map((h) => (
-                      <th key={h} className="whitespace-nowrap border-b border-[#2d3148] px-2.5 py-2 font-medium">
+                      <th key={h} className="whitespace-nowrap border-b border-[var(--border)] px-2.5 py-2 font-medium">
                         {h}
                       </th>
                     ))}
@@ -204,23 +200,23 @@ export default function EspionarLoja() {
                 </thead>
                 <tbody>
                   {data.products.map((p, i) => (
-                    <tr key={i} className="border-b border-[#22263a] hover:bg-[#1c1f2e]">
+                    <tr key={i} className="border-b border-[var(--border-soft)] hover:bg-[var(--bg-surface)]">
                       <td className="max-w-[260px] whitespace-normal px-2.5 py-1.5">
                         <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-brand-400 hover:underline">
                           {p.title}
                         </a>
                       </td>
-                      <td className="whitespace-nowrap px-2.5 py-1.5 text-gray-300">{p.vendor || '—'}</td>
-                      <td className="whitespace-nowrap px-2.5 py-1.5 text-gray-300">{p.supplierId || '—'}</td>
-                      <td className="whitespace-nowrap px-2.5 py-1.5 text-gray-300">{fmtPrice(p.priceMin, p.priceMax)}</td>
-                      <td className="whitespace-nowrap px-2.5 py-1.5 text-gray-300">{p.variantCount}</td>
-                      <td className="whitespace-nowrap px-2.5 py-1.5 text-gray-300">{p.imageCount}</td>
-                      <td className="whitespace-nowrap px-2.5 py-1.5 text-gray-300">{p.ageDays !== null ? `${p.ageDays}d` : '—'}</td>
-                      <td className="whitespace-nowrap px-2.5 py-1.5 text-gray-300">
+                      <td className="whitespace-nowrap px-2.5 py-1.5 text-[var(--text-secondary)]">{p.vendor || '—'}</td>
+                      <td className="whitespace-nowrap px-2.5 py-1.5 text-[var(--text-secondary)]">{p.supplierId || '—'}</td>
+                      <td className="whitespace-nowrap px-2.5 py-1.5 text-[var(--text-secondary)]">{fmtPrice(p.priceMin, p.priceMax)}</td>
+                      <td className="whitespace-nowrap px-2.5 py-1.5 text-[var(--text-secondary)]">{p.variantCount}</td>
+                      <td className="whitespace-nowrap px-2.5 py-1.5 text-[var(--text-secondary)]">{p.imageCount}</td>
+                      <td className="whitespace-nowrap px-2.5 py-1.5 text-[var(--text-secondary)]">{p.ageDays !== null ? `${p.ageDays}d` : '—'}</td>
+                      <td className="whitespace-nowrap px-2.5 py-1.5 text-[var(--text-secondary)]">
                         {p.inBestsellerCollection ? `${p.inBestsellerCollection} (#${p.bestsellerPosition})` : '—'}
                       </td>
-                      <td className="whitespace-nowrap px-2.5 py-1.5 text-gray-300">{p.duplicatePageCount >= 2 ? `🔁 ${p.duplicatePageCount}` : '—'}</td>
-                      <td className="whitespace-nowrap px-2.5 py-1.5 text-gray-300">{p.score}</td>
+                      <td className="whitespace-nowrap px-2.5 py-1.5 text-[var(--text-secondary)]">{p.duplicatePageCount >= 2 ? `🔁 ${p.duplicatePageCount}` : '—'}</td>
+                      <td className="whitespace-nowrap px-2.5 py-1.5 text-[var(--text-secondary)]">{p.score}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -230,10 +226,10 @@ export default function EspionarLoja() {
 
           {data.vendorsBreakdown?.length > 0 && (
             <div>
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Fornecedores (vendor) e quantidade de produtos</h3>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Fornecedores (vendor) e quantidade de produtos</h3>
               <ul className="flex flex-wrap gap-1.5">
                 {data.vendorsBreakdown.map((v, i) => (
-                  <li key={i} className="rounded-full border border-[#2d3148] bg-[#1c1f2e] px-2.5 py-1 text-[11.5px] text-gray-400">
+                  <li key={i} className="rounded-full border border-[var(--border)] bg-[var(--bg-surface)] px-2.5 py-1 text-[11.5px] text-[var(--text-tertiary)]">
                     {v.vendor} ({v.count})
                   </li>
                 ))}
@@ -243,10 +239,10 @@ export default function EspionarLoja() {
 
           {data.collections?.length > 0 && (
             <div>
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Coleções públicas da loja</h3>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Coleções públicas da loja</h3>
               <ul className="flex flex-wrap gap-1.5">
                 {data.collections.map((c, i) => (
-                  <li key={i} className="rounded-full border border-[#2d3148] bg-[#1c1f2e] px-2.5 py-1 text-[11.5px] text-gray-400">
+                  <li key={i} className="rounded-full border border-[var(--border)] bg-[var(--bg-surface)] px-2.5 py-1 text-[11.5px] text-[var(--text-tertiary)]">
                     {c.title}
                   </li>
                 ))}

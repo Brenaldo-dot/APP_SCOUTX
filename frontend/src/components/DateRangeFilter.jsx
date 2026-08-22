@@ -42,13 +42,13 @@ export default function DateRangeFilter({ range, onChange }) {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 rounded-lg border border-[#2d3148] px-3 py-1.5 text-xs font-medium text-gray-400 hover:bg-[#161824]"
+        className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-tertiary)] hover:bg-[var(--bg-surface-2)]"
       >
         📅 {currentLabel(range)}
       </button>
 
       {open && (
-        <div className="absolute right-0 z-10 mt-1 w-64 rounded-lg border border-[#2d3148] bg-[#1c1f2e] py-1.5 shadow-lg">
+        <div className="absolute right-0 z-10 mt-1 w-64 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] py-1.5 shadow-lg">
           {PRESETS.map((preset) => {
             const selected = range.mode === 'preset' && range.days === preset.days
             return (
@@ -58,7 +58,7 @@ export default function DateRangeFilter({ range, onChange }) {
                   onChange({ mode: 'preset', days: preset.days })
                   setOpen(false)
                 }}
-                className="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-[#161824]"
+                className="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-surface-2)]"
               >
                 {preset.label}
                 {selected && <span className="text-brand-600">✓</span>}
@@ -66,21 +66,21 @@ export default function DateRangeFilter({ range, onChange }) {
             )
           })}
 
-          <div className="mt-1 border-t border-[#2d3148] px-3 pt-2">
-            <p className="mb-1.5 text-xs font-medium text-gray-500">Período customizado</p>
+          <div className="mt-1 border-t border-[var(--border)] px-3 pt-2">
+            <p className="mb-1.5 text-xs font-medium text-[var(--text-muted)]">Período customizado</p>
             <div className="flex items-center gap-1.5">
               <input
                 type="date"
                 value={customStart}
                 onChange={(e) => setCustomStart(e.target.value)}
-                className="w-full rounded border border-[#2d3148] bg-[#161824] px-1.5 py-1 text-xs text-gray-100"
+                className="w-full rounded border border-[var(--border)] bg-[var(--bg-surface-2)] px-1.5 py-1 text-xs text-[var(--text-primary)]"
               />
-              <span className="text-xs text-gray-500">–</span>
+              <span className="text-xs text-[var(--text-muted)]">–</span>
               <input
                 type="date"
                 value={customEnd}
                 onChange={(e) => setCustomEnd(e.target.value)}
-                className="w-full rounded border border-[#2d3148] bg-[#161824] px-1.5 py-1 text-xs text-gray-100"
+                className="w-full rounded border border-[var(--border)] bg-[var(--bg-surface-2)] px-1.5 py-1 text-xs text-[var(--text-primary)]"
               />
             </div>
             <button

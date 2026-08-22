@@ -27,7 +27,7 @@ export const PLATFORM_HEX = {
 }
 
 export function PlatformBadge({ platform }) {
-  const style = PLATFORM_STYLES[platform] || 'bg-[#222538] text-gray-400 border-[#2d3148]'
+  const style = PLATFORM_STYLES[platform] || 'bg-[var(--hover-surface)] text-[var(--text-tertiary)] border-[var(--border)]'
   return (
     <span className={`rounded-full border px-2 py-0.5 text-xs font-medium uppercase ${style}`}>
       {PLATFORM_LABELS[platform] || platform}
@@ -38,7 +38,7 @@ export function PlatformBadge({ platform }) {
 const STATUS_STYLES = {
   checking: 'bg-amber-500/15 text-amber-400',
   active: 'bg-emerald-500/15 text-emerald-400',
-  paused: 'bg-[#222538] text-gray-400',
+  paused: 'bg-[var(--hover-surface)] text-[var(--text-tertiary)]',
   not_shopify: 'bg-red-500/15 text-red-400',
 }
 
@@ -52,7 +52,7 @@ const STATUS_LABELS = {
 export function StatusBadge({ status }) {
   return (
     <span
-      className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_STYLES[status] || 'bg-[#222538] text-gray-400'}`}
+      className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_STYLES[status] || 'bg-[var(--hover-surface)] text-[var(--text-tertiary)]'}`}
     >
       {STATUS_LABELS[status] || status}
     </span>
@@ -72,10 +72,10 @@ const CLASS_LABELS = {
 }
 
 export function ClassificationBadge({ classification }) {
-  if (!classification) return <span className="text-xs text-gray-500">—</span>
+  if (!classification) return <span className="text-xs text-[var(--text-muted)]">—</span>
   return (
     <span
-      className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${CLASS_STYLES[classification] || 'bg-[#222538] text-gray-400'}`}
+      className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${CLASS_STYLES[classification] || 'bg-[var(--hover-surface)] text-[var(--text-tertiary)]'}`}
     >
       {CLASS_LABELS[classification] || classification}
     </span>
@@ -84,7 +84,7 @@ export function ClassificationBadge({ classification }) {
 
 // Faixas do Módulo 5: 0–30 Frio, 31–55 Morno, 56–79 Quente, 80–100 Escalando.
 const SCORE_LABEL_STYLES = {
-  Frio: 'bg-[#222538] text-gray-400',
+  Frio: 'bg-[var(--hover-surface)] text-[var(--text-tertiary)]',
   Morno: 'bg-amber-500/15 text-amber-400',
   Quente: 'bg-orange-500/15 text-orange-400',
   Escalando: 'bg-red-500/15 text-red-400',
@@ -107,9 +107,52 @@ export const SCORE_LABEL_HEX = {
 export function ScoreBadge({ score, label }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${SCORE_LABEL_STYLES[label] || 'bg-[#222538] text-gray-400'}`}
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${SCORE_LABEL_STYLES[label] || 'bg-[var(--hover-surface)] text-[var(--text-tertiary)]'}`}
     >
       {score} · {label}
+    </span>
+  )
+}
+
+// Anúncio no ar há 30+ dias é sinal quase certo de operação vencedora, 14-29
+// já é forte indício, 7-13 é sinal fraco-a-médio — a cor sobe de intensidade
+// junto (cinza → âmbar → laranja → vermelho), mesma rampa de calor usada no
+// ScoreBadge, pra bater o olho sem precisar ler o número.
+function daysActiveStyle(days) {
+  if (days >= 30) return 'bg-red-500/15 text-red-400'
+  if (days >= 14) return 'bg-orange-500/15 text-orange-400'
+  if (days >= 7) return 'bg-amber-500/15 text-amber-400'
+  return 'bg-[var(--hover-surface)] text-[var(--text-tertiary)]'
+}
+
+export function DaysActiveBadge({ days, title }) {
+  if (days == null) return null
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${daysActiveStyle(days)}`} title={title}>
+      📅 {days}d ativo
+    </span>
+  )
+}
+
+// Ícone + cor por tipo de sinal de escala (scoring_service.py) — cada sinal
+// já tinha um ícone fixo espalhado em HotProducts.jsx; centralizado aqui e
+// com cor própria por sinal, pra "anúncios crescendo" e "páginas duplicadas"
+// pararem de se misturar visualmente com o resto (mesma cor cinza de tudo).
+const SIGNAL_STYLES = [
+  [/^anuncio_ativo/, '📢', 'bg-blue-500/15 text-blue-400'],
+  [/^anuncios_crescendo/, '🚀', 'bg-violet-500/15 text-violet-400'],
+  [/^paginas_duplicadas/, '📄', 'bg-orange-500/15 text-orange-400'],
+  [/^fornecedor_mudou/, '🔄', 'bg-amber-500/15 text-amber-400'],
+  [/^estoque_caindo/, '📦', 'bg-red-500/15 text-red-400'],
+  [/^variacoes_aumentaram/, '🎨', 'bg-blue-500/15 text-blue-400'],
+]
+
+export function SignalChip({ signal }) {
+  const match = SIGNAL_STYLES.find(([re]) => re.test(signal))
+  const [, icon, style] = match || [null, '•', 'bg-[var(--hover-surface)] text-[var(--text-tertiary)]']
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${style}`}>
+      {icon} {signal.replace(/_/g, ' ')}
     </span>
   )
 }
@@ -131,10 +174,10 @@ export function DuplicateBadge({ duplicateCount, duplicateOf }) {
   const titles = (duplicateOf || []).map((d) => d.title).join(' · ')
   return (
     <span
-      className="rounded bg-orange-500/15 px-1.5 py-0.5 text-xs text-orange-400"
+      className="inline-flex items-center gap-1 rounded-full bg-orange-500/15 px-2 py-0.5 text-xs font-medium text-orange-400"
       title={titles ? `Mesma oferta de:\n${titles}` : undefined}
     >
-      duplicado ({duplicateCount}x)
+      📄 duplicado ({duplicateCount}x)
     </span>
   )
 }
@@ -145,10 +188,10 @@ export function SupplierIdTag({ supplierId }) {
   if (!supplierId) {
     return (
       <span
-        className="rounded bg-red-500/15 px-1.5 py-0.5 font-mono text-xs text-red-400"
+        className="inline-block whitespace-nowrap rounded bg-red-500/15 px-1.5 py-0.5 text-xs text-red-400"
         title="Nenhum código de fornecedor confirmado pra este produto"
       >
-        —
+        Fornecedor não cadastrado
       </span>
     )
   }
@@ -239,11 +282,11 @@ export function alertCategory(type) {
 // (verde/roxo pra sinal positivo, vermelho pra negativo, azul pra neutro),
 // pra bater o olho e já saber o tipo sem ler o texto inteiro.
 const ALERT_TYPE_STYLES = {
-  new_product: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+  new_product: 'bg-green-900/40 text-green-500 border-green-700/40',
   stock_change: 'bg-red-500/15 text-red-400 border-red-500/30',
   variations_added: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
   new_ad: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-  price_change: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+  price_change: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
   urgency_detected: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
   vendor_changed: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
   supplier_id_changed: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
@@ -256,10 +299,34 @@ const ALERT_TYPE_STYLES = {
 }
 
 export function AlertTypeBadge({ type }) {
-  const style = ALERT_TYPE_STYLES[type] || 'bg-[#222538] text-gray-400 border-[#2d3148]'
+  const style = ALERT_TYPE_STYLES[type] || 'bg-[var(--hover-surface)] text-[var(--text-tertiary)] border-[var(--border)]'
   return (
     <span className={`inline-block shrink-0 rounded-md border px-2 py-1 text-xs font-semibold ${style}`}>
       {alertLabel(type)}
     </span>
   )
+}
+
+// Mesmo agrupamento de cor de ALERT_TYPE_STYLES acima, só que como borda
+// sólida (não translúcida) — usada como faixa colorida na lateral do card de
+// alerta, pra bater o olho no tipo antes de ler qualquer texto.
+const ALERT_ACCENT = {
+  new_product: 'border-green-700',
+  stock_change: 'border-red-500',
+  variations_added: 'border-blue-500',
+  new_ad: 'border-blue-500',
+  price_change: 'border-emerald-500',
+  urgency_detected: 'border-orange-500',
+  vendor_changed: 'border-orange-500',
+  supplier_id_changed: 'border-orange-500',
+  duplicate_detected: 'border-orange-500',
+  scaling_detected: 'border-violet-500',
+  winning_ad: 'border-violet-500',
+  product_removed: 'border-red-500',
+  ad_killed: 'border-red-500',
+  not_shopify: 'border-red-500',
+}
+
+export function alertAccentClass(type) {
+  return ALERT_ACCENT[type] || 'border-[var(--border)]'
 }

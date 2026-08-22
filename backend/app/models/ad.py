@@ -76,6 +76,20 @@ class Ad(Base):
     )
 
     @property
+    def product_image_url(self) -> str | None:
+        # Nenhum scraper de anúncio (Meta/Google/TikTok) consegue capturar o
+        # criativo em si (Meta é texto puro, Google fica dentro de um
+        # safeframe, TikTok não expõe card por anúncio — ver os 3 módulos em
+        # scrapers/) — usa a imagem do PRODUTO vinculado (Product.main_image_url,
+        # casado por product_handle) como aproximação visual, pedido do
+        # usuário pra não deixar o card de anúncio só com texto.
+        return self.product.main_image_url if self.product else None
+
+    @property
+    def product_title(self) -> str | None:
+        return self.product.title if self.product else None
+
+    @property
     def days_active(self) -> int | None:
         if not self.started_at:
             return None

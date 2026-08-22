@@ -184,7 +184,16 @@ def _upsert_products(db: Session, competitor: Competitor, normalized: list[dict]
             )
         else:
             product.title = item["title"]
-            product.vendor = item["vendor"]
+            # NÃO sobrescreve incondicional (era um bug real: apagava o
+            # vendor antigo sem passar pelo diff/alerta de VENDOR_CHANGED em
+            # services/snapshot_service.py:_diff_product, que É quem detecta
+            # troca de fornecedor de verdade — isso silenciosamente resetava
+            # a baseline toda semana no raio-x, antes do snapshot diário
+            # seguinte conseguir comparar contra o valor antigo). Só
+            # preenche se ainda tava vazio, mesmo padrão do supplier_id logo
+            # abaixo.
+            if item["vendor"] and not product.vendor:
+                product.vendor = item["vendor"]
             if item["supplier_id"]:
                 product.supplier_id = item["supplier_id"]
             product.image_urls = item["image_urls"]

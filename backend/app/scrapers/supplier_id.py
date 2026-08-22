@@ -40,6 +40,20 @@ logger = logging.getLogger(__name__)
 # de páginas duplicadas.
 JUNK_FREQUENCY_THRESHOLD = 15
 
+# Bug real encontrado em produção: loja COD típica tem TODO o catálogo (ou
+# quase) vindo de 1-2 fornecedores só — então o cód. de fornecedor REAL se
+# repete em dezenas/centenas de produtos, ultrapassando o threshold acima
+# folgado. Resultado: o alerta de "fornecedor mudou" nunca disparava, porque
+# `filter_junk_supplier_ids` zerava o código de TODO o catálogo, todo santo
+# dia, achando que era placeholder — mesmo sendo o identificador real do
+# fornecedor único da loja. Fix: um código que cobre a MAIORIA do catálogo
+# não é "genérico repetido em produtos sem relação" (o caso que o threshold
+# original mirava), é o próprio fornecedor dominante da loja — sinal real,
+# não lixo. Só zera quando fica no meio-termo: repete demais pra ser
+# coincidência (> threshold) mas NÃO domina o catálogo (não é o fornecedor
+# principal da loja).
+JUNK_MAJORITY_RATIO = 0.5
+
 # Cód. de fornecedor de verdade é SEMPRE numérico (ex: "37625", "2343") —
 # confirmado pelo usuário a partir da própria experiência analisando
 # fornecedor manualmente, não suposição nossa. "P2E1", "q4", "CG-0077" etc.
@@ -91,17 +105,21 @@ def pick_supplier_id_from_variants(variants: list[dict] | None) -> str | None:
     return None
 
 
-def filter_junk_supplier_ids(products: list[dict], threshold: int = JUNK_FREQUENCY_THRESHOLD) -> None:
+def filter_junk_supplier_ids(
+    products: list[dict], threshold: int = JUNK_FREQUENCY_THRESHOLD, majority_ratio: float = JUNK_MAJORITY_RATIO
+) -> None:
     """Modifica `products` in-place: zera supplier_id que se repete demais entre
-    produtos diferentes (placeholder, não identificador real)."""
+    produtos SEM relação, mas preserva um código que domina o catálogo — esse
+    é o fornecedor principal da loja, não um placeholder (ver JUNK_MAJORITY_RATIO)."""
     freq: dict[str, int] = {}
     for p in products:
         sid = p.get("supplier_id")
         if sid:
             freq[sid] = freq.get(sid, 0) + 1
+    majority_floor = len(products) * majority_ratio
     for p in products:
         sid = p.get("supplier_id")
-        if sid and freq.get(sid, 0) > threshold:
+        if sid and freq.get(sid, 0) > threshold and freq[sid] < majority_floor:
             p["supplier_id"] = None
 
 

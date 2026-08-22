@@ -6,6 +6,7 @@ import StatCard from '../components/StatCard.jsx'
 import Pagination from '../components/Pagination.jsx'
 import { ClassificationBadge, DuplicateBadge, ScalingBadge, StatusBadge, SupplierIdTag } from '../components/Badges.jsx'
 import QuickPreview from '../components/QuickPreview.jsx'
+import LinkChip from '../components/LinkChip.jsx'
 
 const PAGE_SIZE = 100
 
@@ -65,7 +66,7 @@ export default function CompetitorDetail() {
   const country = competitor ? OPERATION_COUNTRY[competitor.operation] || 'CO' : 'CO'
 
   if (error) return <EmptyState title="Não deu pra carregar o concorrente" subtitle={error} />
-  if (!competitor) return <p className="text-sm text-gray-500">Carregando…</p>
+  if (!competitor) return <p className="text-sm text-[var(--text-muted)]">Carregando…</p>
 
   return (
     <div className="space-y-8">
@@ -78,42 +79,22 @@ export default function CompetitorDetail() {
           <StatusBadge status={competitor.status} />
           <ClassificationBadge classification={competitor.classification} />
         </div>
-        <p className="text-sm text-gray-500">{competitor.domain}</p>
-        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
-          <a
-            href={`https://${competitor.domain}/`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-block text-sm text-brand-600 hover:underline"
-          >
-            🏬 Abrir loja em nova aba ↗
-          </a>
-          <a
-            href={metaAdsLibraryUrl(competitor.domain, country)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-block text-sm text-brand-600 hover:underline"
-          >
-            🔍 Ver anúncios ao vivo na Meta Ads Library ↗
-          </a>
-          <a
-            href={tiktokCreativeCenterUrl(competitor.domain, country)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-block text-sm text-brand-600 hover:underline"
-          >
-            🔍 Ver no TikTok Creative Center ↗
-          </a>
-          <a
-            href={googleAdsTransparencyUrl(competitor.domain, country)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-block text-sm text-brand-600 hover:underline"
-          >
-            🔍 Ver no Google Ads Transparency Center ↗
-          </a>
+        <p className="text-sm text-[var(--text-muted)]">{competitor.domain}</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <LinkChip href={`https://${competitor.domain}/`} variant="brand">
+            🏬 Abrir loja ↗
+          </LinkChip>
+          <LinkChip href={metaAdsLibraryUrl(competitor.domain, country)} variant="violet">
+            🔍 Meta Ads Library ↗
+          </LinkChip>
+          <LinkChip href={tiktokCreativeCenterUrl(competitor.domain, country)} variant="violet">
+            🔍 TikTok Creative Center ↗
+          </LinkChip>
+          <LinkChip href={googleAdsTransparencyUrl(competitor.domain, country)} variant="violet">
+            🔍 Google Ads Transparency ↗
+          </LinkChip>
         </div>
-        <p className="mt-0.5 text-xs text-gray-500">
+        <p className="mt-0.5 text-xs text-[var(--text-muted)]">
           Abre a busca por "{competitor.domain}" direto na fonte — funciona mesmo se a raspagem automática falhar ou
           não achar nada, porque quem navega é você. O TikTok é limitado por natureza da ferramenta deles: a
           biblioteca pública só cobre países da União Europeia (exigência regulatória local, testado ao vivo — o
@@ -155,11 +136,11 @@ export default function CompetitorDetail() {
               .map((t) => (
                 <span
                   key={t.name}
-                  className="rounded-full border border-[#2d3148] bg-[#1c1f2e] px-3 py-1 text-xs text-gray-400"
+                  className="rounded-full border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-1 text-xs text-[var(--text-tertiary)]"
                   title={t.external_id ? `ID: ${t.external_id}` : undefined}
                 >
                   {t.name}
-                  {t.external_id && <span className="ml-1 text-gray-500">· {t.external_id}</span>}
+                  {t.external_id && <span className="ml-1 text-[var(--text-muted)]">· {t.external_id}</span>}
                 </span>
               ))}
           </div>
@@ -171,9 +152,9 @@ export default function CompetitorDetail() {
         {!products || products.length === 0 ? (
           <EmptyState title="Nenhum produto encontrado ainda" />
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-[#2d3148] bg-[#1c1f2e]">
+          <div className="overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)]">
             <table className="w-full text-left text-sm">
-              <thead className="bg-[#161824] text-xs uppercase text-gray-500">
+              <thead className="bg-[var(--bg-surface-2)] text-xs uppercase text-[var(--text-muted)]">
                 <tr>
                   <th className="px-4 py-3">Produto</th>
                   <th className="px-4 py-3">Fornecedor</th>
@@ -184,13 +165,13 @@ export default function CompetitorDetail() {
                   <th className="px-4 py-3">Ver na loja</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#2d3148]">
+              <tbody className="divide-y divide-[var(--border)]">
                 {products.map((p) => {
                   const url = `https://${competitor.domain}/products/${p.handle}`
                   return (
-                    <tr key={p.id} className="hover:bg-[#161824]">
-                      <td className="px-4 py-3 font-medium text-gray-200">{p.title}</td>
-                      <td className="px-4 py-3 text-gray-500">{p.vendor || '—'}</td>
+                    <tr key={p.id} className="hover:bg-[var(--bg-surface-2)]">
+                      <td className="px-4 py-3 font-medium text-[var(--text-primary)]">{p.title}</td>
+                      <td className="px-4 py-3 text-[var(--text-muted)]">{p.vendor || '—'}</td>
                       <td className="px-4 py-3">
                         <SupplierIdTag supplierId={p.supplier_id} />
                       </td>

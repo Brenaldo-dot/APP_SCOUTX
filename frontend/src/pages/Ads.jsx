@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client.js'
 import EmptyState from '../components/EmptyState.jsx'
-import { PlatformBadge } from '../components/Badges.jsx'
+import { DaysActiveBadge, PlatformBadge } from '../components/Badges.jsx'
 import Pagination from '../components/Pagination.jsx'
+import Select from '../components/Select.jsx'
+import LinkChip from '../components/LinkChip.jsx'
+import ProductThumb from '../components/ProductThumb.jsx'
 import { useOperation } from '../context/OperationContext.jsx'
 
 const RESCAN_POLL_MS = 6000
@@ -116,57 +119,46 @@ export default function Ads() {
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold">Anúncios{total > 0 ? ` (${total})` : ''}</h2>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-[var(--text-muted)]">
           Encontrados na Meta Ads Library, no Google Ads Transparency Center e no TikTok Creative Center
         </p>
       </div>
 
       <div className="flex flex-wrap items-end gap-4">
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-gray-500">Loja</label>
-          <select
+          <label className="text-xs font-medium text-[var(--text-muted)]">Loja</label>
+          <Select
+            className="w-44"
             value={competitorId}
-            onChange={(e) => updateParam('competitor_id', e.target.value)}
-            className="rounded-lg border border-[#2d3148] bg-[#161824] px-3 py-2 text-sm text-gray-100 focus:border-brand-500 focus:outline-none"
-          >
-            <option value="">Todas as lojas</option>
-            {competitors.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => updateParam('competitor_id', v)}
+            options={[{ value: '', label: 'Todas as lojas' }, ...competitors.map((c) => ({ value: String(c.id), label: c.name }))]}
+          />
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-gray-500">Ferramenta</label>
-          <select
+          <label className="text-xs font-medium text-[var(--text-muted)]">Ferramenta</label>
+          <Select
+            className="w-44"
             value={platform}
-            onChange={(e) => updateParam('platform', e.target.value)}
-            className="rounded-lg border border-[#2d3148] bg-[#161824] px-3 py-2 text-sm text-gray-100 focus:border-brand-500 focus:outline-none"
-          >
-            <option value="">Todas as ferramentas</option>
-            {PLATFORMS.map((p) => (
-              <option key={p.value} value={p.value}>
-                {p.label}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => updateParam('platform', v)}
+            options={[{ value: '', label: 'Todas as ferramentas' }, ...PLATFORMS]}
+          />
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-gray-500">Ordenar por</label>
-          <select
+          <label className="text-xs font-medium text-[var(--text-muted)]">Ordenar por</label>
+          <Select
+            className="w-52"
             value={sort}
-            onChange={(e) => updateParam('sort', e.target.value === 'days_active' ? 'days_active' : '')}
-            className="rounded-lg border border-[#2d3148] bg-[#161824] px-3 py-2 text-sm text-gray-100 focus:border-brand-500 focus:outline-none"
-          >
-            <option value="recent">Mais recentes primeiro</option>
-            <option value="days_active">Mais dias ativos primeiro</option>
-          </select>
+            onChange={(v) => updateParam('sort', v === 'days_active' ? 'days_active' : '')}
+            options={[
+              { value: 'recent', label: 'Mais recentes primeiro' },
+              { value: 'days_active', label: 'Mais dias ativos primeiro' },
+            ]}
+          />
         </div>
 
-        <label className="flex items-center gap-2 pb-2 text-sm text-gray-400">
+        <label className="flex items-center gap-2 pb-2 text-sm text-[var(--text-tertiary)]">
           <input
             type="checkbox"
             checked={winningOnly}
@@ -184,14 +176,14 @@ export default function Ads() {
             onClick={handleRescan}
             disabled={rescanning}
             title="Dispara um scan agora em vez de esperar o cron diário (8h)"
-            className="mb-2 rounded-lg border border-[#2d3148] bg-[#161824] px-3 py-2 text-sm font-medium text-gray-300 hover:border-brand-500 hover:text-brand-500 disabled:opacity-50"
+            className="mb-2 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm font-medium text-[var(--text-secondary)] hover:border-brand-500 hover:text-brand-500 disabled:opacity-50"
           >
             {rescanning ? '🔄 Escaneando…' : '🔄 Escanear agora'}
           </button>
         )}
       </div>
 
-      {rescanMessage && <p className="text-xs text-gray-500">{rescanMessage}</p>}
+      {rescanMessage && <p className="text-xs text-[var(--text-muted)]">{rescanMessage}</p>}
 
       {error && <EmptyState title="Não deu pra carregar os anúncios" subtitle={error} />}
 
@@ -231,54 +223,51 @@ export default function Ads() {
       {ads && ads.length > 0 && (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {ads.map((ad) => (
-            <div key={ad.id} className="rounded-xl border border-[#2d3148] bg-[#1c1f2e] p-4">
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <PlatformBadge platform={ad.platform} />
-                {ad.days_active != null && (
-                  <span
-                    className="rounded-full bg-[#222538] px-2 py-0.5 text-xs font-medium text-gray-400"
-                    title={
-                      ad.started_at_raw
-                        ? 'Data informada pela própria biblioteca de anúncios'
-                        : 'Sem data de início confirmada pela biblioteca — contando desde que nosso sistema viu esse anúncio'
-                    }
-                  >
-                    📅 {ad.days_active}d ativo
-                  </span>
-                )}
-                {ad.is_winning && (
-                  <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-xs font-medium text-violet-400">
-                    🏆 vencedor
-                  </span>
-                )}
-                {ad.status === 'inactive' && (
-                  <span className="rounded-full bg-[#222538] px-2 py-0.5 text-xs font-medium text-gray-500">
-                    inativo
-                  </span>
-                )}
+            <div key={ad.id} className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-4">
+              <div className="mb-2 flex items-start gap-3">
+                <ProductThumb src={ad.product_image_url} title={ad.product_title} size="h-14 w-14" rounded="rounded-xl" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <PlatformBadge platform={ad.platform} />
+                    <DaysActiveBadge
+                      days={ad.days_active}
+                      title={
+                        ad.started_at_raw
+                          ? 'Data informada pela própria biblioteca de anúncios'
+                          : 'Sem data de início confirmada pela biblioteca — contando desde que nosso sistema viu esse anúncio'
+                      }
+                    />
+                    {ad.is_winning && (
+                      <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-xs font-medium text-violet-400">
+                        🏆 vencedor
+                      </span>
+                    )}
+                    {ad.status === 'inactive' && (
+                      <span className="rounded-full bg-[var(--hover-surface)] px-2 py-0.5 text-xs font-medium text-[var(--text-muted)]">
+                        inativo
+                      </span>
+                    )}
+                  </div>
+                  {ad.product_title && (
+                    <p className="mt-1 truncate text-xs font-medium text-[var(--text-secondary)]">{ad.product_title}</p>
+                  )}
+                </div>
               </div>
               {ad.advertiser_name && (
-                <p className="mb-1 text-xs font-medium text-gray-500">
-                  Anunciante: <span className="text-gray-300">{ad.advertiser_name}</span>
+                <p className="mb-1 text-xs font-medium text-[var(--text-muted)]">
+                  Anunciante: <span className="text-[var(--text-secondary)]">{ad.advertiser_name}</span>
                 </p>
               )}
-              <p className="line-clamp-3 text-sm text-gray-300">
+              <p className="line-clamp-3 text-sm text-[var(--text-secondary)]">
                 {ad.creative_text || 'Sem texto de criativo capturado'}
               </p>
-              <div className="mt-3 flex items-center justify-between gap-2 text-xs text-gray-500">
+              <div className="mt-3 flex items-center justify-between gap-2 text-xs text-[var(--text-muted)]">
                 <span title={ad.started_at_raw ? 'Data informada pela própria biblioteca de anúncios' : 'Sem data de início confirmada pela biblioteca — contando desde que nosso sistema viu esse anúncio'}>
                   {ad.started_at_raw || (ad.days_active != null ? `${ad.days_active} dias sob nosso monitoramento` : '—')}
                 </span>
-                {ad.library_url && (
-                  <a
-                    href={ad.library_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-brand-600 hover:underline"
-                  >
-                    Ver na biblioteca ↗
-                  </a>
-                )}
+                <LinkChip href={ad.library_url} variant="violet">
+                  📣 Ver na biblioteca ↗
+                </LinkChip>
               </div>
             </div>
           ))}

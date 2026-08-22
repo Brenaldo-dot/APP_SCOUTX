@@ -51,4 +51,10 @@ export const api = {
   createAdMinerScan: (url, operation) =>
     request('/api/ad-miner/scans', { method: 'POST', body: JSON.stringify({ url, operation }) }),
   getAdMinerScan: (id) => request(`/api/ad-miner/scans/${id}`),
+
+  getDiscordWebhook: () => request('/api/settings/discord'),
+  setDiscordWebhook: (url) =>
+    request('/api/settings/discord', { method: 'PUT', body: JSON.stringify({ discord_webhook_url: url }) }),
+  removeDiscordWebhook: () => request('/api/settings/discord', { method: 'DELETE' }),
+  testDiscordWebhook: () => request('/api/settings/discord/test', { method: 'POST' }),
 }

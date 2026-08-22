@@ -15,16 +15,16 @@ export default function QuickPreview({ product, url, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
-        className="flex h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-[#1c1f2e] shadow-xl"
+        className="flex h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-[var(--bg-surface)] shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-[#2d3148] px-4 py-2">
-          <p className="truncate text-xs font-medium text-gray-500" title={product.title}>
+        <div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-4 py-2">
+          <p className="truncate text-xs font-medium text-[var(--text-muted)]" title={product.title}>
             Prévia · {product.title}
           </p>
           <button
             onClick={onClose}
-            className="shrink-0 rounded p-1 text-gray-500 hover:bg-[#222538] hover:text-gray-400"
+            className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover-surface)] hover:text-[var(--text-tertiary)]"
             aria-label="Fechar"
           >
             ✕
@@ -35,10 +35,10 @@ export default function QuickPreview({ product, url, onClose }) {
           src={api.productPreviewUrl(product.id)}
           sandbox=""
           title={`Prévia de ${product.title}`}
-          className="w-full flex-1 bg-[#1c1f2e]"
+          className="w-full flex-1 bg-[var(--bg-surface)]"
         />
 
-        <div className="shrink-0 border-t border-[#2d3148] p-3 text-center">
+        <div className="shrink-0 border-t border-[var(--border)] p-3 text-center">
           <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-brand-600 hover:underline">
             Abrir página completa na loja ↗
           </a>

@@ -4,7 +4,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app.models import Ad, Alert, AlertType, Competitor, Product
+from app.models import Ad, Alert, AlertType, Competitor, CompetitorTracker, Product, UserNotificationSettings
 from app.notifications import discord
 
 logger = logging.getLogger(__name__)
@@ -67,5 +67,30 @@ async def create_alert(
         if link_url is None and product is not None:
             link_url = f"https://{competitor.domain}/products/{product.handle}"
         alert.sent_to_discord = await discord.send_alert(competitor.name, alert_type, alert.message, link_url)
+
+        # Canal pessoal (Módulo 9 — Minha Conta): todo usuário que rastreia
+        # ESSE concorrente e configurou o próprio webhook recebe também, na
+        # hora — além do canal global do admin acima, não em vez dele. Um
+        # concorrente pode ter vários rastreadores (dado compartilhado, ver
+        # CompetitorTracker); dedup por URL pra não mandar 2x se por acaso
+        # dois usuários colarem o mesmo webhook.
+        tracker_user_ids = [
+            row[0]
+            for row in db.query(CompetitorTracker.user_id)
+            .filter(CompetitorTracker.competitor_id == competitor.id)
+            .all()
+        ]
+        if tracker_user_ids:
+            personal_webhooks = {
+                row[0]
+                for row in db.query(UserNotificationSettings.discord_webhook_url)
+                .filter(
+                    UserNotificationSettings.user_id.in_(tracker_user_ids),
+                    UserNotificationSettings.discord_webhook_url.isnot(None),
+                )
+                .all()
+            }
+            for webhook_url in personal_webhooks:
+                await discord.send_alert(competitor.name, alert_type, alert.message, link_url, webhook_url=webhook_url)
 
     return alert

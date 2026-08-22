@@ -87,7 +87,29 @@ def get_summary(
     total_competitors = competitors_query.count()
     active_competitors = competitors_query.filter(Competitor.status == CompetitorStatus.ACTIVE).count()
     total_products = products_query.filter(Product.is_active.is_(True)).count()
-    scaling_products = products_query.filter(Product.is_active.is_(True), Product.scaling.is_(True)).count()
+
+    # "Produtos Quentes" (score 56+, Quente OU Escalando — MESMO critério de
+    # /api/products/hot) — não só product.scaling (80+ estrito): esse card
+    # ficava quase sempre em 0/1 mesmo com a aba Produtos Quentes cheia,
+    # porque o sinal que fecha os 80 pontos sozinho (anúncios crescendo) é
+    # raro; a maioria dos produtos quentes chega no 56-79 (ver
+    # models/competitor.py:hot_products, mesmo fix aplicado lá).
+    score_rows_query = (
+        db.query(ProductScore.product_id, ProductScore.date, ProductScore.score)
+        .join(Product, Product.id == ProductScore.product_id)
+        .join(Competitor, Competitor.id == Product.competitor_id)
+        .join(CompetitorTracker, CompetitorTracker.competitor_id == Competitor.id)
+        .filter(CompetitorTracker.user_id == target_user, Product.is_active.is_(True))
+    )
+    if operation:
+        score_rows_query = score_rows_query.filter(Competitor.operation == operation)
+    latest_score_by_product: dict[int, tuple[date_, int]] = {}
+    for product_id, score_date, score in score_rows_query.all():
+        prev = latest_score_by_product.get(product_id)
+        if prev is None or score_date > prev[0]:
+            latest_score_by_product[product_id] = (score_date, score)
+    hot_products = sum(1 for _, score in latest_score_by_product.values() if score >= 56)
+
     alerts_last_24h = alerts_query.filter(Alert.created_at >= since).count()
     recent_alerts = (
         alerts_query.options(selectinload(Alert.ad), selectinload(Alert.competitor), selectinload(Alert.product))
@@ -100,7 +122,7 @@ def get_summary(
         total_competitors=total_competitors,
         active_competitors=active_competitors,
         total_products=total_products,
-        scaling_products=scaling_products,
+        hot_products=hot_products,
         alerts_last_24h=alerts_last_24h,
         recent_alerts=recent_alerts,
     )

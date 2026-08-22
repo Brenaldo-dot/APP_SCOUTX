@@ -20,13 +20,13 @@ function ChartTooltip({ active, payload, label }) {
   const rows = payload.filter((p) => p.value > 0)
   if (rows.length === 0) return null
   return (
-    <div className="rounded-lg border border-[#2d3148] bg-[#1c1f2e] px-3 py-2 text-xs shadow-sm">
-      <p className="mb-1 text-gray-500">{formatDay(label)}</p>
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-xs shadow-lg">
+      <p className="mb-1 text-[var(--text-muted)]">{formatDay(label)}</p>
       {rows.map((row) => (
         <p key={row.dataKey} className="flex items-center gap-1.5">
           <span className="inline-block h-0.5 w-3" style={{ backgroundColor: row.fill }} />
-          <span className="font-semibold text-gray-200">{row.value}</span>
-          <span className="text-gray-500">{SERIES.find((s) => s.key === row.dataKey)?.label}</span>
+          <span className="font-semibold text-[var(--text-primary)]">{row.value}</span>
+          <span className="text-[var(--text-muted)]">{SERIES.find((s) => s.key === row.dataKey)?.label}</span>
         </p>
       ))}
     </div>
@@ -44,8 +44,8 @@ export default function AdsTimelineChart({ competitorId, operation, range }) {
       .catch((e) => setError(e.message))
   }, [competitorId, operation, range])
 
-  if (error) return <p className="py-8 text-center text-sm text-gray-500">Não deu pra carregar o gráfico.</p>
-  if (!data) return <p className="py-8 text-center text-sm text-gray-500">Carregando…</p>
+  if (error) return <p className="py-8 text-center text-sm text-[var(--text-muted)]">Não deu pra carregar o gráfico.</p>
+  if (!data) return <p className="py-8 text-center text-sm text-[var(--text-muted)]">Carregando…</p>
 
   const total = data.reduce((sum, d) => sum + d.meta + d.google + d.tiktok, 0)
 
@@ -53,20 +53,20 @@ export default function AdsTimelineChart({ competitorId, operation, range }) {
     <div>
       <ResponsiveContainer width="100%" height={220}>
         <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-          <CartesianGrid vertical={false} stroke="#2d3148" />
+          <CartesianGrid vertical={false} stroke="var(--border)" />
           <XAxis
             dataKey="date"
             tickFormatter={formatDay}
-            tick={{ fill: '#6b7280', fontSize: 11 }}
-            axisLine={{ stroke: '#2d3148' }}
+            tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
+            axisLine={{ stroke: 'var(--border)' }}
             tickLine={false}
             minTickGap={24}
           />
-          <YAxis allowDecimals={false} tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} width={28} />
-          <Tooltip content={<ChartTooltip />} cursor={{ fill: '#f9f9f7' }} />
+          <YAxis allowDecimals={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} width={28} />
+          <Tooltip content={<ChartTooltip />} cursor={{ fill: 'var(--hover-surface)' }} />
           <Legend
             iconType="plainline"
-            wrapperStyle={{ fontSize: 12, color: '#9ca3af' }}
+            wrapperStyle={{ fontSize: 12, color: 'var(--text-muted)' }}
             formatter={(value) => SERIES.find((s) => s.key === value)?.label || value}
           />
           {SERIES.map((s) => (
@@ -75,7 +75,7 @@ export default function AdsTimelineChart({ competitorId, operation, range }) {
         </BarChart>
       </ResponsiveContainer>
       {total === 0 && (
-        <p className="mt-1 text-center text-xs text-gray-500">Nenhum anúncio detectado nesse período.</p>
+        <p className="mt-1 text-center text-xs text-[var(--text-muted)]">Nenhum anúncio detectado nesse período.</p>
       )}
     </div>
   )

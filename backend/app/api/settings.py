@@ -1,0 +1,62 @@
+"""Módulo 9 — Minha Conta: preferências pessoais (hoje só notificação Discord)."""
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from app.api.deps import CurrentUser, get_current_user
+from app.database import get_db
+from app.models import UserNotificationSettings
+from app.notifications import discord
+from app.schemas.settings import DiscordWebhookOut, DiscordWebhookUpdate
+
+router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+_VALID_PREFIXES = ("https://discord.com/api/webhooks/", "https://discordapp.com/api/webhooks/")
+
+
+def _get_or_none(db: Session, user_id: int) -> UserNotificationSettings | None:
+    return db.query(UserNotificationSettings).filter(UserNotificationSettings.user_id == user_id).first()
+
+
+@router.get("/discord", response_model=DiscordWebhookOut)
+def get_discord_webhook(db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
+    row = _get_or_none(db, current_user.id)
+    return DiscordWebhookOut(discord_webhook_url=row.discord_webhook_url if row else None)
+
+
+@router.put("/discord", response_model=DiscordWebhookOut)
+def set_discord_webhook(
+    payload: DiscordWebhookUpdate, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)
+):
+    url = payload.discord_webhook_url.strip() if payload.discord_webhook_url else None
+    if url and not url.startswith(_VALID_PREFIXES):
+        raise HTTPException(400, "Isso não parece uma URL de webhook do Discord válida (precisa começar com https://discord.com/api/webhooks/...).")
+
+    row = _get_or_none(db, current_user.id)
+    if row is None:
+        row = UserNotificationSettings(user_id=current_user.id, discord_webhook_url=url)
+        db.add(row)
+    else:
+        row.discord_webhook_url = url
+    db.commit()
+    return DiscordWebhookOut(discord_webhook_url=url)
+
+
+@router.delete("/discord", response_model=DiscordWebhookOut)
+def remove_discord_webhook(db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
+    row = _get_or_none(db, current_user.id)
+    if row:
+        row.discord_webhook_url = None
+        db.commit()
+    return DiscordWebhookOut(discord_webhook_url=None)
+
+
+@router.post("/discord/test")
+async def test_discord_webhook(db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
+    row = _get_or_none(db, current_user.id)
+    if not row or not row.discord_webhook_url:
+        raise HTTPException(400, "Configure e salve o webhook do Discord antes de testar.")
+    ok = await discord.send_test(row.discord_webhook_url)
+    if not ok:
+        raise HTTPException(502, "Não consegui enviar pro Discord — confira se a URL do webhook ainda é válida (ela pode ter sido apagada no servidor).")
+    return {"ok": True}

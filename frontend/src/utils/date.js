@@ -28,3 +28,27 @@ export function formatDate(value) {
   if (!value) return '—'
   return new Date(toUtcIso(value)).toLocaleDateString('pt-BR', { timeZone: TIMEZONE })
 }
+
+function minutesSince(value) {
+  return (Date.now() - new Date(toUtcIso(value)).getTime()) / 60000
+}
+
+// Pra deixar o feed de alertas mais vivo (pedido do usuário) — "há 5 min" dá
+// mais senso de urgência/atualidade que uma data/hora fixa, principalmente
+// pra quem revisita a tela várias vezes ao dia.
+export function formatRelativeTime(value) {
+  if (!value) return '—'
+  const diffMin = Math.floor(minutesSince(value))
+  if (diffMin < 1) return 'agora mesmo'
+  if (diffMin < 60) return `há ${diffMin} min`
+  const diffHours = Math.floor(diffMin / 60)
+  if (diffHours < 24) return `há ${diffHours}h`
+  const diffDays = Math.floor(diffHours / 24)
+  if (diffDays < 7) return `há ${diffDays}d`
+  return formatDateTime(value)
+}
+
+export function isRecent(value, withinMinutes = 15) {
+  if (!value) return false
+  return minutesSince(value) < withinMinutes
+}

@@ -13,8 +13,8 @@ export default function RouteGuard({ allow }) {
   if (loading || !me) return null
   if (!allow(me)) {
     return (
-      <div className="rounded-xl border border-[#2d3148] bg-[#1c1f2e] p-8 text-center">
-        <p className="text-sm text-gray-400">Você não tem permissão para acessar essa área.</p>
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-8 text-center">
+        <p className="text-sm text-[var(--text-tertiary)]">Você não tem permissão para acessar essa área.</p>
       </div>
     )
   }

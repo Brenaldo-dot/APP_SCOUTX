@@ -156,6 +156,10 @@ async def _diff_product(
                 AlertType.PRICE_CHANGE,
                 f"Preço mudou → {product.title} em {competitor.name} era {old_price}, agora {item['price_min']}",
                 product=product,
+                # payload estruturado — frontend usa pra colorir o valor que
+                # subiu/caiu (verde/vermelho) em vez de tentar extrair os 2
+                # números de dentro do texto da mensagem.
+                payload={"old_price": old_price, "new_price": item["price_min"]},
             )
 
     if (

@@ -49,10 +49,18 @@ def _category_for(alert_type: AlertType) -> tuple[str, int]:
 
 
 async def send_alert(
-    competitor_name: str, alert_type: AlertType, message: str, link_url: str | None = None
+    competitor_name: str,
+    alert_type: AlertType,
+    message: str,
+    link_url: str | None = None,
+    webhook_url: str | None = None,
 ) -> bool:
+    """webhook_url explícito = canal PESSOAL de um usuário (Módulo 9 — Minha
+    Conta); None = cai no canal global do admin (DISCORD_WEBHOOK_URL, env),
+    comportamento original antes de existir webhook por usuário."""
     settings = get_settings()
-    if not is_configured():
+    target = webhook_url or settings.discord_webhook_url
+    if not target:
         logger.warning("Discord não configurado (DISCORD_WEBHOOK_URL ausente); alerta não enviado.")
         return False
 
@@ -78,21 +86,50 @@ async def send_alert(
         # venda de terceiro) disparava pra galera toda do servidor.
         "allowed_mentions": {"parse": []},
     }
-    if settings.discord_mention_id.strip().lower() == "everyone":
+    # A menção configurada (DISCORD_MENTION_ID, env) é do ADMIN pro canal
+    # GLOBAL dele — não faz sentido aplicar no webhook pessoal de outro
+    # usuário, que é um servidor Discord diferente, com cargos/pessoas que
+    # esse ID nem existe.
+    if webhook_url is None and settings.discord_mention_id.strip().lower() == "everyone":
         # @everyone é uma menção especial do Discord — não é um snowflake
         # (ID), é o texto literal "@everyone" + "everyone" na allowlist de
         # parse. Um ID de usuário/cargo aqui não faria nada.
         payload["content"] = "@everyone"
         payload["allowed_mentions"] = {"parse": ["everyone"]}
-    elif settings.discord_mention_id:
+    elif webhook_url is None and settings.discord_mention_id:
         payload["content"] = f"<@{settings.discord_mention_id}>"
         payload["allowed_mentions"] = {"users": [settings.discord_mention_id]}
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            response = await client.post(settings.discord_webhook_url, json=payload)
+            response = await client.post(target, json=payload)
             response.raise_for_status()
             return True
         except httpx.HTTPError:
             logger.exception("Falha ao enviar alerta para o Discord")
+            return False
+
+
+async def send_test(webhook_url: str) -> bool:
+    """Botão 'Testar' da tela Minha Conta — confirma que a URL colada é um
+    webhook válido ANTES da pessoa depender dele pra receber alerta de
+    verdade (erro de copiar/colar só apareceria dias depois, no primeiro
+    alerta que nunca chegaria, sem isso)."""
+    payload = {
+        "embeds": [
+            {
+                "title": "✅ ScoutX conectado!",
+                "description": "Esse é um teste — se você tá vendo essa mensagem, seus alertas vão chegar aqui a partir de agora.",
+                "color": 0x22C55E,
+            }
+        ],
+        "allowed_mentions": {"parse": []},
+    }
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.post(webhook_url, json=payload)
+            response.raise_for_status()
+            return True
+        except httpx.HTTPError:
+            logger.exception("Falha ao enviar teste de webhook do Discord")
             return False

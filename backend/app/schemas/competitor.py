@@ -39,6 +39,7 @@ class CompetitorOut(BaseModel):
     price_avg: float | None
     classification: ScaleClassification | None
     avg_daily_volume: float | None
+    hot_products: int
 
 
 class TechStackOut(BaseModel):

@@ -32,8 +32,18 @@ class ProductOut(BaseModel):
     last_seen_at: datetime
 
 
+class ProductWithAdCountOut(ProductOut):
+    """Só pra /api/products (lista geral) — anúncios ativos por produto, pro
+    filtro/ordenação 'mais anúncios ativos' e pra mostrar o número no card.
+    Campo à parte de ProductOut (não direto na base) porque HotProductOut já
+    define active_ad_count com outra fonte de dado (ver api/products.py) —
+    colocar na base colidiria com o kwarg explícito que HotProductOut passa."""
+
+    active_ad_count: int = 0
+
+
 class ProductListOut(BaseModel):
-    items: list[ProductOut]
+    items: list[ProductWithAdCountOut]
     total: int
 
 

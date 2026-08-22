@@ -7,9 +7,9 @@ function ChartTooltip({ active, payload }) {
   if (!active || !payload?.length) return null
   const { label, count } = payload[0].payload
   return (
-    <div className="rounded-lg border border-[#2d3148] bg-[#1c1f2e] px-3 py-2 text-xs shadow-sm">
-      <p className="text-gray-500">{label}</p>
-      <p className="font-semibold text-gray-200">
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-xs shadow-lg">
+      <p className="text-[var(--text-muted)]">{label}</p>
+      <p className="font-semibold text-[var(--text-primary)]">
         {count} produto{count === 1 ? '' : 's'}
       </p>
     </div>
@@ -29,8 +29,8 @@ export default function ScoreDistributionChart({ competitorId, operation }) {
       .catch((e) => setError(e.message))
   }, [competitorId, operation])
 
-  if (error) return <p className="py-8 text-center text-sm text-gray-500">Não deu pra carregar o gráfico.</p>
-  if (!data) return <p className="py-8 text-center text-sm text-gray-500">Carregando…</p>
+  if (error) return <p className="py-8 text-center text-sm text-[var(--text-muted)]">Não deu pra carregar o gráfico.</p>
+  if (!data) return <p className="py-8 text-center text-sm text-[var(--text-muted)]">Carregando…</p>
 
   const total = data.reduce((sum, d) => sum + d.count, 0)
 
@@ -38,10 +38,10 @@ export default function ScoreDistributionChart({ competitorId, operation }) {
     <div>
       <ResponsiveContainer width="100%" height={200}>
         <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-          <CartesianGrid vertical={false} stroke="#2d3148" />
-          <XAxis dataKey="label" tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={{ stroke: '#2d3148' }} tickLine={false} />
-          <YAxis allowDecimals={false} tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} width={28} />
-          <Tooltip content={<ChartTooltip />} cursor={{ fill: '#222538' }} />
+          <CartesianGrid vertical={false} stroke="var(--border)" />
+          <XAxis dataKey="label" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} axisLine={{ stroke: 'var(--border)' }} tickLine={false} />
+          <YAxis allowDecimals={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} width={28} />
+          <Tooltip content={<ChartTooltip />} cursor={{ fill: 'var(--hover-surface)' }} />
           <Bar dataKey="count" maxBarSize={64} radius={[4, 4, 0, 0]}>
             {data.map((d) => (
               <Cell key={d.label} fill={SCORE_LABEL_HEX[d.label]} />
@@ -49,7 +49,7 @@ export default function ScoreDistributionChart({ competitorId, operation }) {
           </Bar>
         </BarChart>
       </ResponsiveContainer>
-      {total === 0 && <p className="mt-1 text-center text-xs text-gray-500">Nenhum produto com score calculado ainda.</p>}
+      {total === 0 && <p className="mt-1 text-center text-xs text-[var(--text-muted)]">Nenhum produto com score calculado ainda.</p>}
     </div>
   )
 }

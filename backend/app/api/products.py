@@ -6,16 +6,33 @@ import httpx
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import CurrentUser, get_current_user, resolve_target_user
 from app.database import get_db
 from app.models import Ad, AdStatus, Competitor, CompetitorTracker, Product, ProductScore
 from app.scrapers.http_client import build_async_client
-from app.schemas.product import HotProductListOut, HotProductOut, ProductDetailOut, ProductListOut, ProductOut
+from app.schemas.product import (
+    HotProductListOut,
+    HotProductOut,
+    ProductDetailOut,
+    ProductListOut,
+    ProductOut,
+    ProductWithAdCountOut,
+)
 from app.services.scoring_service import score_label
 
 router = APIRouter(prefix="/api/products", tags=["products"])
+
+# Subquery correlacionada (1 por linha, sem GROUP BY) — mesmo padrão de
+# api/ads.py:_DAYS_ACTIVE_EXPR pra ordenar por algo que não é coluna direta.
+_ACTIVE_ADS_SUBQ = (
+    select(func.count(Ad.id))
+    .where(Ad.product_id == Product.id, Ad.status == AdStatus.ACTIVE)
+    .correlate(Product)
+    .scalar_subquery()
+)
 
 
 @router.get("", response_model=ProductListOut)
@@ -23,9 +40,10 @@ def list_products(
     competitor_id: int | None = None,
     operation: str | None = None,
     as_user_id: int | None = None,
+    q: str | None = None,
     scaling_only: bool = False,
     active_only: bool = True,
-    sort: Literal["recent", "duplicates"] = "recent",
+    sort: Literal["recent", "duplicates", "active_ads"] = "recent",
     page: int = Query(1, ge=1),
     limit: int = Query(100, le=500),
     db: Session = Depends(get_db),
@@ -45,6 +63,8 @@ def list_products(
         query = query.filter(Product.competitor_id == competitor_id)
     if operation:
         query = query.filter(Competitor.operation == operation)
+    if q and q.strip():
+        query = query.filter(Product.title.ilike(f"%{q.strip()}%"))
     if scaling_only:
         query = query.filter(Product.scaling.is_(True))
     if active_only:
@@ -57,6 +77,11 @@ def list_products(
         query = query.filter(Product.duplicate_count > 0).order_by(
             Product.duplicate_count.desc(), Product.last_seen_at.desc()
         )
+    elif sort == "active_ads":
+        # Mesma lógica de "duplicates": só quem tem pelo menos 1 anúncio
+        # ativo — senão a lista fica cheia de produto com 0 anúncio lá
+        # embaixo, sem sentido pra quem pediu "mais anúncio ativo primeiro".
+        query = query.filter(_ACTIVE_ADS_SUBQ > 0).order_by(_ACTIVE_ADS_SUBQ.desc(), Product.last_seen_at.desc())
     else:
         query = query.order_by(Product.last_seen_at.desc())
 
@@ -65,7 +90,27 @@ def list_products(
     # de produto hoje, 500 por página não dava pra ver o resto de jeito nenhum).
     total = query.order_by(None).count()
     items = query.limit(limit).offset((page - 1) * limit).all()
-    return ProductListOut(items=items, total=total)
+
+    # Contagem de anúncios ativos por produto da PÁGINA, numa query só (não
+    # uma por produto) — mesmo padrão de list_hot_products logo abaixo.
+    product_ids = [p.id for p in items]
+    active_counts: dict[int, int] = {}
+    if product_ids:
+        count_rows = (
+            db.query(Ad.product_id, func.count(Ad.id))
+            .filter(Ad.product_id.in_(product_ids), Ad.status == AdStatus.ACTIVE)
+            .group_by(Ad.product_id)
+            .all()
+        )
+        active_counts = dict(count_rows)
+
+    results = [
+        ProductWithAdCountOut(
+            **ProductOut.model_validate(p).model_dump(), active_ad_count=active_counts.get(p.id, 0)
+        )
+        for p in items
+    ]
+    return ProductListOut(items=results, total=total)
 
 
 @router.get("/hot", response_model=HotProductListOut)

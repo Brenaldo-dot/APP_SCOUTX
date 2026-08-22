@@ -2,7 +2,7 @@
 
 from sqlalchemy.orm import Session
 
-from app.models import Competitor, EcosystemEntry, Product
+from app.models import Competitor, CompetitorTracker, EcosystemEntry, Product
 
 
 def sync_ecosystem_map(db: Session, competitor: Competitor) -> None:
@@ -24,9 +24,21 @@ def sync_ecosystem_map(db: Session, competitor: Competitor) -> None:
             db.add(EcosystemEntry(vendor=vendor, product_id=product.id, competitor_id=competitor.id))
 
 
-def find_shared_vendors(db: Session, min_stores: int = 2) -> list[dict]:
-    """Fornecedores que aparecem em 2+ lojas concorrentes — provável agente/dropshipper comum."""
-    entries = db.query(EcosystemEntry).all()
+def find_shared_vendors(db: Session, user_id: int, min_stores: int = 2) -> list[dict]:
+    """Fornecedores que aparecem em 2+ lojas concorrentes — provável agente/dropshipper comum.
+
+    Achado numa revisão de segurança: essa consulta rodava sem NENHUM filtro
+    de dono — qualquer usuário logado enxergava competitor_id de concorrente
+    rastreado só por OUTRO usuário, furando o isolamento multi-tenant (ver
+    CompetitorTracker em models/competitor.py). Agora só entra concorrente
+    que o usuário que pediu realmente rastreia."""
+    entries = (
+        db.query(EcosystemEntry)
+        .join(Competitor, Competitor.id == EcosystemEntry.competitor_id)
+        .join(CompetitorTracker, CompetitorTracker.competitor_id == Competitor.id)
+        .filter(CompetitorTracker.user_id == user_id)
+        .all()
+    )
     by_vendor: dict[str, set[int]] = {}
     for entry in entries:
         by_vendor.setdefault(entry.vendor, set()).add(entry.competitor_id)

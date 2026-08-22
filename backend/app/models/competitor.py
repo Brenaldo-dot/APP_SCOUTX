@@ -66,6 +66,16 @@ class Competitor(Base):
         Enum(ScaleClassification, native_enum=False), nullable=True
     )
     avg_daily_volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Quantos produtos ATIVOS dessa loja têm score 56+ (Quente OU Escalando —
+    # MESMO corte de min_score usado em /api/products/hot, a aba "Produtos
+    # Quentes"). Primeira versão usava só Product.scaling (score 80+, faixa
+    # "Escalando" pura) e ficava quase sempre em 0/1 mesmo com a aba Produtos
+    # Quentes cheia — sinal "anúncios crescendo" que fecha os 80 pontos
+    # sozinho é raro; a maioria dos produtos quentes chega no 56-79 somando
+    # sinais mais fracos (ver scoring_service.py). Esse card mostra a MESMA
+    # população da aba Produtos Quentes, por loja. Atualizado todo dia junto
+    # do resto do snapshot (tasks/daily_snapshot.py).
+    hot_products: Mapped[int] = mapped_column(Integer, default=0)
 
     products: Mapped[list["Product"]] = relationship(back_populates="competitor", cascade="all, delete-orphan")
     tech_stack: Mapped[list["TechStack"]] = relationship(back_populates="competitor", cascade="all, delete-orphan")

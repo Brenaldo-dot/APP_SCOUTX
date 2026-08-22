@@ -63,6 +63,13 @@ class Alert(Base):
         return f"https://{self.competitor.domain}/products/{self.product.handle}"
 
     @property
+    def product_image_url(self) -> str | None:
+        # Pra deixar o feed de alertas mais vivo (pedido do usuário) — a
+        # imagem já vem raspada em Product.main_image_url, só faltava expor
+        # aqui pro AlertOut alcançar.
+        return self.product.main_image_url if self.product else None
+
+    @property
     def competitor_name(self) -> str:
         # Estruturado, não texto embutido na mensagem — usuário pediu a loja
         # visível em TODO alerta; confiar em cada f-string mencionar a loja

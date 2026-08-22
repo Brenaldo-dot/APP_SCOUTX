@@ -28,6 +28,12 @@ function qs(params = {}) {
 
 export const rawApi = {
   me: () => request('/api/me'),
+  changeMyPassword: (currentPassword, newPassword) =>
+    request('/api/me/password', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
 
   buscarBarcode: (url) => request(`/api/buscar?${qs({ url })}`),
   espionarLoja: (url) => request(`/api/spy?${qs({ url })}`),

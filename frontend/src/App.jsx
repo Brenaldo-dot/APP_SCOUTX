@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { OperationProvider } from './context/OperationContext.jsx'
 import { AuthProvider, useAuth } from './context/AuthContext.jsx'
+import { ThemeProvider } from './context/ThemeContext.jsx'
+import { LanguageProvider } from './context/LanguageContext.jsx'
 import Layout from './components/Layout.jsx'
 import RouteGuard from './components/RouteGuard.jsx'
 import Dashboard from './pages/Dashboard.jsx'
@@ -15,6 +17,7 @@ import BuscarBarcode from './pages/BuscarBarcode.jsx'
 import EspionarLoja from './pages/EspionarLoja.jsx'
 import Historico from './pages/Historico.jsx'
 import Usuarios from './pages/Usuarios.jsx'
+import Conta from './pages/Conta.jsx'
 
 // Quem não tem acesso ao núcleo do ScoutX não deve cair numa tela de "sem
 // permissão" logo depois de logar — manda direto pra ferramenta que ela
@@ -28,6 +31,8 @@ function Home() {
 
 export default function App() {
   return (
+    <ThemeProvider>
+    <LanguageProvider>
     <AuthProvider>
       <OperationProvider>
         <Routes>
@@ -51,6 +56,11 @@ export default function App() {
             <Route path="/ferramentas/buscar-barcode" element={<BuscarBarcode />} />
             <Route path="/ferramentas/espionar-loja" element={<EspionarLoja />} />
 
+            {/* Minha Conta: idioma, senha, notificação Discord — configuração
+                da PESSOA, não da ferramenta, então qualquer usuário logado
+                acessa, sem RouteGuard de permissão. */}
+            <Route path="/conta" element={<Conta />} />
+
             <Route element={<RouteGuard allow={(me) => me.isAdmin || me.canViewHistory} />}>
               <Route path="/ferramentas/historico" element={<Historico />} />
             </Route>
@@ -62,5 +72,7 @@ export default function App() {
         </Routes>
       </OperationProvider>
     </AuthProvider>
+    </LanguageProvider>
+    </ThemeProvider>
   )
 }

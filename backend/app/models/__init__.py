@@ -13,6 +13,7 @@ from app.models.ecosystem import EcosystemEntry
 from app.models.product import Product, ProductEvent, ProductEventType, ProductSnapshot
 from app.models.score import ProductScore
 from app.models.tech_stack import TechStack
+from app.models.user_settings import UserNotificationSettings
 from app.models.volume import DailyVolume, VolumeMethod, VolumeStatus
 
 __all__ = [
@@ -37,6 +38,7 @@ __all__ = [
     "ProductSnapshot",
     "ProductScore",
     "TechStack",
+    "UserNotificationSettings",
     "DailyVolume",
     "VolumeMethod",
     "VolumeStatus",

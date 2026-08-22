@@ -7,6 +7,15 @@ const db = require("./db");
 
 const APP_BASE_URL = requireEnv("APP_BASE_URL");
 const SESSION_SECRET = requireEnv("SESSION_SECRET");
+// Revisão de segurança: o FastAPI (mega-minerador) confia cegamente nos
+// headers X-User-Id/X-User-Is-Admin pra saber quem tá pedindo (não tem
+// conexão com este banco de app_users — ver backend/app/api/deps.py). Até
+// agora a única proteção era o serviço não ter domínio público — o que se
+// mostrou frágil (bastou 1 comando de diagnóstico pra criar um domínio sem
+// querer). Esse segredo compartilhado é a segunda camada: mesmo que o
+// FastAPI volte a ficar acessível de fora por engano, ninguém de fora
+// consegue forjar identidade sem conhecer ele também.
+const INTERNAL_API_SECRET = requireEnv("INTERNAL_API_SECRET");
 const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 dias — ferramenta interna de time
 
 function requireEnv(name) {
@@ -77,27 +86,70 @@ function authPage({ title, subtitle, action, error, showNameField }) {
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ScoutX</title>
 <style>
-  body { font-family: system-ui, sans-serif; background: #0f1117; color: #f3f4f6; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
-  form { background: #1c1f2e; border: 1px solid #2d3148; padding: 28px; border-radius: 12px; width: 320px; }
-  h1 { font-size: 18px; margin: 0 0 6px; }
-  p { color: #9ca3af; font-size: 13px; margin: 0 0 18px; }
-  label { display: block; font-size: 13px; color: #d1d5db; margin: 0 0 4px; }
-  input { width: 100%; box-sizing: border-box; padding: 10px 12px; margin-bottom: 14px; border-radius: 6px; border: 1px solid #2d3148; background: #161824; color: #f3f4f6; }
-  button { width: 100%; padding: 10px; border-radius: 6px; border: none; background: #2563eb; color: #fff; font-weight: 500; cursor: pointer; }
-  .error { background: rgba(127,29,29,0.3); color: #f87171; border: 1px solid #7f1d1d; padding: 8px 10px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, sans-serif; background: #0a0c12; color: #f3f4f6;
+    display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0;
+    position: relative; overflow: hidden;
+  }
+  /* Glow radial no canto — mesma linguagem visual da referência (canto
+     superior esquerdo, bem vívido), azul em vez de roxo. */
+  body::before {
+    content: ""; position: absolute; top: -15%; left: -10%;
+    width: 620px; height: 620px; border-radius: 999px;
+    background: radial-gradient(circle, rgba(59,130,246,0.38) 0%, rgba(59,130,246,0) 70%);
+    pointer-events: none;
+  }
+  .card {
+    position: relative; background: #12141e; border: 1px solid #262a3d; padding: 32px;
+    border-radius: 16px; width: 340px; box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+  }
+  .brand { display: flex; align-items: center; gap: 8px; margin-bottom: 22px; }
+  .brand .dot {
+    width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+    background: linear-gradient(135deg, #2563eb, #60a5fa);
+    box-shadow: 0 4px 14px rgba(37,99,235,0.4);
+  }
+  .brand span { font-weight: 700; font-size: 16px; }
+  h1 { font-size: 19px; margin: 0 0 6px; }
+  p.subtitle { color: #9ca3af; font-size: 13px; margin: 0 0 22px; }
+  label { display: block; font-size: 13px; color: #d1d5db; margin: 0 0 5px; }
+  input {
+    width: 100%; padding: 11px 13px; margin-bottom: 16px; border-radius: 8px;
+    border: 1px solid #262a3d; background: #0a0c12; color: #f3f4f6; font-size: 14px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  input:focus {
+    outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.25);
+  }
+  button {
+    width: 100%; padding: 13px; border-radius: 9999px; border: none;
+    background: linear-gradient(90deg, #1d4ed8 0%, #3b82f6 55%, #7dd3fc 100%);
+    color: #fff; font-weight: 600; font-size: 14px;
+    cursor: pointer; box-shadow: inset 0 1px 0 rgba(255,255,255,0.3), 0 6px 24px rgba(59,130,246,0.45);
+    transition: filter 0.15s, box-shadow 0.15s;
+  }
+  button:hover { filter: brightness(1.06); box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 8px 30px rgba(59,130,246,0.6); }
+  .error {
+    background: rgba(127,29,29,0.25); color: #f87171; border: 1px solid #7f1d1d;
+    padding: 9px 11px; border-radius: 8px; font-size: 13px; margin-bottom: 16px;
+  }
 </style></head>
 <body>
-<form method="POST" action="${action}">
-  <h1>${escapeHtml(title)}</h1>
-  <p>${escapeHtml(subtitle)}</p>
-  ${error ? `<div class="error">${escapeHtml(error)}</div>` : ""}
-  ${showNameField ? `<label for="name">Nome</label><input type="text" id="name" name="name" required autofocus maxlength="80">` : ""}
-  <label for="email">Email</label>
-  <input type="email" id="email" name="email" required ${showNameField ? "" : "autofocus"} maxlength="200">
-  <label for="password">Senha</label>
-  <input type="password" id="password" name="password" required minlength="8">
-  <button type="submit">${showNameField ? "Criar conta de administrador" : "Entrar"}</button>
-</form>
+<div class="card">
+  <div class="brand"><span class="dot"></span><span>ScoutX</span></div>
+  <form method="POST" action="${action}">
+    <h1>${escapeHtml(title)}</h1>
+    <p class="subtitle">${escapeHtml(subtitle)}</p>
+    ${error ? `<div class="error">${escapeHtml(error)}</div>` : ""}
+    ${showNameField ? `<label for="name">Nome</label><input type="text" id="name" name="name" required autofocus maxlength="80">` : ""}
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" required ${showNameField ? "" : "autofocus"} maxlength="200">
+    <label for="password">Senha</label>
+    <input type="password" id="password" name="password" required minlength="8">
+    <button type="submit">${showNameField ? "Criar conta de administrador" : "Entrar"}</button>
+  </form>
+</div>
 </body></html>`;
 }
 
@@ -168,23 +220,47 @@ function createApp() {
     res.send(authPage({ title: "ScoutX", subtitle: "Entre com seu email e senha.", action: "/login" }));
   });
 
+  // Minutos arredondados pra cima — "bloqueado por 4 minutos" é melhor que
+  // "3.2 minutos" (a pessoa não vai cronometrar o segundo exato mesmo).
+  function minutesLeft(lockedUntil) {
+    return Math.max(1, Math.ceil((new Date(lockedUntil).getTime() - Date.now()) / 60000));
+  }
+
+  const PERMANENT_LOCK_MESSAGE = "Conta bloqueada por excesso de tentativas — peça pra um administrador redefinir sua senha (aba Usuários → 🔑 Senha).";
+
   app.post("/login", async (req, res) => {
     const email = String(req.body.email || "").trim();
     const password = String(req.body.password || "");
 
     const user = await db.findUserByEmail(email);
-    const valid = user ? await bcrypt.compare(password, user.password_hash) : false;
-    if (!user || !valid) {
-      return res.status(401).send(
-        authPage({
-          title: "ScoutX",
-          subtitle: "Entre com seu email e senha.",
-          action: "/login",
-          error: "Email ou senha inválidos.",
-        })
+
+    // Bloqueio ativo: nem chega a checar a senha — não consome tentativa
+    // nova (senão as "2 tentativas a mais"/"1 tentativa a mais" prometidas
+    // pro usuário nunca sobrariam) e não dá pra "esperar" tentando de novo.
+    if (user && user.locked_until && new Date(user.locked_until) > new Date()) {
+      const permanent = new Date(user.locked_until).getUTCFullYear() >= 9000;
+      const error = permanent
+        ? PERMANENT_LOCK_MESSAGE
+        : `Muitas tentativas erradas — tenta de novo em ${minutesLeft(user.locked_until)} min.`;
+      return res.status(423).send(
+        authPage({ title: "ScoutX", subtitle: "Entre com seu email e senha.", action: "/login", error })
       );
     }
 
+    const valid = user ? await bcrypt.compare(password, user.password_hash) : false;
+    if (!user || !valid) {
+      let error = "Email ou senha inválidos.";
+      if (user) {
+        const { lockedUntil, permanent } = await db.recordFailedLogin(user.id);
+        if (permanent) error = PERMANENT_LOCK_MESSAGE;
+        else if (lockedUntil) error = `Muitas tentativas erradas — conta bloqueada por ${minutesLeft(lockedUntil)} min.`;
+      }
+      return res.status(401).send(
+        authPage({ title: "ScoutX", subtitle: "Entre com seu email e senha.", action: "/login", error })
+      );
+    }
+
+    await db.resetFailedLogins(user.id);
     db.logLogin(user.id, req.ip).catch((e) => console.error("log login:", e));
     setSessionCookie(res, user.id);
     res.redirect("/");
@@ -232,6 +308,26 @@ function createApp() {
     });
   });
 
+  // Autoatendimento — troca a PRÓPRIA senha (exige a senha atual, diferente
+  // do reset de admin em /api/admin/users/:id que não pede, já que é o
+  // próprio dono da conta confirmando que é ele mesmo).
+  app.patch("/api/me/password", async (req, res) => {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Informe a senha atual e a nova senha." });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: "A nova senha precisa ter no mínimo 8 caracteres." });
+    }
+    const valid = await bcrypt.compare(currentPassword, req.appUser.password_hash);
+    if (!valid) {
+      return res.status(401).json({ error: "Senha atual incorreta." });
+    }
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await db.updateUserPassword(req.appUser.id, passwordHash);
+    res.json({ ok: true });
+  });
+
   // ---------- Administração de usuários (admin only) ----------
 
   function requireAdmin(req, res, next) {
@@ -252,7 +348,13 @@ function createApp() {
         searchCount: u.search_count,
         ipCount: u.ip_count,
         lastIp: u.last_ip,
+        lastLoginAt: u.last_login_at,
+        allIps: u.all_ips || [],
         createdAt: u.created_at,
+        failedLoginAttempts: u.failed_login_attempts,
+        lockedUntil:
+          u.locked_until && new Date(u.locked_until) > new Date() ? u.locked_until : null,
+        lockedPermanently: u.locked_until && new Date(u.locked_until).getUTCFullYear() >= 9000,
       }))
     );
   });
@@ -285,9 +387,12 @@ function createApp() {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: "id inválido" });
 
-    const { role, canViewHistory, canAccessMinerador } = req.body || {};
+    const { role, canViewHistory, canAccessMinerador, password } = req.body || {};
     if (role !== undefined && role !== "admin" && role !== "collaborator") {
       return res.status(400).json({ error: "role deve ser 'admin' ou 'collaborator'" });
+    }
+    if (password !== undefined && password.length < 8) {
+      return res.status(400).json({ error: "A senha precisa ter no mínimo 8 caracteres." });
     }
 
     await db.updateUserPermissions(id, {
@@ -295,6 +400,13 @@ function createApp() {
       canViewHistory: typeof canViewHistory === "boolean" ? canViewHistory : undefined,
       canAccessMinerador: typeof canAccessMinerador === "boolean" ? canAccessMinerador : undefined,
     });
+    // Senha muda em query separada (updateUserPermissions só monta SET pros
+    // 3 campos de permissão) — admin resetando a senha de outra pessoa, ex:
+    // usuário esqueceu ou perdeu acesso ao email cadastrado.
+    if (password !== undefined) {
+      const passwordHash = await bcrypt.hash(password, 10);
+      await db.updateUserPassword(id, passwordHash);
+    }
     res.json({ ok: true });
   });
 
@@ -363,6 +475,7 @@ function createApp() {
           // domínio público), só que agora explícito por usuário.
           "X-User-Id": String(req.appUser.id),
           "X-User-Is-Admin": req.appUser.role === "admin" ? "true" : "false",
+          "X-Internal-Secret": INTERNAL_API_SECRET,
         },
         body: ["GET", "HEAD"].includes(req.method) ? undefined : JSON.stringify(req.body || {}),
       });

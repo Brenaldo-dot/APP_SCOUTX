@@ -9,6 +9,8 @@ class AdOut(BaseModel):
     id: int
     competitor_id: int
     product_id: int | None
+    product_title: str | None
+    product_image_url: str | None
     platform: str
     external_ad_id: str
     library_url: str | None

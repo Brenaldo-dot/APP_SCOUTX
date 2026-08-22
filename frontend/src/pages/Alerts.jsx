@@ -1,13 +1,30 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { AlertTriangle, DollarSign, Factory, LayoutGrid, Megaphone, Package, Rocket } from 'lucide-react'
 import { api } from '../api/client.js'
 import EmptyState from '../components/EmptyState.jsx'
 import Pagination from '../components/Pagination.jsx'
-import { ALERT_CATEGORIES, AlertTypeBadge } from '../components/Badges.jsx'
-import { formatDateTime } from '../utils/date.js'
+import { ALERT_CATEGORIES, AlertTypeBadge, alertAccentClass } from '../components/Badges.jsx'
+import LinkChip from '../components/LinkChip.jsx'
+import ProductThumb from '../components/ProductThumb.jsx'
+import PriceChangeRow from '../components/PriceChangeRow.jsx'
+import LedIcon from '../components/LedIcon.jsx'
+import { formatDateTime, formatRelativeTime, isRecent } from '../utils/date.js'
 import { useOperation } from '../context/OperationContext.jsx'
 
 const PAGE_SIZE = 50
+
+// Emoji cru nos filtros ("📦 Produto", "🏭 Fornecedor"...) destoava do resto
+// do app depois da troca do menu pra ícone-em-pastilha-LED — mesmo
+// tratamento aqui, por categoria.
+const CATEGORY_ICONS = {
+  produto: Package,
+  fornecedor: Factory,
+  anuncios: Megaphone,
+  escala: Rocket,
+  preco_estoque: DollarSign,
+  outros: AlertTriangle,
+}
 
 export default function Alerts() {
   const { operation } = useOperation()
@@ -56,7 +73,7 @@ export default function Alerts() {
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold">Alertas</h2>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-[var(--text-muted)]">
           Separado por assunto — fornecedor, anúncios, produto etc. cada um no seu canto, em vez de um fluxo só
           misturando tudo. Histórico completo, sempre — nada some por causa de outro alerta mais novo.
         </p>
@@ -66,26 +83,31 @@ export default function Alerts() {
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => selectCategory('')}
-            className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-              category === '' ? 'border-brand-600 bg-brand-600 text-white' : 'border-[#2d3148] text-gray-400 hover:bg-[#222538]'
+            className={`flex items-center gap-2 rounded-full border py-1.5 pl-1.5 pr-3.5 text-sm font-medium transition-colors ${
+              category === '' ? 'border-brand-600 bg-brand-600 text-white' : 'border-[var(--border)] text-[var(--text-tertiary)] hover:bg-[var(--hover-surface)]'
             }`}
           >
+            {category === '' ? <LayoutGrid size={14} /> : <LedIcon Icon={LayoutGrid} />}
             Todos ({counts.total})
           </button>
-          {ALERT_CATEGORIES.map((cat) => (
-            <button
-              key={cat.key}
-              onClick={() => selectCategory(cat.key)}
-              disabled={!counts.by_category[cat.key]}
-              className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                category === cat.key
-                  ? 'border-brand-600 bg-brand-600 text-white'
-                  : 'border-[#2d3148] text-gray-400 hover:bg-[#222538]'
-              }`}
-            >
-              {cat.icon} {cat.label} ({counts.by_category[cat.key] || 0})
-            </button>
-          ))}
+          {ALERT_CATEGORIES.map((cat) => {
+            const CatIcon = CATEGORY_ICONS[cat.key]
+            return (
+              <button
+                key={cat.key}
+                onClick={() => selectCategory(cat.key)}
+                disabled={!counts.by_category[cat.key]}
+                className={`flex items-center gap-2 rounded-full border py-1.5 pl-1.5 pr-3.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                  category === cat.key
+                    ? 'border-brand-600 bg-brand-600 text-white'
+                    : 'border-[var(--border)] text-[var(--text-tertiary)] hover:bg-[var(--hover-surface)]'
+                }`}
+              >
+                {category === cat.key ? <CatIcon size={14} /> : <LedIcon Icon={CatIcon} />}
+                {cat.label} ({counts.by_category[cat.key] || 0})
+              </button>
+            )
+          })}
         </div>
       )}
 
@@ -103,39 +125,40 @@ export default function Alerts() {
       )}
 
       {alerts && alerts.length > 0 && (
-        <div className="divide-y divide-[#2d3148] rounded-xl border border-[#2d3148] bg-[#1c1f2e]">
+        <div className="space-y-2.5">
           {alerts.map((alert) => (
-            <div key={alert.id} className="flex items-start justify-between gap-4 px-4 py-3 text-sm">
+            <div
+              key={alert.id}
+              className={`flex gap-3 rounded-2xl border border-[var(--border)] border-l-4 bg-[var(--bg-surface)] p-4 transition-colors hover:border-brand-500/40 ${alertAccentClass(alert.alert_type)}`}
+            >
+              <ProductThumb src={alert.product_image_url} title={alert.competitor_name} size="h-12 w-12" rounded="rounded-lg" />
               <div className="min-w-0 flex-1">
                 <div className="mb-1.5 flex flex-wrap items-center gap-2">
                   <AlertTypeBadge type={alert.alert_type} />
-                  <span className="rounded-full bg-[#222538] px-2 py-0.5 text-xs font-medium text-gray-400">
+                  <span className="rounded-full bg-[var(--hover-surface)] px-2 py-0.5 text-xs font-medium text-[var(--text-tertiary)]">
                     🏬 {alert.competitor_name}
                   </span>
-                  {alert.product_url && (
-                    <a
-                      href={alert.product_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="whitespace-nowrap text-xs font-medium text-brand-600 hover:underline"
-                    >
-                      Ver produto ↗
-                    </a>
+                  {isRecent(alert.created_at) && (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-400">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+                      Novo
+                    </span>
                   )}
-                  {alert.ad_library_url && (
-                    <a
-                      href={alert.ad_library_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="whitespace-nowrap text-xs font-medium text-brand-600 hover:underline"
-                    >
-                      Ver na biblioteca ↗
-                    </a>
-                  )}
+                  <span className="ml-auto shrink-0 text-xs text-[var(--text-muted)]" title={formatDateTime(alert.created_at)}>
+                    {formatRelativeTime(alert.created_at)}
+                  </span>
                 </div>
-                <p>{alert.message}</p>
+                <p className="text-sm leading-snug text-[var(--text-secondary)]">{alert.message}</p>
+                <PriceChangeRow payload={alert.payload} message={alert.message} />
+                <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                  <LinkChip href={alert.product_url} variant="brand">
+                    🔗 Ver produto ↗
+                  </LinkChip>
+                  <LinkChip href={alert.ad_library_url} variant="violet">
+                    📣 Ver na biblioteca ↗
+                  </LinkChip>
+                </div>
               </div>
-              <span className="shrink-0 text-xs text-gray-500">{formatDateTime(alert.created_at)}</span>
             </div>
           ))}
         </div>

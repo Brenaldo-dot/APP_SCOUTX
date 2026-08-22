@@ -5,6 +5,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.api.deps import CurrentUser, get_current_user
 from app.database import get_db
 from app.models import AdMinerScan, AdMinerScanStatus
 from app.schemas.ad_miner import AdMinerScanCreate, AdMinerScanOut
@@ -17,7 +18,9 @@ router = APIRouter(prefix="/api/ad-miner", tags=["ad-miner"])
 
 
 @router.post("/scans", response_model=AdMinerScanOut, status_code=201)
-def create_scan(payload: AdMinerScanCreate, db: Session = Depends(get_db)):
+def create_scan(
+    payload: AdMinerScanCreate, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)
+):
     domain = normalize_domain(payload.url)
     if not domain or "." not in domain:
         raise HTTPException(400, "URL inválida — cola o link da loja (ex: lojaexemplo.com)")
@@ -44,7 +47,7 @@ def create_scan(payload: AdMinerScanCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/scans/{scan_id}", response_model=AdMinerScanOut)
-def get_scan(scan_id: int, db: Session = Depends(get_db)):
+def get_scan(scan_id: int, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
     scan = db.get(AdMinerScan, scan_id)
     if not scan:
         raise HTTPException(404, "Scan não encontrado")

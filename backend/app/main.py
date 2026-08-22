@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app import models  # noqa: F401  garante que todo modelo é registrado no Base.metadata
-from app.api import ad_miner, ads, alerts, competitors, dashboard, ecosystem, products
+from app.api import ad_miner, ads, alerts, competitors, dashboard, ecosystem, products, settings as settings_api
 from app.config import get_settings
 from app.database import Base, engine
 
@@ -108,6 +108,31 @@ async def lifespan(app: FastAPI):
         conn.execute(text("ALTER TABLE competitors DROP CONSTRAINT IF EXISTS competitors_domain_key"))
         conn.execute(text("ALTER TABLE competitors ADD CONSTRAINT competitors_domain_key UNIQUE (domain)"))
 
+        # Contagem de produtos QUENTES por loja (pedido explícito: mostrar
+        # isso no card de cada concorrente). Rodada 1 usava scaling_products
+        # a partir de products.scaling (score 80+ estrito) e o número ficava
+        # quase sempre 0/1 mesmo com a aba Produtos Quentes cheia — o sinal
+        # que fecha os 80 pontos sozinho (anúncios crescendo) é raro, a
+        # maioria dos produtos quentes chega no 56-79 (ver
+        # models/competitor.py:hot_products). Renomeada pra hot_products e
+        # recalculada a partir do MESMO critério que /api/products/hot usa:
+        # último ProductScore de cada produto ativo, score >= 56.
+        conn.execute(text("ALTER TABLE competitors ADD COLUMN IF NOT EXISTS hot_products INTEGER NOT NULL DEFAULT 0"))
+        conn.execute(
+            text(
+                "UPDATE competitors c SET hot_products = COALESCE(("
+                "SELECT COUNT(*) FROM ("
+                "SELECT DISTINCT ON (ps.product_id) ps.product_id, ps.score "
+                "FROM product_scores ps "
+                "JOIN products p ON p.id = ps.product_id "
+                "WHERE p.competitor_id = c.id AND p.is_active = true "
+                "ORDER BY ps.product_id, ps.date DESC"
+                ") latest WHERE latest.score >= 56"
+                "), 0)"
+            )
+        )
+        conn.execute(text("ALTER TABLE competitors DROP COLUMN IF EXISTS scaling_products"))
+
     yield
 
 
@@ -128,43 +153,9 @@ app.include_router(alerts.router)
 app.include_router(dashboard.router)
 app.include_router(ecosystem.router)
 app.include_router(ad_miner.router)
+app.include_router(settings_api.router)
 
 
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
-
-
-@app.get("/api/_debug/tenant_state")
-def debug_tenant_state():
-    # Temporário — usuário reportou "sumiu todos os concorrentes da conta
-    # do Samuel" logo após a migração pra CompetitorTracker. Objetivo: ver
-    # se o backfill (owner_id -> competitor_trackers) rodou de verdade, sem
-    # precisar de sessão logada (o proxy do Node exige login, então não dá
-    # pra testar via curl direto — isso aqui fica alcançável só pela rede
-    # interna do Railway mesmo assim, igual todo o resto do FastAPI).
-    with engine.connect() as conn:
-        total_competitors = conn.execute(text("SELECT count(*) FROM competitors")).scalar()
-        total_trackers = conn.execute(text("SELECT count(*) FROM competitor_trackers")).scalar()
-        by_user = conn.execute(
-            text("SELECT user_id, count(*) FROM competitor_trackers GROUP BY user_id ORDER BY count(*) DESC")
-        ).all()
-        has_owner_id = conn.execute(
-            text(
-                "SELECT 1 FROM information_schema.columns "
-                "WHERE table_name = 'competitors' AND column_name = 'owner_id'"
-            )
-        ).first()
-        orphan_competitors = conn.execute(
-            text(
-                "SELECT count(*) FROM competitors c "
-                "WHERE NOT EXISTS (SELECT 1 FROM competitor_trackers t WHERE t.competitor_id = c.id)"
-            )
-        ).scalar()
-    return {
-        "total_competitors": total_competitors,
-        "total_trackers": total_trackers,
-        "trackers_by_user": [{"user_id": row[0], "count": row[1]} for row in by_user],
-        "owner_id_column_still_exists": bool(has_owner_id),
-        "competitors_with_no_tracker": orphan_competitors,
-    }

@@ -26,9 +26,15 @@ def _snapshot_and_score(db, competitor: Competitor) -> None:
     # de verdade por trás. Ver structure_analyzer.py pro valor inicial (no
     # cadastro, antes de existir qualquer score).
     max_score = 0
+    # Mesmo corte (56+) de /api/products/hot — não é só product.scaling
+    # (score 80+ estrito), ver models/competitor.py:hot_products.
+    hot_count = 0
     for product in active_products:
         record = run_async(score_product(db, competitor, product))
         max_score = max(max_score, record.score)
+        if record.score >= 56:
+            hot_count += 1
+    competitor.hot_products = hot_count
 
     if max_score >= 80:
         competitor.classification = ScaleClassification.SCALING
