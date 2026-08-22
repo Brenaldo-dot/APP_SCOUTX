@@ -1,5 +1,7 @@
 const express = require("express");
 const path = require("path");
+const dns = require("dns").promises;
+const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const { analyzeStore, UnsupportedStoreError } = require("./shopify-spy");
 const { sign, verify, parseCookies, serializeCookie } = require("./auth");
@@ -44,6 +46,153 @@ function normalizeShopifyProductUrl(raw) {
   url.hash = "";
   url.pathname = url.pathname.replace(/\/+$/, "").replace(/\.json$/, "") + ".json";
   return url.toString();
+}
+
+// Revisão de segurança: achado num teste de invasão. Buscar Fornecedor e
+// Espionar Loja fazem o SERVIDOR buscar a URL que a pessoa cola — sem essa
+// checagem, qualquer usuário logado (não precisa ser admin) conseguia
+// colar um endereço interno (localhost, IP privado, *.railway.internal) e
+// usar o app como ponte pra sondar a rede interna da infraestrutura
+// (SSRF). Resolve o hostname de verdade e bloqueia qualquer IP que caia
+// numa faixa privada/reservada/loopback, nas duas versões (v4 e v6).
+function ipv4ToInt(ip) {
+  const parts = ip.split(".").map(Number);
+  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+}
+
+const PRIVATE_IPV4_RANGES = [
+  ["0.0.0.0", 8], // "esta rede"
+  ["10.0.0.0", 8], // RFC1918
+  ["100.64.0.0", 10], // CGNAT
+  ["127.0.0.0", 8], // loopback
+  ["169.254.0.0", 16], // link-local — inclui o metadata de nuvem 169.254.169.254
+  ["172.16.0.0", 12], // RFC1918
+  ["192.0.0.0", 24], // reservado IETF
+  ["192.0.2.0", 24], // documentação (TEST-NET-1)
+  ["192.168.0.0", 16], // RFC1918
+  ["198.18.0.0", 15], // benchmarking
+  ["198.51.100.0", 24], // documentação (TEST-NET-2)
+  ["203.0.113.0", 24], // documentação (TEST-NET-3)
+  ["224.0.0.0", 4], // multicast
+  ["240.0.0.0", 4], // reservado
+];
+
+function isPrivateIPv4(ip) {
+  const n = ipv4ToInt(ip);
+  return PRIVATE_IPV4_RANGES.some(([base, bits]) => {
+    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+    return (n & mask) === (ipv4ToInt(base) & mask);
+  });
+}
+
+function isPrivateIPv6(ip) {
+  const v = ip.toLowerCase();
+  if (v === "::1" || v === "::") return true; // loopback / unspecified
+  if (/^fe[89ab][0-9a-f]:/.test(v)) return true; // fe80::/10 link-local
+  if (/^f[cd][0-9a-f]{2}:/.test(v)) return true; // fc00::/7 unique local
+  const mapped = v.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return isPrivateIPv4(mapped[1]); // IPv4-mapped IPv6
+  return false;
+}
+
+async function assertPublicHost(hostname) {
+  const host = String(hostname).toLowerCase();
+  if (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    host.endsWith(".railway.internal")
+  ) {
+    throw new Error("Esse endereço não pode ser consultado.");
+  }
+  let addresses;
+  try {
+    addresses = await dns.lookup(host, { all: true, verbatim: true });
+  } catch {
+    throw new Error("Não foi possível resolver esse endereço.");
+  }
+  for (const { address, family } of addresses) {
+    const isPrivate = family === 4 ? isPrivateIPv4(address) : isPrivateIPv6(address);
+    if (isPrivate) {
+      throw new Error("Esse endereço não pode ser consultado.");
+    }
+  }
+}
+
+// Revisão de segurança: o bloqueio por CONTA (db.js:recordFailedLogin)
+// protege contra "tentar várias senhas na MESMA conta", mas não contra
+// "tentar 1 senha em VÁRIAS contas" (password spraying) — cada conta só
+// vê 1 tentativa isolada, nunca bate o limite. Esse aqui é por IP,
+// independente de qual email foi tentado. Em memória (não sobrevive a
+// restart, não sincroniza entre múltiplas instâncias) — suficiente pro
+// tamanho desse app hoje; se um dia escalar pra várias instâncias, precisa
+// virar Redis.
+const IP_ATTEMPT_WINDOW_MS = 10 * 60 * 1000;
+const IP_ATTEMPT_LIMIT = 15;
+const IP_BLOCK_MS = 15 * 60 * 1000;
+const ipLoginFailures = new Map();
+
+function checkIpLoginLimit(ip) {
+  const entry = ipLoginFailures.get(ip);
+  if (entry && entry.blockedUntil && entry.blockedUntil > Date.now()) {
+    return { blocked: true, retryAfterMinutes: Math.ceil((entry.blockedUntil - Date.now()) / 60000) };
+  }
+  return { blocked: false };
+}
+
+function recordIpLoginFailure(ip) {
+  const now = Date.now();
+  let entry = ipLoginFailures.get(ip);
+  if (!entry || now - entry.windowStart > IP_ATTEMPT_WINDOW_MS) {
+    entry = { count: 0, windowStart: now, blockedUntil: null };
+  }
+  entry.count += 1;
+  if (entry.count >= IP_ATTEMPT_LIMIT) {
+    entry.blockedUntil = now + IP_BLOCK_MS;
+  }
+  ipLoginFailures.set(ip, entry);
+}
+
+function resetIpLoginFailures(ip) {
+  ipLoginFailures.delete(ip);
+}
+
+// Limpeza periódica — sem isso o Map só cresce (1 entrada por IP que já
+// tentou logar errado alguma vez).
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of ipLoginFailures) {
+    const stillBlocked = entry.blockedUntil && entry.blockedUntil > now;
+    const windowActive = now - entry.windowStart <= IP_ATTEMPT_WINDOW_MS;
+    if (!stillBlocked && !windowActive) ipLoginFailures.delete(ip);
+  }
+}, 30 * 60 * 1000).unref();
+
+// Revisão de segurança: checa a senha nova contra o banco público de senhas
+// já vazadas (Have I Been Pwned, modelo k-Anonymity) — protege contra
+// "credencial reusada", uma das formas mais comuns de conta ser invadida
+// sem precisar quebrar nada, só reaproveitando senha que já vazou em OUTRO
+// site. Manda só os 5 primeiros caracteres do hash SHA-1 pra API — a senha
+// em si, e até o hash completo, nunca saem daqui. Falha ABERTA (não
+// bloqueia troca de senha) se a API estiver fora do ar ou lenta: é
+// ferramenta interna de time, não vale travar o acesso de alguém por causa
+// de uma dependência externa instável.
+async function isPasswordPwned(password) {
+  const hash = crypto.createHash("sha1").update(password, "utf8").digest("hex").toUpperCase();
+  const prefix = hash.slice(0, 5);
+  const suffix = hash.slice(5);
+  try {
+    const response = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`, {
+      headers: { "User-Agent": "ScoutX-PasswordCheck" },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!response.ok) return false;
+    const text = await response.text();
+    return text.split("\n").some((line) => line.split(":")[0].trim() === suffix);
+  } catch {
+    return false;
+  }
 }
 
 function extractDomain(raw) {
@@ -156,8 +305,39 @@ function authPage({ title, subtitle, action, error, showNameField }) {
 function createApp() {
   const app = express();
   app.set("trust proxy", 1);
+  app.disable("x-powered-by");
   app.use(express.urlencoded({ extended: false }));
   app.use(express.json());
+
+  // Revisão de segurança: nenhum header de proteção do navegador vinha
+  // configurado antes (achado no teste de invasão) — sem eles o app fica
+  // mais exposto a clickjacking (carregar o ScoutX escondido dentro de um
+  // iframe de outro site) e a downgrade de HTTPS. CSP liberado o suficiente
+  // pra não quebrar nada: imagem de produto/favicon vem de domínio de
+  // concorrente (arbitrário) e do Google, por isso img-src aceita qualquer
+  // https; o resto (script, estilo do bundle, conexão de API) é tudo
+  // same-origin, só a tela de login/setup tem <style> inline mesmo.
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    res.setHeader(
+      "Content-Security-Policy",
+      [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: https:",
+        "font-src 'self' data:",
+        "connect-src 'self'",
+        "frame-ancestors 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+      ].join("; ")
+    );
+    next();
+  });
 
   app.use((req, res, next) => {
     req.cookies = parseCookies(req.headers.cookie);
@@ -204,6 +384,17 @@ function createApp() {
         })
       );
     }
+    if (await isPasswordPwned(password)) {
+      return res.status(400).send(
+        authPage({
+          title: "Criar conta de administrador",
+          subtitle: "Primeira vez usando essa ferramenta — crie a conta principal.",
+          action: "/setup",
+          showNameField: true,
+          error: "Essa senha já apareceu em vazamentos conhecidos — escolha outra.",
+        })
+      );
+    }
 
     const passwordHash = await bcrypt.hash(password, 10);
     const user = await db.createUser({ name, email, passwordHash, role: "admin" });
@@ -232,6 +423,18 @@ function createApp() {
     const email = String(req.body.email || "").trim();
     const password = String(req.body.password || "");
 
+    const ipLimit = checkIpLoginLimit(req.ip);
+    if (ipLimit.blocked) {
+      return res.status(429).send(
+        authPage({
+          title: "ScoutX",
+          subtitle: "Entre com seu email e senha.",
+          action: "/login",
+          error: `Muitas tentativas de login vindas daqui — tenta de novo em ${ipLimit.retryAfterMinutes} min.`,
+        })
+      );
+    }
+
     const user = await db.findUserByEmail(email);
 
     // Bloqueio ativo: nem chega a checar a senha — não consome tentativa
@@ -249,6 +452,7 @@ function createApp() {
 
     const valid = user ? await bcrypt.compare(password, user.password_hash) : false;
     if (!user || !valid) {
+      recordIpLoginFailure(req.ip);
       let error = "Email ou senha inválidos.";
       if (user) {
         const { lockedUntil, permanent } = await db.recordFailedLogin(user.id);
@@ -260,6 +464,7 @@ function createApp() {
       );
     }
 
+    resetIpLoginFailures(req.ip);
     await db.resetFailedLogins(user.id);
     db.logLogin(user.id, req.ip).catch((e) => console.error("log login:", e));
     setSessionCookie(res, user.id);
@@ -323,6 +528,9 @@ function createApp() {
     if (!valid) {
       return res.status(401).json({ error: "Senha atual incorreta." });
     }
+    if (await isPasswordPwned(newPassword)) {
+      return res.status(400).json({ error: "Essa senha já apareceu em vazamentos conhecidos — escolha outra." });
+    }
     const passwordHash = await bcrypt.hash(newPassword, 10);
     await db.updateUserPassword(req.appUser.id, passwordHash);
     res.json({ ok: true });
@@ -377,6 +585,9 @@ function createApp() {
 
     const existing = await db.findUserByEmail(email);
     if (existing) return res.status(409).json({ error: "Já existe um usuário com esse email." });
+    if (await isPasswordPwned(password)) {
+      return res.status(400).json({ error: "Essa senha já apareceu em vazamentos conhecidos — escolha outra." });
+    }
 
     const passwordHash = await bcrypt.hash(password, 10);
     const user = await db.createUser({ name, email, passwordHash, role: role || "collaborator" });
@@ -393,6 +604,9 @@ function createApp() {
     }
     if (password !== undefined && password.length < 8) {
       return res.status(400).json({ error: "A senha precisa ter no mínimo 8 caracteres." });
+    }
+    if (password !== undefined && (await isPasswordPwned(password))) {
+      return res.status(400).json({ error: "Essa senha já apareceu em vazamentos conhecidos — escolha outra." });
     }
 
     await db.updateUserPermissions(id, {
@@ -524,6 +738,12 @@ function createApp() {
       return res.status(400).json({ error: err.message || "URL inválida" });
     }
 
+    try {
+      await assertPublicHost(new URL(jsonUrl).hostname);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+
     let response;
     try {
       response = await fetch(jsonUrl, {
@@ -567,6 +787,15 @@ function createApp() {
     const domain = extractDomain(raw);
     if (domain) {
       db.logSearch(req.appUser.id, "spy", domain, String(raw)).catch((e) => console.error("log search:", e));
+    }
+
+    if (!domain) {
+      return res.status(400).json({ error: "URL inválida" });
+    }
+    try {
+      await assertPublicHost(domain);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
     }
 
     try {
