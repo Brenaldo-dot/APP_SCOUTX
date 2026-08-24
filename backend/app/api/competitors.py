@@ -82,7 +82,7 @@ def _assert_operation_allowed(db: Session, current_user: CurrentUser, effective_
     if len(used) >= current_user.org_max_operations:
         raise HTTPException(
             400,
-            f"Sua organização já está no limite de {current_user.org_max_operations} país(es) do plano — "
+            f"Sua organização já está no limite de {current_user.org_max_operations} país(es) do plano, "
             "fale com um administrador pra liberar mais países.",
         )
 
@@ -113,7 +113,7 @@ def _assert_competitor_limit_allowed(
         raise HTTPException(
             400,
             f"Sua organização já está no limite de {current_user.org_max_competitors} concorrente(s) cadastrado(s) "
-            "do plano — fale com um administrador pra liberar mais, ou remova um concorrente antes de cadastrar outro.",
+            "do plano, fale com um administrador pra liberar mais, ou remova um concorrente antes de cadastrar outro.",
         )
 
 
@@ -129,9 +129,16 @@ async def create_competitor(
         raise HTTPException(
             409,
             f'{domain} já está na sua lista na operação "{existing_for_user.operation}" (como '
-            f'"{existing_for_user.name}") — um domínio só pode pertencer a uma operação por vez. Troque pra '
+            f'"{existing_for_user.name}"). Um domínio só pode pertencer a uma operação por vez, troque pra '
             "essa operação pra ver o cadastro, ou exclua-o antes de recadastrar em outra.",
         )
+    # Achado pelo usuário: cadastrar de novo um domínio que ele mesmo já
+    # rastreia (mesma operação) não dava erro nenhum nem mudava nada na tela
+    # (register_competitor só reaproveita a linha, sem criar tracker
+    # duplicado) — parecia que o clique "não fez nada". Agora avisa com
+    # clareza em vez de ficar mudo.
+    if existing_for_user:
+        raise HTTPException(409, f'"{existing_for_user.name}" ({domain}) já está cadastrado na sua lista.')
 
     # Domínio já rastreado por outro usuário: register_competitor reaproveita
     # a linha e IGNORA o payload.operation, mantendo o país original — o

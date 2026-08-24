@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { rawApi } from '../api/rawClient.js'
 import QuickPreview from '../components/QuickPreview.jsx'
+import ProductThumb from '../components/ProductThumb.jsx'
 import { metaAdsLibrarySearchUrl } from '../utils/adLibrary.js'
 
 function fmtPrice(min, max) {
@@ -40,7 +41,7 @@ function Badges({ p }) {
       </span>,
     )
   }
-  return <div className="flex flex-wrap justify-end gap-1.5">{badges}</div>
+  return <div className="flex flex-wrap items-center gap-1.5">{badges}</div>
 }
 
 // Mesmo padrão de Products.jsx (👁 Ver = prévia num modal, ↗ = link direto,
@@ -80,32 +81,6 @@ function ProductLinks({ p, domain, onPreview }) {
       )}
     </div>
   )
-}
-
-function csvEscape(value) {
-  const s = String(value ?? '')
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-}
-
-function exportCsv(data) {
-  const headers = [
-    'titulo', 'url', 'vendor', 'id_fornecedor', 'tipo', 'tags', 'preco_min', 'preco_max',
-    'variantes', 'imagens', 'criado_em', 'dias_desde_criacao', 'colecao_destaque', 'posicao_na_colecao',
-    'paginas_duplicadas', 'urls_paginas_duplicadas', 'score',
-  ]
-  const rows = data.products.map((p) => [
-    p.title, p.url, p.vendor, p.supplierId, p.productType, p.tags, p.priceMin, p.priceMax,
-    p.variantCount, p.imageCount, p.createdAt, p.ageDays, p.inBestsellerCollection || '', p.bestsellerPosition || '',
-    p.duplicatePageCount, (p.duplicatePages || []).map((d) => d.url).join(' | '), p.score,
-  ])
-  const csv = [headers, ...rows].map((row) => row.map(csvEscape).join(',')).join('\r\n')
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `espionagem-${new URL(data.baseUrl).hostname}.csv`
-  a.click()
-  URL.revokeObjectURL(url)
 }
 
 const STATS = [
@@ -196,21 +171,32 @@ export default function EspionarLoja() {
             </h3>
             {top.length === 0 ? (
               <p className="text-sm text-[var(--text-muted)]">
-                Nenhum sinal forte encontrado — a loja não expõe coleções de mais-vendidos ou datas recentes publicamente.
+                Nenhum sinal forte encontrado, a loja não expõe coleções de mais-vendidos ou datas recentes publicamente.
               </p>
             ) : (
               <div className="flex flex-col gap-2">
+                {/* Duas linhas, não uma só: com título + miniatura + até 4
+                    badges + score + 3 links de ação, uma linha única
+                    (justify-between) deixava o grupo de badges/links "comer"
+                    todo o espaço em telas menores e o título sumia,
+                    espremido a zero de largura (relatado pelo usuário com
+                    print — badges e botões amontoados, sem nome do produto
+                    nenhum aparecendo). Título agora tem a linha só pra ele,
+                    nunca disputa espaço com o resto. */}
                 {top.map((p, i) => (
                   <div
                     key={i}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3.5 py-2.5"
+                    className="flex flex-col gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3.5 py-2.5"
                   >
-                    <span className="text-sm font-medium text-[var(--text-primary)]">{p.title}</span>
-                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-                      <Badges p={p} />
-                      <span className="rounded-full border border-pink-500/35 bg-pink-500/10 px-2 py-0.5 text-[10.5px] font-medium text-pink-400">
+                    <div className="flex items-center gap-2.5">
+                      <ProductThumb src={p.mainImageUrl} title={p.title} size="h-9 w-9" rounded="rounded-lg" />
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--text-primary)]">{p.title}</span>
+                      <span className="shrink-0 rounded-full border border-pink-500/35 bg-pink-500/10 px-2 py-0.5 text-[10.5px] font-medium text-pink-400">
                         score {p.score}
                       </span>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-1.5">
+                      <Badges p={p} />
                       <ProductLinks p={p} domain={storeDomain} onPreview={setPreviewProduct} />
                     </div>
                   </div>
@@ -220,15 +206,7 @@ export default function EspionarLoja() {
           </div>
 
           <div>
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Catálogo completo</h3>
-              <button
-                onClick={() => exportCsv(data)}
-                className="rounded-md bg-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--hover-secondary)]"
-              >
-                Exportar CSV
-              </button>
-            </div>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Catálogo completo</h3>
             <div className="max-h-[420px] overflow-auto rounded-lg border border-[var(--border)]">
               <table className="w-full text-left text-xs">
                 <thead className="sticky top-0 bg-[var(--bg-surface-2)] text-[var(--text-muted)]">
@@ -243,7 +221,12 @@ export default function EspionarLoja() {
                 <tbody>
                   {data.products.map((p, i) => (
                     <tr key={i} className="border-b border-[var(--border-soft)] hover:bg-[var(--bg-surface)]">
-                      <td className="max-w-[260px] whitespace-normal px-2.5 py-1.5 text-[var(--text-primary)]">{p.title}</td>
+                      <td className="max-w-[260px] whitespace-normal px-2.5 py-1.5 text-[var(--text-primary)]">
+                        <div className="flex items-center gap-2">
+                          <ProductThumb src={p.mainImageUrl} title={p.title} size="h-8 w-8" rounded="rounded-md" />
+                          <span>{p.title}</span>
+                        </div>
+                      </td>
                       <td className="whitespace-nowrap px-2.5 py-1.5 text-[var(--text-secondary)]">{p.vendor || '—'}</td>
                       <td className="whitespace-nowrap px-2.5 py-1.5 text-[var(--text-secondary)]">{p.supplierId || '—'}</td>
                       <td className="whitespace-nowrap px-2.5 py-1.5 text-[var(--text-secondary)]">{fmtPrice(p.priceMin, p.priceMax)}</td>

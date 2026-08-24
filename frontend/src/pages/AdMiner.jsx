@@ -132,14 +132,14 @@ export default function AdMiner() {
         <h2 className="text-xl font-semibold">Minerador de Anúncios</h2>
         <p className="text-sm text-[var(--text-muted)]">
           Cola a URL de uma loja e o app varre Meta Ads Library, Google Ads Transparency Center e TikTok Creative
-          Center (biblioteca de {operationLabel(operation)}) pra achar qual produto ela está escalando agora — sem
+          Center (biblioteca de {operationLabel(operation)}) pra achar qual produto ela está escalando agora, sem
           precisar cadastrar a loja como concorrente.
         </p>
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-3 rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-4">
         <div className="flex flex-1 min-w-[260px] flex-col gap-1">
-          <label className="text-xs font-medium text-[var(--text-muted)]">URL da loja</label>
+          <label className="text-xs font-medium text-[var(--text-muted)]">Cole a URL da loja concorrente</label>
           <input
             required
             placeholder="lojaexemplo.com"
@@ -158,12 +158,12 @@ export default function AdMiner() {
       {scanningNow && (
         <EmptyState
           title="Escaneando as bibliotecas de anúncio…"
-          subtitle="Meta, Google e TikTok em paralelo — costuma levar de 20 a 60 segundos."
+          subtitle="Meta, Google e TikTok em paralelo, costuma levar de 20 a 60 segundos."
         />
       )}
 
       {scan?.status === 'failed' && (
-        <EmptyState title="O scan falhou" subtitle={scan.error || 'Erro desconhecido — tenta de novo.'} />
+        <EmptyState title="O scan falhou" subtitle={scan.error || 'Erro desconhecido, tenta de novo.'} />
       )}
 
       {result && (
@@ -173,7 +173,7 @@ export default function AdMiner() {
               <p className="font-semibold">⚠️ Sinal de multi-plataforma (nível da loja)</p>
               <p className="mt-1 text-red-300/80">
                 {result.domain} tem anúncio ativo na Meta E no Google ao mesmo tempo. Não dá pra confirmar se é o
-                MESMO produto nas duas (o Google não expõe a URL de destino do criativo publicamente) — mas é forte
+                MESMO produto nas duas (o Google não expõe a URL de destino do criativo publicamente), mas é forte
                 indício de operação em escala, não só teste.
               </p>
             </div>
@@ -195,7 +195,7 @@ export default function AdMiner() {
             {result.meta.scan_failed ? (
               <EmptyState
                 title="Não deu pra escanear a Meta agora"
-                subtitle="Timeout ou bloqueio temporário da própria Ads Library — isso NÃO significa que a loja não anuncia lá. Tenta escanear de novo em alguns minutos."
+                subtitle="Timeout ou bloqueio temporário da própria Ads Library, isso NÃO significa que a loja não anuncia lá. Tenta escanear de novo em alguns minutos."
               />
             ) : result.meta.products.length === 0 ? (
               <EmptyState

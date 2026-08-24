@@ -16,7 +16,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 // Fixo em 1 (não uma constante à parte) de propósito, pra não sobrar
 // nenhuma trilha de "plano X permite N usuários" pra reintroduzir sem querer.
 const PLAN_LIMITS = {
-  solo: { label: "Standard", maxUsers: 1, maxOperations: 1, maxCompetitors: 70 },
+  solo: { label: "Standard", maxUsers: 1, maxOperations: 1, maxCompetitors: 50 },
   pro: { label: "Pro", maxUsers: 1, maxOperations: 3, maxCompetitors: 250 },
   agencia: { label: "Enterprise", maxUsers: 1, maxOperations: Infinity, maxCompetitors: Infinity },
 };

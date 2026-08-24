@@ -35,7 +35,7 @@ def run_ad_miner_scan(self, scan_id: int) -> dict:
         except Exception:
             logger.exception("Falha no scan do Minerador de Anúncios pra %s", scan.domain)
             scan.status = AdMinerScanStatus.FAILED
-            scan.error = "Não deu pra escanear agora — tenta de novo em instantes."
+            scan.error = "Não deu pra escanear agora, tenta de novo em instantes."
 
         scan.finished_at = datetime.now(timezone.utc)
         db.commit()

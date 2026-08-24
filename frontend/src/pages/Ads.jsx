@@ -88,7 +88,7 @@ export default function Ads() {
     if (!competitorId) return
     clearTimeout(pollRef.current)
     setRescanning(true)
-    setRescanMessage('Escaneando Meta, Google e TikTok agora — pode levar até 1 minuto…')
+    setRescanMessage('Escaneando Meta, Google e TikTok agora, pode levar até 1 minuto…')
     try {
       await api.rescanAds(competitorId)
       const before = ads?.length ?? 0
@@ -102,7 +102,7 @@ export default function Ads() {
           setRescanMessage(
             now > before
               ? `Achou ${now - before} anúncio(s) novo(s).`
-              : 'Scan terminou sem achar anúncio novo agora — o concorrente pode não estar anunciando no momento.',
+              : 'Scan terminou sem achar anúncio novo agora, o concorrente pode não estar anunciando no momento.',
           )
           return
         }
@@ -189,27 +189,12 @@ export default function Ads() {
 
       {ads && ads.length === 0 && platform === 'tiktok' && (
         <EmptyState
-          title="TikTok não publica anúncio pra Colômbia — não é falha da raspagem"
-          subtitle={
-            <>
-              Testado ao vivo direto na ferramenta oficial do TikTok (
-              <a
-                href="https://library.tiktok.com/ads"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-brand-600 hover:underline"
-              >
-                library.tiktok.com/ads ↗
-              </a>
-              ), inclusive com "Todos os países" selecionado (o filtro mais amplo que existe lá) e
-              buscando tanto pelo domínio quanto pelo nome real do anunciante: zero resultado, sempre.
-              A Commercial Content Library do TikTok só existe por exigência legal da União Europeia
-              (DSA) — nenhum país da América Latina é coberto. Isso não quer dizer que a loja não
-              anuncia no TikTok (aliás, quando ela tem TikTok Pixel instalado no site — visível na
-              aba Concorrentes — isso é sinal forte de que anuncia sim), só que essa informação não é
-              pública em lugar nenhum hoje, oficial ou de terceiro.
-            </>
+          title={
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-400">
+              🔧 Em manutenção
+            </span>
           }
+          subtitle="TikTok está temporariamente indisponível nessa aba, estamos trabalhando numa atualização."
         />
       )}
 
@@ -225,7 +210,25 @@ export default function Ads() {
           {ads.map((ad) => (
             <div key={ad.id} className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-4">
               <div className="mb-2 flex items-start gap-3">
-                <ProductThumb src={ad.product_image_url} title={ad.product_title} size="h-14 w-14" rounded="rounded-xl" />
+                <ProductThumb
+                  src={ad.product_image_url}
+                  title={ad.product_title}
+                  size="h-14 w-14"
+                  rounded="rounded-xl"
+                  // Meta às vezes casa o anúncio com o produto certo (destino/
+                  // texto do criativo, ver meta_ads.py) e mostra a foto DELE —
+                  // Google e TikTok não expõem link de destino nem texto do
+                  // criativo publicamente (testado ao vivo, ver
+                  // scrapers/google_ads.py e tiktok_ads.py), então nunca tem
+                  // produto vinculado pra puxar imagem nenhuma; sem esse
+                  // aviso o ícone vazio parecia bug em vez de limitação da
+                  // própria biblioteca de anúncios.
+                  fallbackTitle={
+                    ad.platform !== 'meta'
+                      ? `${ad.platform === 'google' ? 'O Google' : 'O TikTok'} não expõe publicamente qual produto esse anúncio promove, por isso não dá pra mostrar a foto aqui.`
+                      : undefined
+                  }
+                />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <PlatformBadge platform={ad.platform} />
@@ -234,7 +237,7 @@ export default function Ads() {
                       title={
                         ad.started_at_raw
                           ? 'Data informada pela própria biblioteca de anúncios'
-                          : 'Sem data de início confirmada pela biblioteca — contando desde que nosso sistema viu esse anúncio'
+                          : 'Sem data de início confirmada pela biblioteca, contando desde que nosso sistema viu esse anúncio'
                       }
                     />
                     {ad.is_winning && (
@@ -262,7 +265,7 @@ export default function Ads() {
                 {ad.creative_text || 'Sem texto de criativo capturado'}
               </p>
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--text-muted)]">
-                <span title={ad.started_at_raw ? 'Data informada pela própria biblioteca de anúncios' : 'Sem data de início confirmada pela biblioteca — contando desde que nosso sistema viu esse anúncio'}>
+                <span title={ad.started_at_raw ? 'Data informada pela própria biblioteca de anúncios' : 'Sem data de início confirmada pela biblioteca, contando desde que nosso sistema viu esse anúncio'}>
                   {ad.started_at_raw || (ad.days_active != null ? `${ad.days_active} dias sob nosso monitoramento` : '—')}
                 </span>
                 <div className="flex flex-wrap items-center gap-2">

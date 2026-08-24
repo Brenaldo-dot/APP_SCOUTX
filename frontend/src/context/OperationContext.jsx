@@ -100,7 +100,7 @@ export function OperationProvider({ children }) {
     !!planLimit && planLimit.maxOperations !== null && touchedOperations.size >= planLimit.maxOperations
 
   // Mesma ideia, pro teto de concorrentes cadastrados do plano (Standard até
-  // 70, Pro até 250, Enterprise ilimitado) — sem a escada de "qual plano libera a
+  // 50, Pro até 250, Enterprise ilimitado) — sem a escada de "qual plano libera a
   // Nª vaga" dos países porque aqui não tem opção fixa pra travar uma por
   // uma, é só "cheio ou não".
   const atCompetitorCap =

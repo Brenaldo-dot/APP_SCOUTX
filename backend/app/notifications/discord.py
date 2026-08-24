@@ -119,7 +119,7 @@ async def send_test(webhook_url: str) -> bool:
         "embeds": [
             {
                 "title": "✅ ScoutX conectado!",
-                "description": "Esse é um teste — se você tá vendo essa mensagem, seus alertas vão chegar aqui a partir de agora.",
+                "description": "Esse é um teste, se você tá vendo essa mensagem, seus alertas vão chegar aqui a partir de agora.",
                 "color": 0x22C55E,
             }
         ],

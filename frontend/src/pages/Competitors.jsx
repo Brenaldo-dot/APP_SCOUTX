@@ -127,7 +127,7 @@ export default function Competitors() {
   }
 
   async function handleDelete(c) {
-    if (!window.confirm(`Excluir "${c.name}" (${c.domain})? Isso apaga todo o histórico de produtos, anúncios e alertas dessa loja — não dá pra desfazer.`)) {
+    if (!window.confirm(`Excluir "${c.name}" (${c.domain})? Isso apaga todo o histórico de produtos, anúncios e alertas dessa loja, não dá pra desfazer.`)) {
       return
     }
     setDeletingId(c.id)
@@ -146,7 +146,7 @@ export default function Competitors() {
       <div>
         <h2 className="text-xl font-semibold">Concorrentes</h2>
         <p className="text-sm text-[var(--text-muted)]">
-          Lojas Shopify monitoradas diariamente — operação {operationLabel(operation)}
+          Lojas Shopify monitoradas diariamente, operação {operationLabel(operation)}
         </p>
       </div>
 
@@ -166,7 +166,7 @@ export default function Competitors() {
 
       {!asUserId && atCompetitorCap && (
         <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
-          📦 Sua organização atingiu o limite de {planLimit.maxCompetitors} concorrentes cadastrados do plano — fale
+          📦 Sua organização atingiu o limite de {planLimit.maxCompetitors} concorrentes cadastrados do plano, fale
           com um administrador pra liberar mais, ou remova um concorrente antes de cadastrar outro.
         </div>
       )}

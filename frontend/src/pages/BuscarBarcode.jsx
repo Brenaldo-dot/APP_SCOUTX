@@ -58,7 +58,7 @@ export default function BuscarBarcode() {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      setError('Não foi possível copiar automaticamente — selecione o texto manualmente')
+      setError('Não foi possível copiar automaticamente, selecione o texto manualmente')
     }
   }
 
@@ -92,7 +92,7 @@ export default function BuscarBarcode() {
           <div className="mt-4 rounded-lg border border-emerald-900 bg-emerald-950/30 px-3 py-2.5">
             <p className="text-sm font-medium text-emerald-400">Encontrado: {result.value}</p>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
-              {result.source === 'sku' ? 'Barcode vazio — exibindo SKU' : 'Barcode'}
+              {result.source === 'sku' ? 'Barcode vazio, exibindo SKU' : 'Barcode'}
               {result.productTitle ? ` · ${result.productTitle}` : ''}
             </p>
             <button

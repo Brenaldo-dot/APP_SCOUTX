@@ -105,7 +105,7 @@ export default function Products() {
       <div>
         <h2 className="text-xl font-semibold">Produtos</h2>
         <p className="text-sm text-[var(--text-muted)]">
-          Todos os produtos ativos descobertos nas lojas monitoradas{total > 0 ? ` — ${total} no total` : ''}
+          Todos os produtos ativos descobertos nas lojas monitoradas{total > 0 ? `, ${total} no total` : ''}
         </p>
       </div>
 

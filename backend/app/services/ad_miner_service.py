@@ -145,20 +145,20 @@ async def scan_store_domain(domain: str, operation: str = "colombia") -> dict:
     multi_platform_signal = meta_has_scaling and not google_result.failed and len(google_result.ads) > 0
 
     google_note = (
-        "A busca no Google Ads Transparency falhou agora (timeout ou bloqueio temporário) — isso NÃO significa "
+        "A busca no Google Ads Transparency falhou agora (timeout ou bloqueio temporário), isso NÃO significa "
         "que a loja não anuncia lá, só que não deu pra confirmar nessa tentativa. Tenta escanear de novo em "
         "alguns minutos."
         if google_result.failed
         else "O Google Ads Transparency Center não expõe a URL de destino do criativo publicamente, "
-        "então aqui só dá pra confirmar QUE a loja tem anúncio ativo no Google — não QUAL produto."
+        "então aqui só dá pra confirmar QUE a loja tem anúncio ativo no Google, não QUAL produto."
     )
     tiktok_note = (
-        "A busca no TikTok Creative Center falhou agora (timeout ou bloqueio temporário) — isso NÃO significa "
+        "A busca no TikTok Creative Center falhou agora (timeout ou bloqueio temporário), isso NÃO significa "
         "que a loja não anuncia lá, só que não deu pra confirmar nessa tentativa. Tenta escanear de novo em "
         "alguns minutos."
         if tiktok_result.failed
         else "TikTok Creative Center é uma vitrine curada (não um índice completo pesquisável) e boa parte "
-        "do texto do anúncio fica gravada no vídeo — cobertura baixa é característica da ferramenta, "
+        "do texto do anúncio fica gravada no vídeo, cobertura baixa é característica da ferramenta, "
         "não é sinal de que a loja não anuncia lá."
     )
 

@@ -268,11 +268,13 @@ export default function Layout() {
         </button>
 
         <div className="relative mb-4 flex items-center justify-center px-2 pt-1">
-          <img
-            src={scoutxLogo}
-            alt="ScoutX"
-            className={`rounded-2xl object-cover shadow-lg transition-all ${effectiveCollapsed ? 'h-9 w-9' : 'h-20 w-20'}`}
-          />
+          <Link to="/" title="Ir pro Dashboard">
+            <img
+              src={scoutxLogo}
+              alt="ScoutX"
+              className={`rounded-2xl object-cover shadow-lg transition-all ${effectiveCollapsed ? 'h-9 w-9' : 'h-20 w-20'}`}
+            />
+          </Link>
           {!effectiveCollapsed && (
             <button
               onClick={toggleTheme}
@@ -472,7 +474,9 @@ export default function Layout() {
           >
             <Menu size={20} />
           </button>
-          <img src={scoutxLogo} alt="ScoutX" className="h-8 w-8 rounded-xl object-cover shadow" />
+          <Link to="/" title="Ir pro Dashboard">
+            <img src={scoutxLogo} alt="ScoutX" className="h-8 w-8 rounded-xl object-cover shadow" />
+          </Link>
           <span className="w-9" />
         </div>
 
@@ -489,8 +493,8 @@ export default function Layout() {
             </h3>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
               {operationModal.mode === 'add'
-                ? 'Só muda como aparece no menu — não afeta nada já cadastrado.'
-                : `Isso só muda como "${operationModal.originalLabel}" aparece pra você — os concorrentes já cadastrados continuam no mesmo lugar.`}
+                ? 'Só muda como aparece no menu, não afeta nada já cadastrado.'
+                : `Isso só muda como "${operationModal.originalLabel}" aparece pra você, os concorrentes já cadastrados continuam no mesmo lugar.`}
             </p>
             <input
               type="text"

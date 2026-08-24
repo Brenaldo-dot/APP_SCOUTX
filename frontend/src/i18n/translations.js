@@ -39,7 +39,7 @@ const DICTS = {
     'greeting.boaNoite': 'Boa noite',
 
     'conta.titulo': 'Minha Conta',
-    'conta.subtitulo': 'Configurações da sua conta — idioma, senha e notificações.',
+    'conta.subtitulo': 'Configurações da sua conta: idioma, senha e notificações.',
 
     'conta.foto.titulo': 'Foto de perfil',
     'conta.foto.desc': 'Aparece no menu lateral e em outros lugares do app.',
@@ -55,7 +55,7 @@ const DICTS = {
     'conta.plano.vencido': 'Vencido em',
 
     'conta.idioma.titulo': 'Idioma',
-    'conta.idioma.desc': 'Idioma da interface do ScoutX (menu e esta tela). O resto do app ainda está só em português — mais idiomas chegam aos poucos.',
+    'conta.idioma.desc': 'Idioma da interface do ScoutX (menu e esta tela). O resto do app ainda está só em português, mais idiomas chegam aos poucos.',
 
     'conta.senha.titulo': 'Alterar senha',
     'conta.senha.desc': 'Troque sua senha de acesso. Você precisa confirmar a senha atual.',
@@ -70,8 +70,8 @@ const DICTS = {
     'conta.senha.erroCampos': 'Preencha os 3 campos.',
 
     'conta.discord.titulo': 'Notificações no Discord',
-    'conta.discord.desc': 'Receba todos os alertas dos concorrentes que você rastreia direto num canal do seu Discord, em tempo real — sem precisar abrir o ScoutX pra saber que algo mudou.',
-    'conta.discord.somentePro': 'Disponível a partir do plano Pro — assine o Pro pra habilitar alertas no Discord.',
+    'conta.discord.desc': 'Receba todos os alertas dos concorrentes que você rastreia direto num canal do seu Discord, em tempo real, sem precisar abrir o ScoutX pra saber que algo mudou.',
+    'conta.discord.somentePro': 'Disponível a partir do plano Pro, assine o Pro pra habilitar alertas no Discord.',
     'conta.discord.statusConectado': '🟢 Conectado',
     'conta.discord.statusDesconectado': '⚪ Não configurado',
     'conta.discord.label': 'URL do Webhook',
@@ -83,7 +83,7 @@ const DICTS = {
     'conta.discord.remover': 'Desconectar',
     'conta.discord.sucessoSalvar': 'Webhook salvo! Clique em "Enviar teste" pra confirmar que funcionou.',
     'conta.discord.sucessoTeste': 'Teste enviado! Confira o canal do seu Discord.',
-    'conta.discord.sucessoRemover': 'Discord desconectado — você não vai mais receber alertas por lá.',
+    'conta.discord.sucessoRemover': 'Discord desconectado, você não vai mais receber alertas por lá.',
     'conta.discord.erroUrl': 'Cole a URL do webhook antes de salvar.',
     'conta.discord.comoConfigurar': 'Como pegar essa URL (passo a passo)',
     'conta.discord.passo1Titulo': 'Abra as configurações do canal',
@@ -93,7 +93,7 @@ const DICTS = {
     'conta.discord.passo3Titulo': 'Crie o Webhook',
     'conta.discord.passo3': 'Clique em "Webhooks" → "Novo Webhook". Dê um nome (ex: "ScoutX") pra identificar de onde vêm os alertas.',
     'conta.discord.passo4Titulo': 'Copie a URL',
-    'conta.discord.passo4': 'Clique em "Copiar URL do Webhook" — não precisa entender o que tem dentro dela, só copiar mesmo.',
+    'conta.discord.passo4': 'Clique em "Copiar URL do Webhook", não precisa entender o que tem dentro dela, só copiar mesmo.',
     'conta.discord.passo5Titulo': 'Cole aqui e salve',
     'conta.discord.passo5': 'Volte pro ScoutX, cole a URL no campo acima, clique em "Salvar" e depois em "Enviar teste" pra confirmar que chegou.',
   },
@@ -125,7 +125,7 @@ const DICTS = {
     'greeting.boaNoite': 'Good evening',
 
     'conta.titulo': 'My Account',
-    'conta.subtitulo': 'Your account settings — language, password and notifications.',
+    'conta.subtitulo': 'Your account settings: language, password and notifications.',
 
     'conta.foto.titulo': 'Profile photo',
     'conta.foto.desc': 'Shows up in the sidebar and other places across the app.',
@@ -141,7 +141,7 @@ const DICTS = {
     'conta.plano.vencido': 'Expired on',
 
     'conta.idioma.titulo': 'Language',
-    'conta.idioma.desc': "ScoutX interface language (menu and this screen). The rest of the app is still Portuguese-only — more languages are coming gradually.",
+    'conta.idioma.desc': "ScoutX interface language (menu and this screen). The rest of the app is still Portuguese-only, more languages are coming gradually.",
 
     'conta.senha.titulo': 'Change password',
     'conta.senha.desc': 'Change your login password. You need to confirm your current password.',
@@ -156,8 +156,8 @@ const DICTS = {
     'conta.senha.erroCampos': 'Fill in all 3 fields.',
 
     'conta.discord.titulo': 'Discord notifications',
-    'conta.discord.desc': "Get every alert from the competitors you track sent straight to a channel on your Discord, in real time — no need to open ScoutX to know something changed.",
-    'conta.discord.somentePro': 'Available from the Pro plan — subscribe to Pro to enable Discord alerts.',
+    'conta.discord.desc': "Get every alert from the competitors you track sent straight to a channel on your Discord, in real time, no need to open ScoutX to know something changed.",
+    'conta.discord.somentePro': 'Available from the Pro plan, subscribe to Pro to enable Discord alerts.',
     'conta.discord.statusConectado': '🟢 Connected',
     'conta.discord.statusDesconectado': '⚪ Not configured',
     'conta.discord.label': 'Webhook URL',
@@ -169,7 +169,7 @@ const DICTS = {
     'conta.discord.remover': 'Disconnect',
     'conta.discord.sucessoSalvar': 'Webhook saved! Click "Send test" to confirm it worked.',
     'conta.discord.sucessoTeste': 'Test sent! Check your Discord channel.',
-    'conta.discord.sucessoRemover': "Discord disconnected — you won't receive alerts there anymore.",
+    'conta.discord.sucessoRemover': "Discord disconnected, you won't receive alerts there anymore.",
     'conta.discord.erroUrl': 'Paste the webhook URL before saving.',
     'conta.discord.comoConfigurar': 'How to get this URL (step by step)',
     'conta.discord.passo1Titulo': 'Open the channel settings',
@@ -179,7 +179,7 @@ const DICTS = {
     'conta.discord.passo3Titulo': 'Create the Webhook',
     'conta.discord.passo3': 'Click "Webhooks" → "New Webhook". Give it a name (e.g. "ScoutX") so you know where alerts come from.',
     'conta.discord.passo4Titulo': 'Copy the URL',
-    'conta.discord.passo4': 'Click "Copy Webhook URL" — you don\'t need to understand what\'s inside it, just copy it.',
+    'conta.discord.passo4': 'Click "Copy Webhook URL", you don\'t need to understand what\'s inside it, just copy it.',
     'conta.discord.passo5Titulo': 'Paste it here and save',
     'conta.discord.passo5': 'Come back to ScoutX, paste the URL in the field above, click "Save", then "Send test" to confirm it arrived.',
   },
@@ -211,7 +211,7 @@ const DICTS = {
     'greeting.boaNoite': 'Buenas noches',
 
     'conta.titulo': 'Mi Cuenta',
-    'conta.subtitulo': 'Configuración de tu cuenta — idioma, contraseña y notificaciones.',
+    'conta.subtitulo': 'Configuración de tu cuenta: idioma, contraseña y notificaciones.',
 
     'conta.foto.titulo': 'Foto de perfil',
     'conta.foto.desc': 'Aparece en el menú lateral y en otras partes de la app.',
@@ -227,7 +227,7 @@ const DICTS = {
     'conta.plano.vencido': 'Vencido el',
 
     'conta.idioma.titulo': 'Idioma',
-    'conta.idioma.desc': 'Idioma de la interfaz de ScoutX (menú y esta pantalla). El resto de la app todavía está solo en portugués — más idiomas llegarán poco a poco.',
+    'conta.idioma.desc': 'Idioma de la interfaz de ScoutX (menú y esta pantalla). El resto de la app todavía está solo en portugués, más idiomas llegarán poco a poco.',
 
     'conta.senha.titulo': 'Cambiar contraseña',
     'conta.senha.desc': 'Cambia tu contraseña de acceso. Necesitas confirmar la contraseña actual.',
@@ -242,8 +242,8 @@ const DICTS = {
     'conta.senha.erroCampos': 'Completa los 3 campos.',
 
     'conta.discord.titulo': 'Notificaciones en Discord',
-    'conta.discord.desc': 'Recibe todas las alertas de los competidores que rastreas directo en un canal de tu Discord, en tiempo real — sin necesidad de abrir ScoutX para saber que algo cambió.',
-    'conta.discord.somentePro': 'Disponible desde el plan Pro — suscríbete al Pro para habilitar alertas en Discord.',
+    'conta.discord.desc': 'Recibe todas las alertas de los competidores que rastreas directo en un canal de tu Discord, en tiempo real, sin necesidad de abrir ScoutX para saber que algo cambió.',
+    'conta.discord.somentePro': 'Disponible desde el plan Pro, suscríbete al Pro para habilitar alertas en Discord.',
     'conta.discord.statusConectado': '🟢 Conectado',
     'conta.discord.statusDesconectado': '⚪ No configurado',
     'conta.discord.label': 'URL del Webhook',
@@ -255,7 +255,7 @@ const DICTS = {
     'conta.discord.remover': 'Desconectar',
     'conta.discord.sucessoSalvar': '¡Webhook guardado! Haz clic en "Enviar prueba" para confirmar que funcionó.',
     'conta.discord.sucessoTeste': '¡Prueba enviada! Revisa el canal de tu Discord.',
-    'conta.discord.sucessoRemover': 'Discord desconectado — ya no recibirás alertas ahí.',
+    'conta.discord.sucessoRemover': 'Discord desconectado, ya no recibirás alertas ahí.',
     'conta.discord.erroUrl': 'Pega la URL del webhook antes de guardar.',
     'conta.discord.comoConfigurar': 'Cómo obtener esta URL (paso a paso)',
     'conta.discord.passo1Titulo': 'Abre la configuración del canal',
@@ -265,7 +265,7 @@ const DICTS = {
     'conta.discord.passo3Titulo': 'Crea el Webhook',
     'conta.discord.passo3': 'Haz clic en "Webhooks" → "Nuevo Webhook". Dale un nombre (ej: "ScoutX") para identificar de dónde vienen las alertas.',
     'conta.discord.passo4Titulo': 'Copia la URL',
-    'conta.discord.passo4': 'Haz clic en "Copiar URL del Webhook" — no necesitas entender lo que contiene, solo copiarla.',
+    'conta.discord.passo4': 'Haz clic en "Copiar URL del Webhook", no necesitas entender lo que contiene, solo copiarla.',
     'conta.discord.passo5Titulo': 'Pégala aquí y guarda',
     'conta.discord.passo5': 'Vuelve a ScoutX, pega la URL en el campo de arriba, haz clic en "Guardar" y luego en "Enviar prueba" para confirmar que llegó.',
   },

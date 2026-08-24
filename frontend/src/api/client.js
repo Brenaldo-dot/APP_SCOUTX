@@ -13,8 +13,19 @@ async function request(path, options = {}) {
     ...options,
   })
   if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new Error(`${res.status} ${res.statusText}${body ? `: ${body}` : ''}`)
+    // FastAPI devolve o erro como JSON ({"detail": "..."}) — sem isso, o
+    // texto cru (incluindo as chaves/aspas do JSON) aparecia direto na tela
+    // pra pessoa (ex: no aviso de "concorrente já cadastrado"), em vez da
+    // mensagem legível que o back escreveu. Mesmo padrão já usado em
+    // rawClient.js pro lado Node (lá a chave é "error", não "detail").
+    let message = `${res.status} ${res.statusText}`
+    try {
+      const body = await res.json()
+      if (body?.detail) message = body.detail
+    } catch {
+      // resposta sem JSON — mantém a mensagem padrão
+    }
+    throw new Error(message)
   }
   if (res.status === 204) return null
   return res.json()

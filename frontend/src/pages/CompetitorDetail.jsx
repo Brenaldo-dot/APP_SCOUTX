@@ -95,11 +95,11 @@ export default function CompetitorDetail() {
           </LinkChip>
         </div>
         <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-          Abre a busca por "{competitor.domain}" direto na fonte — funciona mesmo se a raspagem automática falhar ou
+          Abre a busca por "{competitor.domain}" direto na fonte, funciona mesmo se a raspagem automática falhar ou
           não achar nada, porque quem navega é você. O TikTok é limitado por natureza da ferramenta deles: a
-          biblioteca pública só cobre países da União Europeia (exigência regulatória local, testado ao vivo — o
+          biblioteca pública só cobre países da União Europeia (exigência regulatória local, testado ao vivo, o
           seletor de país nem lista Colômbia), então não existe uma forma pública de confirmar anúncio de TikTok pra
-          loja colombiana nenhuma, não é falha da raspagem. Já o Google cobre Colômbia normalmente — pode aparecer
+          loja colombiana nenhuma, não é falha da raspagem. Já o Google cobre Colômbia normalmente, pode aparecer
           bem mais anúncio ali do que os que a raspagem automática mostra na aba Anúncios.
         </p>
       </div>

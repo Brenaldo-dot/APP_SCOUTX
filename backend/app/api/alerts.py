@@ -159,7 +159,7 @@ async def send_test_alert(
         db,
         competitor,
         AlertType.NEW_PRODUCT,
-        "🧪 Alerta de teste — se essa mensagem chegou no Discord, a notificação tá funcionando.",
+        "🧪 Alerta de teste, se essa mensagem chegou no Discord, a notificação tá funcionando.",
     )
     db.commit()
     db.refresh(alert)

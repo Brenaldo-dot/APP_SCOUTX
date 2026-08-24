@@ -298,6 +298,10 @@ async function analyzeStore(rawUrl, fetchImpl) {
       priceMax: max,
       variantCount,
       imageCount: images.length,
+      // Só a primeira imagem (capa do produto na listagem) — pedido do
+      // usuário pra Espionar Loja mostrar foto igual Produtos já mostra,
+      // sem precisar baixar/guardar a galeria inteira de cada produto.
+      mainImageUrl: images[0]?.src || null,
       imageKeys: images.map((img) => imageKey(img.src)).filter(Boolean),
       inBestsellerCollection: bestsellerHit ? bestsellerHit.collectionTitle : null,
       bestsellerPosition: bestsellerHit ? bestsellerHit.position : null,

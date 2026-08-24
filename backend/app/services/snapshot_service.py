@@ -132,7 +132,7 @@ async def _create_product(db: Session, competitor: Competitor, item: dict, dup_o
             db,
             competitor,
             AlertType.DUPLICATE_DETECTED,
-            f"Produto duplicado detectado → {item['title']} em {competitor.name} — sinal de escala",
+            f"Produto duplicado detectado → {item['title']} em {competitor.name}, sinal de escala",
             product=product,
         )
     return product
@@ -211,7 +211,7 @@ async def _diff_product(
             db,
             competitor,
             AlertType.DUPLICATE_DETECTED,
-            f"Produto duplicado detectado → {product.title} em {competitor.name} — sinal de escala",
+            f"Produto duplicado detectado → {product.title} em {competitor.name}, sinal de escala",
             product=product,
         )
 

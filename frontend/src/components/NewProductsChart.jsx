@@ -76,7 +76,7 @@ export default function NewProductsChart({ competitorId, operation, range }) {
       </ResponsiveContainer>
       {total === 0 && (
         <p className="mt-1 text-center text-xs text-[var(--text-muted)]">
-          Nenhum produto novo detectado nesse período ainda — o catálogo atual entrou todo de uma vez no cadastro; o
+          Nenhum produto novo detectado nesse período ainda, o catálogo atual entrou todo de uma vez no cadastro. O
           sinal aparece a partir de agora, conforme os snapshots diários forem rodando.
         </p>
       )}

@@ -211,7 +211,7 @@ async def ingest_search_results(
                 competitor,
                 AlertType.WINNING_AD,
                 f"Anúncio ativo há {ad.days_active}+ dias → {ad.creative_text or ad.library_url} "
-                f"em {competitor.name} — pode estar convertendo",
+                f"em {competitor.name}, pode estar convertendo",
                 product=product,
                 ad=ad,
             )
@@ -267,8 +267,8 @@ async def _mark_killed_ads(
             db,
             competitor,
             AlertType.AD_KILLED,
-            f"Anúncio pausado → {ad.creative_text or ad.library_url} em {competitor.name} "
-            "— produto possivelmente morto",
+            f"Anúncio pausado → {ad.creative_text or ad.library_url} em {competitor.name}, "
+            "produto possivelmente morto",
             product=ad.product,
             ad=ad,
         )

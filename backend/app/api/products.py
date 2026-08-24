@@ -1,5 +1,6 @@
 """Produtos descobertos por loja + histórico de eventos e score."""
 
+import html
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -151,6 +152,7 @@ def list_hot_products(
     min_score: int = Query(HOT_MIN_SCORE, ge=0, le=100),
     operation: str | None = None,
     as_user_id: int | None = None,
+    q: str | None = None,
     sort: Literal["score", "active_ads", "ad_duration"] = "score",
     has_supplier: bool = False,
     growing_only: bool = False,
@@ -170,10 +172,11 @@ def list_hot_products(
     alguém roda o snapshot diário manualmente, então travar em `date==hoje`
     faria essa tela voltar vazia sempre que o último cálculo foi ontem.
 
-    `has_supplier`/`growing_only` e `sort=active_ads`/`ad_duration` (pedido
-    do usuário: filtros de mais anúncios ativos, fornecedor conectado, mais
-    tempo de anúncio ativo, anúncios crescendo) precisam ser aplicados ANTES
-    de paginar — senão a página 2 não bate com o que a página 1 já mostrou.
+    `q` (busca por nome), `has_supplier`/`growing_only` e
+    `sort=active_ads`/`ad_duration` (pedido do usuário: filtros de mais
+    anúncios ativos, fornecedor conectado, mais tempo de anúncio ativo,
+    anúncios crescendo) precisam ser aplicados ANTES de paginar, senão a
+    página 2 não bate com o que a página 1 já mostrou.
     """
     target_user = resolve_target_user(current_user, as_user_id)
     latest_by_product: dict[int, ProductScore] = {}
@@ -199,6 +202,13 @@ def list_hot_products(
     product_ids_all = [row.product_id for row in qualifying_all]
     products = {p.id: p for p in db.query(Product).filter(Product.id.in_(product_ids_all))} if product_ids_all else {}
 
+    if q and q.strip():
+        term = q.strip().lower()
+        qualifying_all = [
+            row
+            for row in qualifying_all
+            if products.get(row.product_id) and term in products[row.product_id].title.lower()
+        ]
     if has_supplier:
         qualifying_all = [
             row for row in qualifying_all if products.get(row.product_id) and products[row.product_id].supplier_id
@@ -340,9 +350,13 @@ async def preview_product_page(
 
 
 def _preview_error_page(target_url: str) -> str:
+    # html.escape aqui é defesa em profundidade (achado em auditoria):
+    # target_url vem de domain + product.handle (slug gerado pela própria
+    # Shopify, não é texto livre digitado por alguém), risco baixo, mas
+    # escapar não custa nada e fecha a brecha por completo.
     return f"""<!doctype html>
 <html><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
 font-family:sans-serif;color:#64748b;text-align:center;padding:16px;">
 <p>Não foi possível carregar a página agora.<br>
-<a href="{target_url}" target="_blank" style="color:#2563eb;">Abrir direto na loja ↗</a></p>
+<a href="{html.escape(target_url)}" target="_blank" style="color:#2563eb;">Abrir direto na loja ↗</a></p>
 </body></html>"""

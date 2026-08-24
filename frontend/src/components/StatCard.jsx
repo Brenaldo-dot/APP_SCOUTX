@@ -1,6 +1,17 @@
-export default function StatCard({ label, value, hint, icon }) {
+import { Link } from 'react-router-dom'
+
+// `to` é opcional — sem ele o card fica igual sempre foi (ex: "Usuários" em
+// Usuarios.jsx/Organizacoes.jsx, que não tem uma tela própria pra apontar).
+// Com `to`, o card inteiro vira link (pedido do usuário: clicar em
+// "Concorrentes ativos" no Dashboard já abrir a aba Concorrentes, em vez de
+// só mostrar o número parado).
+export default function StatCard({ label, value, hint, icon, to }) {
+  const Wrapper = to ? Link : 'div'
   return (
-    <div className="group relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5 shadow-sm transition-colors hover:border-brand-500/50">
+    <Wrapper
+      {...(to ? { to } : {})}
+      className="group relative block overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5 shadow-sm transition-colors hover:border-brand-500/50"
+    >
       {/* Glow no canto — mesmo tratamento visual dos cards de destaque da
           referência (cards "hub"), na cor da marca em vez de roxo. */}
       <div className="pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full bg-gradient-to-br from-brand-500/25 to-transparent blur-2xl transition-opacity group-hover:opacity-90" />
@@ -22,6 +33,6 @@ export default function StatCard({ label, value, hint, icon }) {
           </span>
         )}
       </div>
-    </div>
+    </Wrapper>
   )
 }

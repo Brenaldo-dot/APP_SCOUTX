@@ -329,7 +329,7 @@ export default function Usuarios() {
           <h3 className="mb-3.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Criar novo usuário</h3>
           {organizations?.length === 0 && (
             <p className="mb-3.5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-500">
-              Nenhuma organização criada ainda — só dá pra criar usuário collaborator depois de ter uma. Crie a
+              Nenhuma organização criada ainda, só dá pra criar usuário collaborator depois de ter uma. Crie a
               organização primeiro na aba{' '}
               <Link to="/organizacoes" className="underline">
                 Organizações
@@ -388,14 +388,14 @@ export default function Usuarios() {
       <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
         <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Concorrentes por usuário</h3>
         <p className="mb-3.5 text-sm text-[var(--text-tertiary)]">
-          Cada usuário só vê os próprios concorrentes — isto aqui é a visão de auditoria, só pra admin. Um mesmo
+          Cada usuário só vê os próprios concorrentes, isto aqui é a visão de auditoria, só pra admin. Um mesmo
           domínio cadastrado por duas pessoas conta pra cada uma (compartilham o dado raspado, mas cada uma tem sua
           própria lista).
         </p>
 
         <input
           type="text"
-          placeholder="Buscar por domínio ou nome da loja — ex: naiastore.com"
+          placeholder="Buscar por domínio ou nome da loja (ex: naiastore.com)"
           value={trackerQuery}
           onChange={(e) => setTrackerQuery(e.target.value)}
           className={`${inputClass} mb-3.5 w-full max-w-sm`}
@@ -510,7 +510,7 @@ export default function Usuarios() {
           </h3>
           <p className="mt-1 text-sm text-[var(--text-tertiary)]">
             Só administradores veem esta tabela. IP repetido em várias contas ou uma conta logando de muitos IPs
-            diferentes pode indicar senha compartilhada ou acesso indevido — vale checar.
+            diferentes pode indicar senha compartilhada ou acesso indevido, vale checar.
           </p>
           <div className="mt-3.5 flex flex-wrap gap-2">
             <input
@@ -697,7 +697,7 @@ export default function Usuarios() {
           <History size={14} /> Log de auditoria
         </h3>
         <p className="mb-3.5 text-sm text-[var(--text-tertiary)]">
-          Toda ação administrativa fica registrada aqui — quem promoveu, suspendeu, resetou senha ou removeu quem, e
+          Toda ação administrativa fica registrada aqui: quem promoveu, suspendeu, resetou senha ou removeu quem, e
           quando. Últimas 100 ações.
         </p>
         {auditLog === null && <p className="text-sm text-[var(--text-muted)]">Carregando…</p>}
@@ -779,7 +779,7 @@ export default function Usuarios() {
           >
             <h3 className="text-sm font-semibold text-[var(--text-primary)]">Trocar senha de {passwordEdit.user.name}</h3>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
-              A pessoa passa a usar essa senha nova pro próximo login — avise ela diretamente.
+              A pessoa passa a usar essa senha nova pro próximo login, avise ela diretamente.
             </p>
             <input
               type="password"

@@ -125,10 +125,11 @@ export default function Dashboard() {
           label="Concorrentes ativos"
           value={summary.active_competitors}
           hint={`${summary.total_competitors} cadastrados`}
+          to="/concorrentes"
         />
-        <StatCard icon="📦" label="Produtos monitorados" value={summary.total_products} />
-        <StatCard icon="🔥" label="Produtos Quentes" value={summary.hot_products} hint="score 56+/100" />
-        <StatCard icon="🔔" label="Alertas (24h)" value={summary.alerts_last_24h} />
+        <StatCard icon="📦" label="Produtos monitorados" value={summary.total_products} to="/produtos" />
+        <StatCard icon="🔥" label="Produtos Quentes" value={summary.hot_products} hint="score 56+/100" to="/produtos-quentes" />
+        <StatCard icon="🔔" label="Alertas (24h)" value={summary.alerts_last_24h} to="/alertas" />
       </div>
 
       {highlights && (
@@ -222,13 +223,13 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-4">
             <h3 className="mb-1 text-base font-semibold">Atividade recente</h3>
-            <p className="mb-3 text-xs text-[var(--text-muted)]">Alertas por dia nas últimas 12 semanas — bate o olho e vê se teve semana parada</p>
+            <p className="mb-3 text-xs text-[var(--text-muted)]">Alertas por dia nas últimas 12 semanas, bate o olho e vê se teve semana parada</p>
             <ActivityHeatmap data={heatmap} />
           </div>
 
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-4">
             <h3 className="mb-1 text-base font-semibold">Quem mais alertou</h3>
-            <p className="mb-3 text-xs text-[var(--text-muted)]">Últimos 30 dias — quem tá puxando o heatmap pra cima</p>
+            <p className="mb-3 text-xs text-[var(--text-muted)]">Últimos 30 dias, quem tá puxando o heatmap pra cima</p>
             {alertsByCompetitor && alertsByCompetitor.length > 0 ? (
               <div className="space-y-2.5">
                 {alertsByCompetitor.map((row, i) => {
@@ -304,19 +305,19 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-4 lg:col-span-2">
           <h3 className="mb-1 text-base font-semibold">Produtos novos por dia</h3>
-          <p className="mb-2 text-xs text-[var(--text-muted)]">Quando cada loja sobe produto — queda e alta de verdade, dia a dia</p>
+          <p className="mb-2 text-xs text-[var(--text-muted)]">Quando cada loja sobe produto, queda e alta de verdade, dia a dia</p>
           <NewProductsChart competitorId={chartCompetitorId} operation={operation} range={range} />
         </div>
 
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-4 lg:col-span-2">
           <h3 className="mb-1 text-base font-semibold">Anúncios encontrados por dia</h3>
-          <p className="mb-2 text-xs text-[var(--text-muted)]">Por plataforma — ritmo de criativo novo indica se o concorrente tá escalando mídia</p>
+          <p className="mb-2 text-xs text-[var(--text-muted)]">Por plataforma, ritmo de criativo novo indica se o concorrente tá escalando mídia</p>
           <AdsTimelineChart competitorId={chartCompetitorId} operation={operation} range={range} />
         </div>
 
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-4">
           <h3 className="mb-1 text-base font-semibold">Produtos por faixa de score</h3>
-          <p className="mb-2 text-xs text-[var(--text-muted)]">Raio-x de agora — quantos produtos em cada faixa (Frio → Escalando)</p>
+          <p className="mb-2 text-xs text-[var(--text-muted)]">Raio-x de agora, quantos produtos em cada faixa (Frio → Escalando)</p>
           <ScoreDistributionChart competitorId={chartCompetitorId} operation={operation} />
         </div>
       </div>

@@ -41,11 +41,13 @@ export default function HotProducts() {
   const sort = searchParams.get('sort') || 'score'
   const hasSupplier = searchParams.get('has_supplier') === '1'
   const growingOnly = searchParams.get('growing_only') === '1'
+  const q = searchParams.get('q') || ''
 
   const [competitors, setCompetitors] = useState([])
   const [products, setProducts] = useState(null)
   const [total, setTotal] = useState(0)
   const [error, setError] = useState(null)
+  const [searchInput, setSearchInput] = useState(q)
 
   useEffect(() => {
     api.listCompetitors({ operation }).then(setCompetitors).catch(() => {})
@@ -66,6 +68,7 @@ export default function HotProducts() {
         sort,
         has_supplier: hasSupplier || undefined,
         growing_only: growingOnly || undefined,
+        q: q || undefined,
         page,
         limit: PAGE_SIZE,
       })
@@ -74,7 +77,27 @@ export default function HotProducts() {
         setTotal(total)
       })
       .catch((e) => setError(e.message))
-  }, [operation, sort, hasSupplier, growingOnly, page])
+  }, [operation, sort, hasSupplier, growingOnly, q, page])
+
+  // Busca com debounce — mesmo padrão de Products.jsx, sem isso dispararia 1
+  // request por letra digitada. Não usa updateFilter (abaixo) de propósito:
+  // aquele trata `value === 'score'` como "volta ao padrão, apaga o
+  // parâmetro" (pensado pro Select de ordenação) — reaproveitar aqui
+  // apagaria a busca por engano se alguém procurasse um produto que tivesse
+  // literalmente "score" no nome.
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (searchInput !== q) {
+        const next = new URLSearchParams(searchParams)
+        if (searchInput.trim()) next.set('q', searchInput.trim())
+        else next.delete('q')
+        next.delete('page')
+        setSearchParams(next)
+      }
+    }, 400)
+    return () => clearTimeout(timeout)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchInput])
 
   function goToPage(nextPage) {
     const next = new URLSearchParams(searchParams)
@@ -112,13 +135,24 @@ export default function HotProducts() {
         <h2 className="text-xl font-semibold">Produtos Quentes{total > 0 ? ` (${total})` : ''}</h2>
         <p className="text-sm text-[var(--text-muted)]">
           Score 56+ (Quente ou Escalando). Os dois sinais que mais pesam: há quanto tempo o anúncio do produto tá no
-          ar (7d já é bom indício, 30d é quase certeza) e a quantidade de anúncios ativos do produto crescendo dia a
-          dia — ver <span className="font-mono text-xs">scoring_service.py</span>. Produto recém-visto começa em 0:
-          todo sinal baseado em histórico só aparece depois de alguns dias de monitoramento.
+          ar (7d já é bom indício, 30d é quase certeza), e a quantidade de anúncios ativos do produto crescendo dia a
+          dia. Produto recém-visto começa em 0: todo sinal baseado em histórico só aparece depois de alguns dias de
+          monitoramento.
         </p>
       </div>
 
       <div className="flex flex-wrap items-end gap-4 rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-4">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-[var(--text-muted)]">Pesquisar produto</label>
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Nome do produto…"
+            className="w-56 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
+          />
+        </div>
+
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-[var(--text-muted)]">Ordenar por</label>
           <Select
@@ -153,7 +187,11 @@ export default function HotProducts() {
       {products && products.length === 0 && (
         <EmptyState
           title="Nenhum produto quente ainda"
-          subtitle="Nenhum produto bateu score 56+ até agora — normal em lojas recém-cadastradas, que ainda não acumularam histórico suficiente. Volte a checar depois do próximo snapshot diário."
+          subtitle={
+            q
+              ? `Nenhum produto quente com "${q}" no nome, com esses filtros.`
+              : 'Nenhum produto bateu score 56+ até agora, normal em lojas recém-cadastradas que ainda não acumularam histórico suficiente. Volte a checar depois do próximo snapshot diário.'
+          }
         />
       )}
 

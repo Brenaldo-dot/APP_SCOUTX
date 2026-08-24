@@ -13,9 +13,9 @@ import { formatDateTime } from '../utils/date.js'
 // MESMO limite (1 usuário por conta/equipe, ver PLAN_LIMITS em db.js) — só
 // país e concorrente diferenciam plano.
 const PLAN_OPTIONS = [
-  { value: 'solo', label: 'Standard — 1 país, até 70 concorrentes' },
-  { value: 'pro', label: 'Pro — até 3 países, até 250 concorrentes' },
-  { value: 'agencia', label: 'Enterprise — países e concorrentes ilimitados' },
+  { value: 'solo', label: 'Standard: 1 país, até 50 concorrentes' },
+  { value: 'pro', label: 'Pro: até 3 países, até 250 concorrentes' },
+  { value: 'agencia', label: 'Enterprise: países e concorrentes ilimitados' },
 ]
 
 const CYCLE_OPTIONS = [
@@ -162,7 +162,7 @@ export default function Organizacoes() {
       <div>
         <h2 className="text-xl font-semibold">Organizações</h2>
         <p className="text-sm text-[var(--text-muted)]">
-          Cada organização é uma assinatura — plano, ciclo de cobrança e validade compartilhados por todos os
+          Cada organização é uma assinatura: plano, ciclo de cobrança e validade compartilhados por todos os
           usuários dela. Ativação ainda é manual: crie a organização aqui depois de fechar a venda, depois crie os
           usuários dela na aba Usuários.
         </p>
@@ -191,7 +191,7 @@ export default function Organizacoes() {
           />
           <input
             type="text"
-            placeholder="Observação (opcional — valor pago, canal de venda)"
+            placeholder="Observação (opcional: valor pago, canal de venda)"
             value={form.notes}
             onChange={(e) => setForm({ ...form, notes: e.target.value })}
             className={inputClass}
@@ -332,7 +332,7 @@ export default function Organizacoes() {
           <div className="w-full max-w-sm rounded-2xl bg-[var(--bg-surface)] p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-sm font-semibold text-[var(--text-primary)]">Editar validade de {expiryModal.org.name}</h3>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
-              Escape-hatch manual — cortesia, correção, ou cancelamento antecipado (data no passado bloqueia o login
+              Ajuste manual: cortesia, correção, ou cancelamento antecipado (data no passado bloqueia o login
               na hora).
             </p>
             <input

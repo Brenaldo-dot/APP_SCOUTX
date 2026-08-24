@@ -124,12 +124,12 @@ export default function Alerts() {
       <div>
         <h2 className="text-xl font-semibold">Alertas</h2>
         <p className="text-sm text-[var(--text-muted)]">
-          Separado por assunto — fornecedor, anúncios, produto etc. cada um no seu canto, em vez de um fluxo só
-          misturando tudo. Histórico completo, sempre — nada some por causa de outro alerta mais novo.
+          Separado por assunto: fornecedor, anúncios, produto etc., cada um no seu canto, em vez de um fluxo só
+          misturando tudo. Histórico completo, sempre: nada some por causa de outro alerta mais novo.
         </p>
         {isStandardPlan && (
           <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-400">
-            🔒 Plano Standard mostra só as 5 notificações mais recentes, tudo junto — categorias separadas (Produto,
+            🔒 Plano Standard mostra só as 5 notificações mais recentes, tudo junto. Categorias separadas (Produto,
             Fornecedor, Anúncios…) e o histórico completo são exclusivos do plano Pro.
           </div>
         )}
@@ -154,7 +154,7 @@ export default function Alerts() {
                 key={cat.key}
                 onClick={() => selectCategory(cat.key)}
                 disabled={locked || !counts.by_category[cat.key]}
-                title={locked ? 'Disponível no plano Pro — assine pra separar os alertas por categoria.' : undefined}
+                title={locked ? 'Disponível no plano Pro, assine pra separar os alertas por categoria.' : undefined}
                 className={`relative flex items-center gap-2 rounded-full border py-1.5 pl-1.5 pr-3.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                   category === cat.key
                     ? 'border-brand-600 bg-brand-600 text-white'
@@ -231,7 +231,7 @@ export default function Alerts() {
       {isStandardPlan && alerts && alerts.length > 0 && (
         <p className="text-center text-xs text-[var(--text-muted)]">
           Mostrando as {alerts.length} notificações mais recentes
-          {counts?.total > alerts.length ? ` de ${counts.total}` : ''} — assine o plano Pro pra ver o histórico
+          {counts?.total > alerts.length ? ` de ${counts.total}` : ''}, assine o plano Pro pra ver o histórico
           completo, sem limite.
         </p>
       )}

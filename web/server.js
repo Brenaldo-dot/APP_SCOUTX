@@ -74,11 +74,15 @@ function applyPreviewCsp(res) {
 }
 
 function previewErrorPage(targetUrl) {
+  // escapeHtml aqui é defesa em profundidade (achado em auditoria): URL.toString()
+  // já garante que aspas virem %22 e nunca quebrem o atributo href sozinhas,
+  // mas escapar mesmo assim custa nada e fecha a brecha por completo, sem
+  // depender de uma garantia de spec de outro objeto.
   return `<!doctype html>
 <html><body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
 font-family:sans-serif;color:#64748b;text-align:center;padding:16px;">
 <p>Não foi possível carregar a página agora.<br>
-<a href="${targetUrl}" target="_blank" style="color:#2563eb;">Abrir direto na loja ↗</a></p>
+<a href="${escapeHtml(targetUrl)}" target="_blank" style="color:#2563eb;">Abrir direto na loja ↗</a></p>
 </body></html>`;
 }
 
@@ -151,6 +155,41 @@ setInterval(() => {
     const stillBlocked = entry.blockedUntil && entry.blockedUntil > now;
     const windowActive = now - entry.windowStart <= IP_ATTEMPT_WINDOW_MS;
     if (!stillBlocked && !windowActive) ipLoginFailures.delete(ip);
+  }
+}, 30 * 60 * 1000).unref();
+
+// Revisão de segurança (achado em auditoria): Buscar Fornecedor, Espionar
+// Loja e a prévia de Espionar Loja fazem o SERVIDOR buscar uma URL externa
+// arbitrária (com proteção de SSRF em safe-fetch.js, mas sem NENHUM limite
+// de volume) — sem isso, uma conta autenticada (não precisa ser admin)
+// conseguia martelar essas rotas em alta frequência, usando o ScoutX como
+// "proxy" de requisição contra qualquer host público (não é bypass da
+// proteção de rede interna, é abuso de volume: sobrecarregar o alvo de
+// terceiros, gastar CPU/banda daqui, ou até fazer o IP do Railway ser
+// bloqueado pelo alvo). Por USUÁRIO (não por IP) — mesma rede corporativa
+// (vários colegas atrás do mesmo IP) não deve se atrapalhar.
+const FETCH_ROUTE_WINDOW_MS = 60 * 1000;
+const FETCH_ROUTE_LIMIT = 20;
+const fetchRouteUsage = new Map();
+
+function checkFetchRouteLimit(userId) {
+  const now = Date.now();
+  const entry = fetchRouteUsage.get(userId);
+  if (!entry || now - entry.windowStart > FETCH_ROUTE_WINDOW_MS) {
+    fetchRouteUsage.set(userId, { count: 1, windowStart: now });
+    return { blocked: false };
+  }
+  entry.count += 1;
+  if (entry.count > FETCH_ROUTE_LIMIT) {
+    return { blocked: true, retryAfterSeconds: Math.ceil((entry.windowStart + FETCH_ROUTE_WINDOW_MS - now) / 1000) };
+  }
+  return { blocked: false };
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [userId, entry] of fetchRouteUsage) {
+    if (now - entry.windowStart > FETCH_ROUTE_WINDOW_MS) fetchRouteUsage.delete(userId);
   }
 }, 30 * 60 * 1000).unref();
 
@@ -391,7 +430,7 @@ function createApp() {
     res.send(
       authPage({
         title: "Criar conta de administrador",
-        subtitle: "Primeira vez usando essa ferramenta — crie a conta principal.",
+        subtitle: "Primeira vez usando essa ferramenta, crie a conta principal.",
         action: "/setup",
         showNameField: true,
       })
@@ -409,7 +448,7 @@ function createApp() {
       return res.status(400).send(
         authPage({
           title: "Criar conta de administrador",
-          subtitle: "Primeira vez usando essa ferramenta — crie a conta principal.",
+          subtitle: "Primeira vez usando essa ferramenta, crie a conta principal.",
           action: "/setup",
           showNameField: true,
           error: "Preencha nome, email e uma senha com pelo menos 8 caracteres.",
@@ -420,10 +459,10 @@ function createApp() {
       return res.status(400).send(
         authPage({
           title: "Criar conta de administrador",
-          subtitle: "Primeira vez usando essa ferramenta — crie a conta principal.",
+          subtitle: "Primeira vez usando essa ferramenta, crie a conta principal.",
           action: "/setup",
           showNameField: true,
-          error: "Essa senha já apareceu em vazamentos conhecidos — escolha outra.",
+          error: "Essa senha já apareceu em vazamentos conhecidos, escolha outra.",
         })
       );
     }
@@ -449,7 +488,7 @@ function createApp() {
     return Math.max(1, Math.ceil((new Date(lockedUntil).getTime() - Date.now()) / 60000));
   }
 
-  const PERMANENT_LOCK_MESSAGE = "Conta bloqueada por excesso de tentativas — peça pra um administrador redefinir sua senha (aba Usuários → 🔑 Senha).";
+  const PERMANENT_LOCK_MESSAGE = "Conta bloqueada por excesso de tentativas, peça pra um administrador redefinir sua senha (aba Usuários → 🔑 Senha).";
 
   app.post("/login", async (req, res) => {
     const email = String(req.body.email || "").trim();
@@ -462,7 +501,7 @@ function createApp() {
           title: "ScoutX",
           subtitle: "Entre com seu email e senha.",
           action: "/login",
-          error: `Muitas tentativas de login vindas daqui — tenta de novo em ${ipLimit.retryAfterMinutes} min.`,
+          error: `Muitas tentativas de login vindas daqui, tenta de novo em ${ipLimit.retryAfterMinutes} min.`,
         })
       );
     }
@@ -476,7 +515,7 @@ function createApp() {
       const permanent = new Date(user.locked_until).getUTCFullYear() >= 9000;
       const error = permanent
         ? PERMANENT_LOCK_MESSAGE
-        : `Muitas tentativas erradas — tenta de novo em ${minutesLeft(user.locked_until)} min.`;
+        : `Muitas tentativas erradas, tenta de novo em ${minutesLeft(user.locked_until)} min.`;
       return res.status(423).send(
         authPage({ title: "ScoutX", subtitle: "Entre com seu email e senha.", action: "/login", error })
       );
@@ -489,7 +528,7 @@ function createApp() {
       if (user) {
         const { lockedUntil, permanent } = await db.recordFailedLogin(user.id);
         if (permanent) error = PERMANENT_LOCK_MESSAGE;
-        else if (lockedUntil) error = `Muitas tentativas erradas — conta bloqueada por ${minutesLeft(lockedUntil)} min.`;
+        else if (lockedUntil) error = `Muitas tentativas erradas, conta bloqueada por ${minutesLeft(lockedUntil)} min.`;
       }
       return res.status(401).send(
         authPage({ title: "ScoutX", subtitle: "Entre com seu email e senha.", action: "/login", error })
@@ -520,7 +559,7 @@ function createApp() {
           title: "ScoutX",
           subtitle: "Entre com seu email e senha.",
           action: "/login",
-          error: "O plano da sua organização venceu — fale com um administrador pra renovar.",
+          error: "O plano da sua organização venceu, fale com um administrador pra renovar.",
         })
       );
     }
@@ -574,7 +613,7 @@ function createApp() {
     if (appUser.org_expires_at && new Date(appUser.org_expires_at) < new Date()) {
       res.setHeader("Set-Cookie", serializeCookie("session", "", { maxAge: 0, secure: isHttps }));
       if (req.path.startsWith("/api/")) {
-        return res.status(403).json({ error: "O plano da sua organização venceu — fale com um administrador pra renovar." });
+        return res.status(403).json({ error: "O plano da sua organização venceu, fale com um administrador pra renovar." });
       }
       return res.redirect("/login");
     }
@@ -620,7 +659,7 @@ function createApp() {
       return res.status(400).json({ error: "Envie uma imagem válida." });
     }
     if (avatarDataUrl.length > MAX_AVATAR_LENGTH) {
-      return res.status(400).json({ error: "Essa imagem ficou grande demais — tenta uma foto menor." });
+      return res.status(400).json({ error: "Essa imagem ficou grande demais, tenta uma foto menor." });
     }
     const avatarUrl = await db.updateUserAvatar(req.appUser.id, avatarDataUrl);
     res.json({ avatarUrl });
@@ -642,7 +681,7 @@ function createApp() {
     if (ipLimit.blocked) {
       return res
         .status(429)
-        .json({ error: `Muitas tentativas vindas daqui — tenta de novo em ${ipLimit.retryAfterMinutes} min.` });
+        .json({ error: `Muitas tentativas vindas daqui, tenta de novo em ${ipLimit.retryAfterMinutes} min.` });
     }
 
     const { currentPassword, newPassword } = req.body || {};
@@ -658,7 +697,7 @@ function createApp() {
       return res.status(401).json({ error: "Senha atual incorreta." });
     }
     if (await isPasswordPwned(newPassword)) {
-      return res.status(400).json({ error: "Essa senha já apareceu em vazamentos conhecidos — escolha outra." });
+      return res.status(400).json({ error: "Essa senha já apareceu em vazamentos conhecidos, escolha outra." });
     }
     resetIpLoginFailures(req.ip);
     const passwordHash = await bcrypt.hash(newPassword, 10);
@@ -738,7 +777,7 @@ function createApp() {
       const limits = db.planLimitsFor(organization.plan);
       if (currentCount >= limits.maxUsers) {
         return res.status(400).json({
-          error: `A organização "${organization.name}" já está no limite de ${limits.maxUsers} usuário(s) do plano ${limits.label} — mude o plano ou remova outro usuário antes.`,
+          error: `A organização "${organization.name}" já está no limite de ${limits.maxUsers} usuário(s) do plano ${limits.label}, mude o plano ou remova outro usuário antes.`,
         });
       }
     }
@@ -746,7 +785,7 @@ function createApp() {
     const existing = await db.findUserByEmail(email);
     if (existing) return res.status(409).json({ error: "Já existe um usuário com esse email." });
     if (await isPasswordPwned(password)) {
-      return res.status(400).json({ error: "Essa senha já apareceu em vazamentos conhecidos — escolha outra." });
+      return res.status(400).json({ error: "Essa senha já apareceu em vazamentos conhecidos, escolha outra." });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
@@ -778,7 +817,7 @@ function createApp() {
     if (!target || target.role !== "admin" || target.suspended) return null;
     const activeAdmins = await db.countActiveAdmins();
     if (activeAdmins <= 1) {
-      return `Não é possível ${actionLabel} o último administrador ativo — promova outra pessoa a admin antes.`;
+      return `Não é possível ${actionLabel} o último administrador ativo, promova outra pessoa a admin antes.`;
     }
     return null;
   }
@@ -798,7 +837,7 @@ function createApp() {
       return res.status(400).json({ error: "A senha precisa ter no mínimo 8 caracteres." });
     }
     if (password !== undefined && (await isPasswordPwned(password))) {
-      return res.status(400).json({ error: "Essa senha já apareceu em vazamentos conhecidos — escolha outra." });
+      return res.status(400).json({ error: "Essa senha já apareceu em vazamentos conhecidos, escolha outra." });
     }
     if (role !== undefined && role !== "admin") {
       const error = await assertNotLastActiveAdmin(id, "remover o admin de");
@@ -947,6 +986,37 @@ function createApp() {
         `${db.planLimitsFor(org.plan).label} → ${newLimits.label} · ${billingCycle}` +
           (currentCount > newLimits.maxUsers ? ` (⚠️ já tem ${currentCount} usuário(s), acima do novo limite)` : "")
       );
+
+      // Revisão de segurança: rebaixar pra Standard tinha que travar alerta
+      // no Discord na hora do PRÓXIMO envio (ver settings.py::set_discord_webhook),
+      // mas quem já tinha configurado um webhook enquanto era Pro continuava
+      // recebendo de graça pra sempre — create_alert nunca reconfere o plano
+      // no momento de mandar. Limpa aqui, na hora da troca, pra não depender
+      // de ninguém lembrar de fazer isso manualmente. Best-effort: se o
+      // FastAPI estiver fora do ar nesse instante, só loga — não pode travar
+      // a troca de plano em si, que já foi salva no banco daqui.
+      if (plan === "solo" && org.plan !== "solo" && MINERADOR_API_URL) {
+        try {
+          const memberIds = await db.getOrgMemberIds(id);
+          if (memberIds.length > 0) {
+            const clearResp = await fetch(`${MINERADOR_API_URL.replace(/\/+$/, "")}/api/settings/discord/clear-for-users`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-User-Id": String(req.appUser.id),
+                "X-User-Is-Admin": "true",
+                "X-Internal-Secret": INTERNAL_API_SECRET,
+              },
+              body: JSON.stringify({ user_ids: memberIds }),
+            });
+            if (!clearResp.ok) {
+              console.error(`Falha ao limpar webhooks do Discord da organização ${id} após rebaixar pra Standard: HTTP ${clearResp.status}`);
+            }
+          }
+        } catch (err) {
+          console.error(`Erro ao limpar webhooks do Discord da organização ${id} após rebaixar pra Standard:`, err);
+        }
+      }
     } else if (expiresAt !== undefined) {
       updated = await db.updateOrganizationExpiry(id, new Date(expiresAt));
       await db.logAdminAction(req.appUser.id, req.appUser.name, null, org.name, "org_expiry_edited", null);
@@ -1092,6 +1162,10 @@ function createApp() {
   // ---------- Rotas da ferramenta (mesmas do app desktop) ----------
 
   app.get("/api/buscar", async (req, res) => {
+    const limit = checkFetchRouteLimit(req.appUser.id);
+    if (limit.blocked) {
+      return res.status(429).json({ error: `Muitas buscas em pouco tempo, tenta de novo em ${limit.retryAfterSeconds}s.` });
+    }
     const raw = req.query.url;
     if (!raw) {
       return res.status(400).json({ error: "Parâmetro 'url' é obrigatório" });
@@ -1151,6 +1225,10 @@ function createApp() {
   });
 
   app.get("/api/spy", async (req, res) => {
+    const limit = checkFetchRouteLimit(req.appUser.id);
+    if (limit.blocked) {
+      return res.status(429).json({ error: `Muitas análises em pouco tempo, tenta de novo em ${limit.retryAfterSeconds}s.` });
+    }
     const raw = req.query.url;
     if (!raw) {
       return res.status(400).json({ error: "Parâmetro 'url' é obrigatório" });
@@ -1194,6 +1272,10 @@ function createApp() {
   // mesmo tratamento do preview_product_page lá (ver comentário de
   // sanitizePreviewHtml acima), só que buscando a URL recebida direto.
   app.get("/api/spy-preview", async (req, res) => {
+    const limit = checkFetchRouteLimit(req.appUser.id);
+    if (limit.blocked) {
+      return res.status(429).json({ error: `Muitas prévias em pouco tempo, tenta de novo em ${limit.retryAfterSeconds}s.` });
+    }
     const raw = req.query.url;
     let target;
     try {
