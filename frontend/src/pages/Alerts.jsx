@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { AlertTriangle, DollarSign, Factory, LayoutGrid, Megaphone, Package, Rocket } from 'lucide-react'
+import { AlertTriangle, DollarSign, Factory, LayoutGrid, Lock, Megaphone, Package, Rocket } from 'lucide-react'
 import { api } from '../api/client.js'
 import EmptyState from '../components/EmptyState.jsx'
 import Pagination from '../components/Pagination.jsx'
@@ -10,7 +10,9 @@ import ProductThumb from '../components/ProductThumb.jsx'
 import PriceChangeRow from '../components/PriceChangeRow.jsx'
 import LedIcon from '../components/LedIcon.jsx'
 import { formatDateTime, formatRelativeTime, isRecent } from '../utils/date.js'
+import { readCategoryVisits, markCategoryVisited } from '../utils/alertsVisit.js'
 import { useOperation } from '../context/OperationContext.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 
 const PAGE_SIZE = 50
 
@@ -26,19 +28,49 @@ const CATEGORY_ICONS = {
   outros: AlertTriangle,
 }
 
+// Bolinha de não lido tipo WhatsApp — só aparece com contagem > 0, some
+// sozinha na próxima visita (a marca de "visto" já foi atualizada pra agora
+// assim que a página abriu, ver useEffect abaixo).
+function UnreadDot({ count }) {
+  if (!count) return null
+  return (
+    <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow-md ring-2 ring-[var(--bg-page)]">
+      {count > 99 ? '99+' : count}
+    </span>
+  )
+}
+
 export default function Alerts() {
   const { operation } = useOperation()
+  const { me } = useAuth()
+  // Standard (chave interna "solo") só vê as 5 notificações mais recentes,
+  // sempre na visão "Todos" — o back já ignora `category` e trava o limite
+  // pra esse plano (backend/app/api/alerts.py), isso aqui só reflete a MESMA
+  // regra na tela (categoria sempre aparece como "Todos" selecionado, nunca
+  // deixa clicar numa categoria) em vez de deixar a pessoa "selecionar" uma
+  // aba que o back vai ignorar silenciosamente.
+  const isStandardPlan = me?.plan === 'solo'
   const [searchParams, setSearchParams] = useSearchParams()
-  const category = searchParams.get('categoria') || ''
+  const category = isStandardPlan ? '' : searchParams.get('categoria') || ''
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1)
 
   const [alerts, setAlerts] = useState(null)
   const [total, setTotal] = useState(0)
   const [counts, setCounts] = useState(null)
+  const [unreadCounts, setUnreadCounts] = useState(null)
   const [error, setError] = useState(null)
 
   useEffect(() => {
     api.getAlertCounts({ operation }).then(setCounts).catch(() => {})
+  }, [operation])
+
+  // Contagem de não lido por categoria — cada uma com seu próprio corte
+  // (ver utils/alertsVisit.js). Só abrir a aba Alertas (visão "Todos") não
+  // marca nada como lido; isso só acontece ao clicar numa categoria de
+  // verdade, em selectCategory abaixo.
+  useEffect(() => {
+    const visits = readCategoryVisits(operation)
+    api.getAlertCounts({ operation, since_map: JSON.stringify(visits) }).then(setUnreadCounts).catch(() => {})
   }, [operation])
 
   useEffect(() => {
@@ -52,6 +84,24 @@ export default function Alerts() {
   }, [operation, category, page])
 
   function selectCategory(key) {
+    // Standard não navega pra categoria nenhuma (botão fica desabilitado,
+    // ver render abaixo) — trava aqui também, defesa extra caso o clique
+    // escape do `disabled` de algum jeito.
+    if (key && isStandardPlan) return
+    // "Todos" (key vazio) é só visão geral, não marca nada como lido — cada
+    // categoria só some quando a pessoa clica nela de verdade.
+    if (key) {
+      markCategoryVisited(operation, key)
+      setUnreadCounts((prev) => {
+        const cleared = prev?.by_category?.[key] || 0
+        if (!cleared) return prev
+        return {
+          ...prev,
+          total: Math.max(0, (prev.total || 0) - cleared),
+          by_category: { ...prev.by_category, [key]: 0 },
+        }
+      })
+    }
     const next = new URLSearchParams(searchParams)
     if (key) next.set('categoria', key)
     else next.delete('categoria')
@@ -77,13 +127,19 @@ export default function Alerts() {
           Separado por assunto — fornecedor, anúncios, produto etc. cada um no seu canto, em vez de um fluxo só
           misturando tudo. Histórico completo, sempre — nada some por causa de outro alerta mais novo.
         </p>
+        {isStandardPlan && (
+          <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-400">
+            🔒 Plano Standard mostra só as 5 notificações mais recentes, tudo junto — categorias separadas (Produto,
+            Fornecedor, Anúncios…) e o histórico completo são exclusivos do plano Pro.
+          </div>
+        )}
       </div>
 
       {counts && (
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => selectCategory('')}
-            className={`flex items-center gap-2 rounded-full border py-1.5 pl-1.5 pr-3.5 text-sm font-medium transition-colors ${
+            className={`relative flex items-center gap-2 rounded-full border py-1.5 pl-1.5 pr-3.5 text-sm font-medium transition-colors ${
               category === '' ? 'border-brand-600 bg-brand-600 text-white' : 'border-[var(--border)] text-[var(--text-tertiary)] hover:bg-[var(--hover-surface)]'
             }`}
           >
@@ -92,19 +148,22 @@ export default function Alerts() {
           </button>
           {ALERT_CATEGORIES.map((cat) => {
             const CatIcon = CATEGORY_ICONS[cat.key]
+            const locked = isStandardPlan
             return (
               <button
                 key={cat.key}
                 onClick={() => selectCategory(cat.key)}
-                disabled={!counts.by_category[cat.key]}
-                className={`flex items-center gap-2 rounded-full border py-1.5 pl-1.5 pr-3.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                disabled={locked || !counts.by_category[cat.key]}
+                title={locked ? 'Disponível no plano Pro — assine pra separar os alertas por categoria.' : undefined}
+                className={`relative flex items-center gap-2 rounded-full border py-1.5 pl-1.5 pr-3.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                   category === cat.key
                     ? 'border-brand-600 bg-brand-600 text-white'
                     : 'border-[var(--border)] text-[var(--text-tertiary)] hover:bg-[var(--hover-surface)]'
                 }`}
               >
-                {category === cat.key ? <CatIcon size={14} /> : <LedIcon Icon={CatIcon} />}
+                {locked ? <Lock size={13} /> : category === cat.key ? <CatIcon size={14} /> : <LedIcon Icon={CatIcon} />}
                 {cat.label} ({counts.by_category[cat.key] || 0})
+                {!locked && <UnreadDot count={unreadCounts?.by_category?.[cat.key]} />}
               </button>
             )
           })}
@@ -151,6 +210,11 @@ export default function Alerts() {
                 <p className="text-sm leading-snug text-[var(--text-secondary)]">{alert.message}</p>
                 <PriceChangeRow payload={alert.payload} message={alert.message} />
                 <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                  {alert.product_title && (
+                    <LinkChip to={`/produtos?q=${encodeURIComponent(alert.product_title)}`} variant="neutral">
+                      🔎 Buscar em Produtos
+                    </LinkChip>
+                  )}
                   <LinkChip href={alert.product_url} variant="brand">
                     🔗 Ver produto ↗
                   </LinkChip>
@@ -164,7 +228,15 @@ export default function Alerts() {
         </div>
       )}
 
-      {alerts && alerts.length > 0 && (
+      {isStandardPlan && alerts && alerts.length > 0 && (
+        <p className="text-center text-xs text-[var(--text-muted)]">
+          Mostrando as {alerts.length} notificações mais recentes
+          {counts?.total > alerts.length ? ` de ${counts.total}` : ''} — assine o plano Pro pra ver o histórico
+          completo, sem limite.
+        </p>
+      )}
+
+      {!isStandardPlan && alerts && alerts.length > 0 && (
         <Pagination page={page} totalPages={totalPages} total={total} onChange={goToPage} />
       )}
     </div>

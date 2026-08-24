@@ -9,7 +9,11 @@ import { api } from '../api/client'
 // sandbox="" (sem nenhum allow-*) bloqueia script/form/popup dentro do
 // iframe — o back já remove todo <script> antes de servir, isso aqui é
 // defesa em profundidade, já que é conteúdo de concorrente (não confiável).
-export default function QuickPreview({ product, url, onClose }) {
+// `previewSrc` deixa o chamador apontar pra outra rota de prévia (ver
+// EspionarLoja.jsx, que usa /api/spy-preview em vez de
+// /api/products/:id/preview — o produto ali vem de um scrape na hora, sem
+// product_id persistido). Sem essa prop, cai no comportamento original.
+export default function QuickPreview({ product, url, previewSrc, onClose }) {
   if (!product) return null
 
   return (
@@ -32,7 +36,7 @@ export default function QuickPreview({ product, url, onClose }) {
         </div>
 
         <iframe
-          src={api.productPreviewUrl(product.id)}
+          src={previewSrc || api.productPreviewUrl(product.id)}
           sandbox=""
           title={`Prévia de ${product.title}`}
           className="w-full flex-1 bg-[var(--bg-surface)]"

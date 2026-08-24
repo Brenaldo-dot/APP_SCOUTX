@@ -34,16 +34,29 @@ export const rawApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ currentPassword, newPassword }),
     }),
+  updateMyAvatar: (avatarDataUrl) =>
+    request('/api/me/avatar', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ avatarDataUrl }),
+    }),
+  removeMyAvatar: () => request('/api/me/avatar', { method: 'DELETE' }),
 
   buscarBarcode: (url) => request(`/api/buscar?${qs({ url })}`),
   espionarLoja: (url) => request(`/api/spy?${qs({ url })}`),
+  spyPreviewUrl: (url) => `/api/spy-preview?${qs({ url })}`,
 
   listHistoryUsers: () => request('/api/history'),
   getHistoryDetail: (userId) => request(`/api/history/${userId}`),
 
   listUsers: () => request('/api/admin/users'),
   getUserIps: (id) => request(`/api/admin/users/${id}/ips`),
+  listAuditLog: () => request('/api/admin/audit-log'),
   createUser: (data) => request('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   updateUser: (id, data) => request(`/api/admin/users/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   deleteUser: (id) => request(`/api/admin/users/${id}`, { method: 'DELETE' }),
+
+  listOrganizations: () => request('/api/admin/organizations'),
+  createOrganization: (data) => request('/api/admin/organizations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  updateOrganization: (id, data) => request(`/api/admin/organizations/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
 }

@@ -25,7 +25,9 @@ def create_scan(
     if not domain or "." not in domain:
         raise HTTPException(400, "URL inválida — cola o link da loja (ex: lojaexemplo.com)")
 
-    scan = AdMinerScan(domain=domain, operation=payload.operation, status=AdMinerScanStatus.PENDING)
+    scan = AdMinerScan(
+        domain=domain, operation=payload.operation, status=AdMinerScanStatus.PENDING, user_id=current_user.id
+    )
     db.add(scan)
     db.commit()
     db.refresh(scan)
@@ -48,7 +50,12 @@ def create_scan(
 
 @router.get("/scans/{scan_id}", response_model=AdMinerScanOut)
 def get_scan(scan_id: int, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
-    scan = db.get(AdMinerScan, scan_id)
+    # Revisão de segurança: antes lia qualquer scan_id sem checar dono — ver
+    # comentário em models/ad_miner.py:user_id.
+    query = db.query(AdMinerScan).filter(AdMinerScan.id == scan_id)
+    if not current_user.is_admin:
+        query = query.filter(AdMinerScan.user_id == current_user.id)
+    scan = query.first()
     if not scan:
         raise HTTPException(404, "Scan não encontrado")
     return scan

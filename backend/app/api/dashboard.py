@@ -5,13 +5,17 @@ from datetime import date as date_, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
+from app.api.alerts import ALERT_CATEGORY_TYPES
 from app.api.deps import CurrentUser, get_current_user, resolve_target_user
 from app.database import get_db
 from app.models import (
     Ad,
+    AdStatus,
     Alert,
+    AlertType,
     Competitor,
     CompetitorStatus,
     CompetitorTracker,
@@ -20,7 +24,13 @@ from app.models import (
     ProductEventType,
     ProductScore,
 )
-from app.schemas.dashboard import DashboardSummary
+from app.schemas.dashboard import (
+    DashboardHighlights,
+    DashboardSummary,
+    TrendingProductOut,
+    VendorChangeMiniOut,
+    WinningAdMiniOut,
+)
 from app.services.scoring_service import score_label
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -126,6 +136,207 @@ def get_summary(
         alerts_last_24h=alerts_last_24h,
         recent_alerts=recent_alerts,
     )
+
+
+@router.get("/highlights", response_model=DashboardHighlights)
+def get_highlights(
+    operation: str | None = None,
+    as_user_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Três listas curtas pro Dashboard bater o olho sem precisar entrar em
+    cada aba: quem tá subindo de score rápido, anúncio vencedor ainda no ar,
+    e troca de fornecedor recente (o alerta mais "acionável" que existe —
+    concorrente trocando de fornecedor é sinal de novo produto chegando).
+    """
+    target_user = resolve_target_user(current_user, as_user_id)
+
+    # --- Quem está bombando agora: maior salto de score nos últimos 7 dias ---
+    since = datetime.now(BRASILIA_TZ).date() - timedelta(days=7)
+    score_query = (
+        db.query(ProductScore.product_id, ProductScore.date, ProductScore.score)
+        .join(Product, Product.id == ProductScore.product_id)
+        .join(Competitor, Competitor.id == Product.competitor_id)
+        .join(CompetitorTracker, CompetitorTracker.competitor_id == Competitor.id)
+        .filter(CompetitorTracker.user_id == target_user, Product.is_active.is_(True), ProductScore.date >= since)
+    )
+    if operation:
+        score_query = score_query.filter(Competitor.operation == operation)
+    window: dict[int, list[tuple[date_, int]]] = defaultdict(list)
+    for product_id, score_date, score in score_query.all():
+        window[product_id].append((score_date, score))
+
+    # Delta = score mais recente - score mais antigo dentro da janela; produto
+    # com só 1 leitura na semana (raio-x novo) não tem base de comparação, fica
+    # de fora em vez de aparecer com salto falso de "0 pra X".
+    deltas: list[tuple[int, int, int]] = []
+    for product_id, rows in window.items():
+        if len(rows) < 2:
+            continue
+        rows.sort()
+        delta = rows[-1][1] - rows[0][1]
+        if delta > 0:
+            deltas.append((product_id, rows[-1][1], delta))
+    deltas.sort(key=lambda row: row[2], reverse=True)
+    top = deltas[:5]
+    products_by_id: dict[int, Product] = {}
+    if top:
+        rows = (
+            db.query(Product)
+            .options(selectinload(Product.competitor))
+            .filter(Product.id.in_([pid for pid, _, _ in top]))
+            .all()
+        )
+        products_by_id = {p.id: p for p in rows}
+    trending_products = [
+        TrendingProductOut(
+            product_id=pid,
+            title=products_by_id[pid].title,
+            competitor_name=products_by_id[pid].competitor.name,
+            image_url=products_by_id[pid].main_image_url,
+            score=score,
+            delta=delta,
+        )
+        for pid, score, delta in top
+        if pid in products_by_id
+    ]
+
+    # --- Anúncios vencedores (7+ dias ativos, Ad.is_winning) ainda no ar ---
+    ads_query = (
+        db.query(Ad)
+        .join(Competitor, Competitor.id == Ad.competitor_id)
+        .join(CompetitorTracker, CompetitorTracker.competitor_id == Competitor.id)
+        .options(selectinload(Ad.product), selectinload(Ad.competitor))
+        .filter(CompetitorTracker.user_id == target_user, Ad.is_winning.is_(True), Ad.status == AdStatus.ACTIVE)
+    )
+    if operation:
+        ads_query = ads_query.filter(Competitor.operation == operation)
+    winning_ads = [
+        WinningAdMiniOut(
+            id=ad.id,
+            product_title=ad.product_title,
+            product_image_url=ad.product_image_url,
+            competitor_name=ad.competitor.name,
+            days_active=ad.days_active,
+            library_url=ad.library_url,
+        )
+        for ad in ads_query.order_by(Ad.started_at.asc()).limit(5).all()
+    ]
+
+    # --- Troca de fornecedor recente ---
+    vendor_query = (
+        db.query(Alert)
+        .join(Competitor, Competitor.id == Alert.competitor_id)
+        .join(CompetitorTracker, CompetitorTracker.competitor_id == Competitor.id)
+        .options(selectinload(Alert.product), selectinload(Alert.competitor))
+        .filter(
+            CompetitorTracker.user_id == target_user,
+            Alert.alert_type.in_([AlertType.VENDOR_CHANGED, AlertType.SUPPLIER_ID_CHANGED]),
+        )
+    )
+    if operation:
+        vendor_query = vendor_query.filter(Competitor.operation == operation)
+    vendor_changes = [
+        VendorChangeMiniOut(
+            id=a.id,
+            competitor_name=a.competitor_name,
+            message=a.message,
+            product_title=a.product_title,
+            created_at=a.created_at,
+        )
+        for a in vendor_query.order_by(Alert.created_at.desc()).limit(5).all()
+    ]
+
+    return DashboardHighlights(
+        trending_products=trending_products,
+        winning_ads=winning_ads,
+        vendor_changes=vendor_changes,
+    )
+
+
+@router.get("/activity-heatmap")
+def activity_heatmap(
+    operation: str | None = None,
+    as_user_id: int | None = None,
+    weeks: int = Query(12, ge=1, le=53),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Quantos alertas por dia nas últimas N semanas — heatmap tipo GitHub, pra
+    bater o olho e ver se teve semana parada sem entrar em Alertas."""
+    target_user = resolve_target_user(current_user, as_user_id)
+    range_end = datetime.now(BRASILIA_TZ).date()
+    range_start = range_end - timedelta(weeks=weeks) + timedelta(days=1)
+    since = datetime.combine(range_start, datetime.min.time(), tzinfo=BRASILIA_TZ).astimezone(timezone.utc)
+
+    query = (
+        db.query(Alert.created_at)
+        .join(Competitor, Competitor.id == Alert.competitor_id)
+        .join(CompetitorTracker, CompetitorTracker.competitor_id == Competitor.id)
+        .filter(Alert.created_at >= since, CompetitorTracker.user_id == target_user)
+    )
+    if operation:
+        query = query.filter(Competitor.operation == operation)
+
+    counts: dict[date_, int] = defaultdict(int)
+    for (created_at,) in query.all():
+        aware = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+        counts[aware.astimezone(BRASILIA_TZ).date()] += 1
+
+    return [{"date": d.isoformat(), "count": counts.get(d, 0)} for d in _daterange(range_start, range_end)]
+
+
+@router.get("/alerts-by-competitor")
+def alerts_by_competitor(
+    operation: str | None = None,
+    as_user_id: int | None = None,
+    days: int = Query(30, ge=1, le=180),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Ranking de quem mais gerou alerta nos últimos N dias — explica o QUE
+    tá puxando o heatmap de atividade pra cima, sem precisar abrir Alertas e
+    filtrar loja por loja."""
+    target_user = resolve_target_user(current_user, as_user_id)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    query = (
+        db.query(Competitor.id, Competitor.name, func.count(Alert.id))
+        .join(Alert, Alert.competitor_id == Competitor.id)
+        .join(CompetitorTracker, CompetitorTracker.competitor_id == Competitor.id)
+        .filter(CompetitorTracker.user_id == target_user, Alert.created_at >= since)
+        .group_by(Competitor.id, Competitor.name)
+    )
+    if operation:
+        query = query.filter(Competitor.operation == operation)
+    rows = query.order_by(func.count(Alert.id).desc()).limit(5).all()
+    return [{"competitor_id": cid, "competitor_name": name, "count": count} for cid, name, count in rows]
+
+
+@router.get("/alerts-by-category")
+def alerts_by_category(
+    operation: str | None = None,
+    as_user_id: int | None = None,
+    days: int = Query(30, ge=1, le=180),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Quantos alertas de cada categoria nos últimos N dias — mesmo
+    agrupamento da aba Alertas (ALERT_CATEGORY_TYPES, importado de lá pra não
+    duplicar a lista), só com corte de tempo pra mostrar o que tá quente
+    AGORA em vez do histórico todo."""
+    target_user = resolve_target_user(current_user, as_user_id)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    base = (
+        db.query(Alert)
+        .join(Competitor, Competitor.id == Alert.competitor_id)
+        .join(CompetitorTracker, CompetitorTracker.competitor_id == Competitor.id)
+        .filter(CompetitorTracker.user_id == target_user, Alert.created_at >= since)
+    )
+    if operation:
+        base = base.filter(Competitor.operation == operation)
+    return {key: base.filter(Alert.alert_type.in_(types)).count() for key, types in ALERT_CATEGORY_TYPES.items()}
 
 
 @router.get("/new-products-timeline")

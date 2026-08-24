@@ -4,12 +4,12 @@ import logging
 import threading
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import CurrentUser, get_current_user, resolve_target_user
 from app.database import get_db
-from app.models import Competitor, CompetitorStatus, CompetitorTracker
+from app.models import Alert, Competitor, CompetitorStatus, CompetitorTracker, Product
 from app.schemas.competitor import CompetitorCreate, CompetitorDetailOut, CompetitorOut, CompetitorUpdate
 from app.services.competitor_service import normalize_domain, register_competitor
 from app.tasks.ads_monitor import run_ads_monitor_one
@@ -58,6 +58,65 @@ def _owned_query(db: Session, user_id: int):
     )
 
 
+def _assert_operation_allowed(db: Session, current_user: CurrentUser, effective_operation: str) -> None:
+    """Limite de países do plano (Módulo de planos/organizações) — só entra
+    em ação pra quem tem organização com teto definido (org_max_operations
+    vindo do Node via header, ver api/deps.py); conta admin e plano Enterprise
+    não mandam esse header, ficam sem limite. `operation` é texto livre (o
+    frontend deixa digitar qualquer país, ver OperationContext.jsx no React),
+    então não dá pra validar contra uma lista fixa — conta os países
+    DISTINTOS que já aparecem de verdade nos concorrentes rastreados por
+    qualquer colega da mesma organização."""
+    if current_user.org_max_operations is None or not current_user.org_member_ids:
+        return
+    used = {
+        row[0]
+        for row in db.query(Competitor.operation)
+        .join(CompetitorTracker, CompetitorTracker.competitor_id == Competitor.id)
+        .filter(CompetitorTracker.user_id.in_(current_user.org_member_ids))
+        .distinct()
+        .all()
+    }
+    if effective_operation in used:
+        return
+    if len(used) >= current_user.org_max_operations:
+        raise HTTPException(
+            400,
+            f"Sua organização já está no limite de {current_user.org_max_operations} país(es) do plano — "
+            "fale com um administrador pra liberar mais países.",
+        )
+
+
+def _assert_competitor_limit_allowed(
+    db: Session, current_user: CurrentUser, existing_competitor_id: int | None
+) -> None:
+    """Limite de concorrentes cadastrados do plano (mesmo módulo do limite de
+    países acima) — org_max_competitors vem do Node via header, ver
+    api/deps.py; conta admin e plano Enterprise não mandam esse header, ficam
+    sem limite. Reaproveitar um concorrente que a organização já rastreia
+    (mesmo domínio, cadastrado por outro colega) não consome vaga nova — só
+    um concorrente de verdade INÉDITO pra organização conta, mesmo raciocínio
+    do "país já usado" acima."""
+    if current_user.org_max_competitors is None or not current_user.org_member_ids:
+        return
+    owned_ids = {
+        row[0]
+        for row in db.query(Competitor.id)
+        .join(CompetitorTracker, CompetitorTracker.competitor_id == Competitor.id)
+        .filter(CompetitorTracker.user_id.in_(current_user.org_member_ids))
+        .distinct()
+        .all()
+    }
+    if existing_competitor_id is not None and existing_competitor_id in owned_ids:
+        return
+    if len(owned_ids) >= current_user.org_max_competitors:
+        raise HTTPException(
+            400,
+            f"Sua organização já está no limite de {current_user.org_max_competitors} concorrente(s) cadastrado(s) "
+            "do plano — fale com um administrador pra liberar mais, ou remova um concorrente antes de cadastrar outro.",
+        )
+
+
 @router.post("", response_model=CompetitorOut, status_code=201)
 async def create_competitor(
     payload: CompetitorCreate, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)
@@ -73,6 +132,16 @@ async def create_competitor(
             f'"{existing_for_user.name}") — um domínio só pode pertencer a uma operação por vez. Troque pra '
             "essa operação pra ver o cadastro, ou exclua-o antes de recadastrar em outra.",
         )
+
+    # Domínio já rastreado por outro usuário: register_competitor reaproveita
+    # a linha e IGNORA o payload.operation, mantendo o país original — o
+    # limite tem que ser checado contra esse país de verdade, não contra o
+    # que o formulário mandou, senão adicionar uma loja que a própria
+    # organização já rastreia consumiria uma vaga de país à toa.
+    existing_competitor = db.query(Competitor).filter(Competitor.domain == domain).first()
+    effective_operation = existing_competitor.operation if existing_competitor else payload.operation
+    _assert_operation_allowed(db, current_user, effective_operation)
+    _assert_competitor_limit_allowed(db, current_user, existing_competitor.id if existing_competitor else None)
 
     competitor, is_new_competitor, _is_new_tracker = await register_competitor(
         db, payload.domain, payload.name, payload.niche, payload.tags, current_user.id, payload.operation
@@ -99,16 +168,67 @@ def list_competitors(
         query = query.filter(Competitor.status == status)
     if operation:
         query = query.filter(Competitor.operation == operation)
-    return query.order_by(Competitor.created_at.desc()).all()
+    competitors = query.order_by(Competitor.created_at.desc()).all()
+
+    # "Desde quando essa loja está no mercado" (filtro "Lojas mais antigas" no
+    # front) — não é uma coluna cacheada no Competitor, calcula na hora a
+    # partir do produto ATIVO mais antigo de cada um (mesma data
+    # shopify_created_at que EspionarLoja usa pra "criado há Xd", só que aqui
+    # é o MENOR valor da loja inteira, não o de 1 produto). Uma query só pra
+    # todos os concorrentes da página, não uma por card.
+    if competitors:
+        oldest_rows = (
+            db.query(Product.competitor_id, func.min(Product.shopify_created_at))
+            .filter(
+                Product.competitor_id.in_([c.id for c in competitors]),
+                Product.is_active.is_(True),
+                Product.shopify_created_at.isnot(None),
+            )
+            .group_by(Product.competitor_id)
+            .all()
+        )
+        oldest_by_competitor = dict(oldest_rows)
+        for c in competitors:
+            c.oldest_product_at = oldest_by_competitor.get(c.id)
+    return competitors
+
+
+@router.get("/my-operations-limit")
+def my_operations_limit(db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
+    """Pra qualquer usuário logado (não só admin) — o seletor de país e o
+    formulário de cadastrar concorrente usam isso pra mostrar o que já cabe
+    no plano da própria organização e o que está travado, ANTES de tentar
+    cadastrar (mesma conta usada em _assert_operation_allowed e
+    _assert_competitor_limit_allowed, só que exposta pra decisão de UI em vez
+    de bloqueio de escrita)."""
+    used_operations: set[str] = set()
+    used_competitor_ids: set[int] = set()
+    if current_user.org_member_ids:
+        rows = (
+            db.query(Competitor.operation, Competitor.id)
+            .join(CompetitorTracker, CompetitorTracker.competitor_id == Competitor.id)
+            .filter(CompetitorTracker.user_id.in_(current_user.org_member_ids))
+            .distinct()
+            .all()
+        )
+        used_operations = {r[0] for r in rows}
+        used_competitor_ids = {r[1] for r in rows}
+    return {
+        "maxOperations": current_user.org_max_operations,
+        "usedOperations": sorted(used_operations),
+        "maxCompetitors": current_user.org_max_competitors,
+        "usedCompetitors": len(used_competitor_ids),
+    }
 
 
 @router.get("/summary-by-user")
 def summary_by_user(db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
     """Painel de auditoria do admin — quantos concorrentes cada usuário
-    rastreia, por operação. Nomes de usuário não existem aqui (app_users
-    vive no banco do app Node, ver api/deps.py) — o frontend cruza esse
-    `user_id` com a lista de /api/admin/users que já busca pra tela de
-    Usuários."""
+    rastreia, por operação, e quantos alertas já foram gerados pras lojas
+    que rastreia (métrica de uso — separa quem usa de verdade de conta
+    esquecida). Nomes de usuário não existem aqui (app_users vive no banco
+    do app Node, ver api/deps.py) — o frontend cruza esse `user_id` com a
+    lista de /api/admin/users que já busca pra tela de Usuários."""
     if not current_user.is_admin:
         raise HTTPException(403, "Só administradores podem ver isso.")
     rows = (
@@ -120,10 +240,90 @@ def summary_by_user(db: Session = Depends(get_db), current_user: CurrentUser = D
     by_user: dict[int, dict[str, int]] = {}
     for user_id, operation, count in rows:
         by_user.setdefault(user_id, {})[operation] = count
+
+    alert_rows = (
+        db.query(CompetitorTracker.user_id, func.count(Alert.id))
+        .join(Competitor, Competitor.id == CompetitorTracker.competitor_id)
+        .join(Alert, Alert.competitor_id == Competitor.id)
+        .group_by(CompetitorTracker.user_id)
+        .all()
+    )
+    alerts_by_user = dict(alert_rows)
+
     return [
-        {"user_id": user_id, "by_operation": operations, "total": sum(operations.values())}
+        {
+            "user_id": user_id,
+            "by_operation": operations,
+            "total": sum(operations.values()),
+            "alerts_total": alerts_by_user.get(user_id, 0),
+        }
         for user_id, operations in by_user.items()
     ]
+
+
+@router.get("/search-trackers")
+def search_trackers(
+    q: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Busca admin: qual usuário rastreia tal loja — digita um pedaço do
+    domínio ou nome e recebe, pra cada concorrente que bater, quem rastreia
+    (varre TODOS os concorrentes do banco, não só os de quem chamou —
+    diferente de list_competitors/_owned_query, por isso admin-only)."""
+    if not current_user.is_admin:
+        raise HTTPException(403, "Só administradores podem buscar por todos os usuários.")
+    term = q.strip()
+    if len(term) < 2:
+        return []
+    like = f"%{term}%"
+    rows = (
+        db.query(Competitor)
+        .options(selectinload(Competitor.trackers))
+        .filter(or_(Competitor.domain.ilike(like), Competitor.name.ilike(like)))
+        .order_by(Competitor.name)
+        .limit(20)
+        .all()
+    )
+    return [
+        {
+            "competitor_id": c.id,
+            "domain": c.domain,
+            "name": c.name,
+            "operation": c.operation,
+            "tracker_user_ids": [t.user_id for t in c.trackers],
+        }
+        for c in rows
+    ]
+
+
+@router.get("/operations-usage")
+def operations_usage(
+    user_ids: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Quantos países distintos e quantos concorrentes distintos os
+    concorrentes de um grupo de usuários já usam — pra tela admin de
+    Organizações mostrar "X de Y países" e "X de Y concorrentes" por
+    organização (o Node manda os `user_ids` de quem é da mesma organização;
+    aqui só soma, não sabe nada de plano/organização, isso é concern do
+    Node)."""
+    if not current_user.is_admin:
+        raise HTTPException(403, "Só administradores podem ver isso.")
+    ids = [int(v) for v in user_ids.split(",") if v.strip().isdigit()]
+    if not ids:
+        return {"operations": [], "count": 0, "competitorsCount": 0}
+    rows = (
+        db.query(Competitor.operation, Competitor.id)
+        .join(CompetitorTracker, CompetitorTracker.competitor_id == Competitor.id)
+        .filter(CompetitorTracker.user_id.in_(ids))
+        .distinct()
+        .all()
+    )
+    ops = sorted({r[0] for r in rows})
+    competitor_ids = {r[1] for r in rows}
+    return {"operations": ops, "count": len(ops), "competitorsCount": len(competitor_ids)}
 
 
 @router.post("/claim-orphaned")
@@ -184,7 +384,8 @@ def update_competitor(
         competitor.niche = payload.niche
     if payload.tags is not None:
         competitor.tags = payload.tags
-    if payload.operation is not None:
+    if payload.operation is not None and payload.operation != competitor.operation:
+        _assert_operation_allowed(db, current_user, payload.operation)
         competitor.operation = payload.operation
     db.commit()
     db.refresh(competitor)

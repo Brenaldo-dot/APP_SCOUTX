@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { rawApi } from '../api/rawClient.js'
+import QuickPreview from '../components/QuickPreview.jsx'
+import { metaAdsLibrarySearchUrl } from '../utils/adLibrary.js'
 
 function fmtPrice(min, max) {
   if (min === null || min === undefined) return '—'
@@ -39,6 +41,45 @@ function Badges({ p }) {
     )
   }
   return <div className="flex flex-wrap justify-end gap-1.5">{badges}</div>
+}
+
+// Mesmo padrão de Products.jsx (👁 Ver = prévia num modal, ↗ = link direto,
+// "Ver anúncios ↗" = biblioteca de anúncios da loja) — aqui não existe
+// active_ad_count (não é uma raspagem de anúncio, é só o catálogo público),
+// então o link de anúncios aparece sempre, não só quando já sabemos que tem
+// anúncio ativo.
+function ProductLinks({ p, domain, onPreview }) {
+  const adsHref = domain ? metaAdsLibrarySearchUrl(domain) : null
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+      <button
+        onClick={() => onPreview(p)}
+        className="text-xs font-medium text-brand-400 hover:underline"
+        title="Prévia rápida sem sair da página"
+      >
+        👁 Ver
+      </button>
+      <a
+        href={p.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-xs font-medium text-brand-400 hover:underline"
+        title="Abrir em aba normal"
+      >
+        ↗
+      </a>
+      {adsHref && (
+        <a
+          href={adsHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 rounded-full border border-violet-500/30 px-2 py-0.5 text-[10.5px] font-medium text-violet-400 transition-colors hover:bg-violet-500/10"
+        >
+          Ver anúncios ↗
+        </a>
+      )}
+    </div>
+  )
 }
 
 function csvEscape(value) {
@@ -81,6 +122,7 @@ export default function EspionarLoja() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [data, setData] = useState(null)
+  const [previewProduct, setPreviewProduct] = useState(null)
 
   async function analisar() {
     const trimmed = url.trim()
@@ -102,6 +144,7 @@ export default function EspionarLoja() {
   }
 
   const top = data ? data.products.filter((p) => p.score > 0).slice(0, 15) : []
+  const storeDomain = data ? new URL(data.baseUrl).hostname : null
 
   return (
     <div className="space-y-6">
@@ -162,14 +205,13 @@ export default function EspionarLoja() {
                     key={i}
                     className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3.5 py-2.5"
                   >
-                    <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-brand-400 hover:underline">
-                      {p.title}
-                    </a>
-                    <div className="flex shrink-0 items-center gap-1.5">
+                    <span className="text-sm font-medium text-[var(--text-primary)]">{p.title}</span>
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
                       <Badges p={p} />
                       <span className="rounded-full border border-pink-500/35 bg-pink-500/10 px-2 py-0.5 text-[10.5px] font-medium text-pink-400">
                         score {p.score}
                       </span>
+                      <ProductLinks p={p} domain={storeDomain} onPreview={setPreviewProduct} />
                     </div>
                   </div>
                 ))}
@@ -191,7 +233,7 @@ export default function EspionarLoja() {
               <table className="w-full text-left text-xs">
                 <thead className="sticky top-0 bg-[var(--bg-surface-2)] text-[var(--text-muted)]">
                   <tr>
-                    {['Produto', 'Fornecedor', 'ID Fornecedor', 'Preço', 'Variantes', 'Imagens', 'Criado há', 'Coleção destaque', 'Páginas duplicadas', 'Score'].map((h) => (
+                    {['Produto', 'Fornecedor', 'ID Fornecedor', 'Preço', 'Variantes', 'Imagens', 'Criado há', 'Coleção destaque', 'Páginas duplicadas', 'Score', 'Ações'].map((h) => (
                       <th key={h} className="whitespace-nowrap border-b border-[var(--border)] px-2.5 py-2 font-medium">
                         {h}
                       </th>
@@ -201,11 +243,7 @@ export default function EspionarLoja() {
                 <tbody>
                   {data.products.map((p, i) => (
                     <tr key={i} className="border-b border-[var(--border-soft)] hover:bg-[var(--bg-surface)]">
-                      <td className="max-w-[260px] whitespace-normal px-2.5 py-1.5">
-                        <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-brand-400 hover:underline">
-                          {p.title}
-                        </a>
-                      </td>
+                      <td className="max-w-[260px] whitespace-normal px-2.5 py-1.5 text-[var(--text-primary)]">{p.title}</td>
                       <td className="whitespace-nowrap px-2.5 py-1.5 text-[var(--text-secondary)]">{p.vendor || '—'}</td>
                       <td className="whitespace-nowrap px-2.5 py-1.5 text-[var(--text-secondary)]">{p.supplierId || '—'}</td>
                       <td className="whitespace-nowrap px-2.5 py-1.5 text-[var(--text-secondary)]">{fmtPrice(p.priceMin, p.priceMax)}</td>
@@ -217,6 +255,9 @@ export default function EspionarLoja() {
                       </td>
                       <td className="whitespace-nowrap px-2.5 py-1.5 text-[var(--text-secondary)]">{p.duplicatePageCount >= 2 ? `🔁 ${p.duplicatePageCount}` : '—'}</td>
                       <td className="whitespace-nowrap px-2.5 py-1.5 text-[var(--text-secondary)]">{p.score}</td>
+                      <td className="whitespace-nowrap px-2.5 py-1.5">
+                        <ProductLinks p={p} domain={storeDomain} onPreview={setPreviewProduct} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -250,6 +291,15 @@ export default function EspionarLoja() {
             </div>
           )}
         </>
+      )}
+
+      {previewProduct && (
+        <QuickPreview
+          product={previewProduct}
+          url={previewProduct.url}
+          previewSrc={rawApi.spyPreviewUrl(previewProduct.url)}
+          onClose={() => setPreviewProduct(null)}
+        />
       )}
     </div>
   )

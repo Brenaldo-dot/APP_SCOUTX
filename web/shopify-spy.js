@@ -34,7 +34,7 @@ async function fetchJson(url, state) {
 
   let res;
   try {
-    res = await fetch(url, { headers: FETCH_HEADERS, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    res = await state.fetchImpl(url, { headers: FETCH_HEADERS, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   } catch {
     return null;
   }
@@ -233,9 +233,16 @@ function clusterDuplicateListings(items) {
   });
 }
 
-async function analyzeStore(rawUrl) {
+// `fetchImpl` vem já fixado (pinned) no IP validado pelo chamador (ver
+// safe-fetch.js) — todas as chamadas dessa análise (products.json,
+// collections.json, cada produto individual pro barcode real) reusam o
+// MESMO endereço já validado, em vez de cada uma resolver DNS de novo (o
+// que reabriria a janela de DNS rebinding que o pin existe pra fechar).
+// Sem `fetchImpl`, cai no fetch global normal (sem pin) — server.js sempre
+// passa o pinned, esse fallback é só rede de segurança pra outro chamador.
+async function analyzeStore(rawUrl, fetchImpl) {
   const baseUrl = baseUrlFromInput(rawUrl);
-  const state = { rateLimited: false };
+  const state = { rateLimited: false, fetchImpl: fetchImpl || fetch };
 
   const [products, collections] = await Promise.all([fetchAllProducts(baseUrl, state), fetchCollections(baseUrl, state)]);
 

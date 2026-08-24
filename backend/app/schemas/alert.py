@@ -14,6 +14,7 @@ class AlertOut(BaseModel):
     ad_library_url: str | None
     product_url: str | None
     product_image_url: str | None
+    product_title: str | None
     alert_type: str
     message: str
     payload: dict | None

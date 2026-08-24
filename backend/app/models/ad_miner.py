@@ -26,6 +26,14 @@ class AdMinerScan(Base):
     __tablename__ = "ad_miner_scans"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Revisão de segurança: sem isso, GET /scans/{id} não tinha como saber de
+    # quem era cada scan — qualquer usuário logado lia o resultado (domínio +
+    # anúncios encontrados) de scan de OUTRA organização só incrementando o
+    # id (sequencial). id de app_users (banco do app Node) — mesma limitação
+    # de FK entre bancos diferentes de CompetitorTracker.user_id acima.
+    # Nullable só pelos registros que já existiam antes desse campo existir
+    # (ninguém sabe de quem eram); esses ficam visíveis só pra admin.
+    user_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
     domain: Mapped[str] = mapped_column(String(255), index=True)
     # Define o país da biblioteca de anúncios buscada (ver
     # services/competitor_service.py:country_for_operation) — sem isso, todo

@@ -170,5 +170,5 @@ async def enrich_with_real_barcodes(
             if real_barcode:
                 product["supplier_id"] = real_barcode
 
-    async with build_async_client() as client:
+    async with await build_async_client(domain) as client:
         await asyncio.gather(*(_worker(client, p) for p in to_enrich))

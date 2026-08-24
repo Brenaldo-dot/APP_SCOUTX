@@ -7,10 +7,12 @@ export function AuthProvider({ children }) {
   const [me, setMe] = useState(null)
   const [loading, setLoading] = useState(true)
 
+  function refreshMe() {
+    return rawApi.me().then(setMe)
+  }
+
   useEffect(() => {
-    rawApi
-      .me()
-      .then(setMe)
+    refreshMe()
       .catch(() => {
         // Sessão expirada/ausente — as próprias rotas Express (/login) já
         // tratam o redirect server-side quando a pessoa navega ali; aqui só
@@ -18,9 +20,10 @@ export function AuthProvider({ children }) {
         window.location.href = '/login'
       })
       .finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  return <AuthContext.Provider value={{ me, loading }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ me, loading, refreshMe }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {

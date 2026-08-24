@@ -23,6 +23,7 @@ feed de alertas fica poluído com o mesmo texto longo repetido 5-6 vezes.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -34,6 +35,59 @@ logger = logging.getLogger(__name__)
 
 WINNING_AD_DAYS = 7
 _FINGERPRINT_LEN = 80
+
+_STOPWORDS_ES = {
+    "de", "la", "el", "en", "con", "para", "por", "un", "una", "y", "o", "los", "las",
+    "del", "al", "su", "sus", "que", "es", "mas", "más", "the", "and", "for", "with",
+}
+
+
+def _significant_words(text: str) -> set[str]:
+    words = re.findall(r"[a-záéíóúñ0-9]+", text.lower())
+    return {w for w in words if len(w) >= 4 and w not in _STOPWORDS_ES}
+
+
+def _match_product_by_text(creative_text: str | None, candidates: list[Product]) -> Product | None:
+    """Reserva pra quando a URL de destino do anúncio não dá pra casar com
+    nenhum handle específico via scrapers/meta_ads.py:_extract_product_handle
+    (funil, redirect, link só pra home/coleção — nem todo anúncio de COD
+    linka direto pra /products/... ou /pages/...) — tenta achar o produto
+    pelo TEXTO do criativo em vez da URL de destino.
+
+    Achado ao vivo revisando o undercount de "anúncios ativos": um produto
+    tinha 5 anúncios reais na biblioteca, só 2 contavam aqui — vários dos
+    outros linkavam pra fora do padrão que a URL sozinha reconhece. Só
+    decide quando a confiança é ALTA e o vencedor é ÚNICO — errar aqui é
+    pior que não vincular nada, porque contaria o anúncio no produto
+    ERRADO."""
+    if not creative_text:
+        return None
+    text_words = _significant_words(creative_text)
+    if not text_words:
+        return None
+
+    best: Product | None = None
+    best_score = 0.0
+    runner_up_score = 0.0
+    for product in candidates:
+        title_words = _significant_words(product.title or "")
+        if len(title_words) < 2:
+            continue  # título curto demais pra confiar (bateria com qualquer copy)
+        score = len(title_words & text_words) / len(title_words)
+        if score > best_score:
+            runner_up_score = best_score
+            best_score = score
+            best = product
+        elif score > runner_up_score:
+            runner_up_score = score
+
+    # Exige pelo menos 70% das palavras significativas do título presentes no
+    # texto do anúncio, E uma margem clara sobre o 2º colocado — evita
+    # decidir em cima de um empate ambíguo entre produtos parecidos da mesma
+    # loja (ex: duas variações de cor do mesmo item).
+    if best_score >= 0.7 and (best_score - runner_up_score) >= 0.2:
+        return best
+    return None
 
 
 def _json_safe(raw: dict) -> dict:
@@ -74,7 +128,13 @@ async def ingest_search_results(
     # extrai (`product_handle`, match exato contra Product.handle). TikTok/
     # Google não preenchem esse campo hoje, então isso vira sempre None ali
     # e o comportamento é o mesmo de antes (anúncio sem produto vinculado).
-    products_by_handle = {p.handle: p for p in db.query(Product).filter(Product.competitor_id == competitor.id).all()}
+    # .strip().lower() nos dois lados — `_extract_product_handle` já devolve
+    # minúsculo, mas comparar sem normalizar os dois lados do mesmo jeito é
+    # um jeito fácil de deixar passar por engano (achado revisando o bug do
+    # undercount de anúncios ativos).
+    products_by_handle = {
+        p.handle.strip().lower(): p for p in db.query(Product).filter(Product.competitor_id == competitor.id).all()
+    }
 
     seen_external_ids: set[str] = set()
 
@@ -84,7 +144,10 @@ async def ingest_search_results(
             continue
         seen_external_ids.add(external_id)
 
-        product = products_by_handle.get(raw.get("product_handle")) if raw.get("product_handle") else None
+        handle = (raw.get("product_handle") or "").strip().lower()
+        product = products_by_handle.get(handle) if handle else None
+        if product is None:
+            product = _match_product_by_text(raw.get("creative_text"), list(products_by_handle.values()))
 
         ad = db.query(Ad).filter(Ad.platform == platform, Ad.external_ad_id == external_id).first()
 
@@ -127,6 +190,7 @@ async def ingest_search_results(
             ad.advertiser_name = raw.get("advertiser_name") or ad.advertiser_name
             ad.status = AdStatus.ACTIVE
             ad.killed_at = None
+            ad.missed_scans = 0
             # Só preenche se ainda não tem produto — não troca um vínculo já
             # existente por outro (ex: handle mudou de dono, caso raro).
             if product is not None and ad.product_id is None:
@@ -183,8 +247,18 @@ async def _mark_killed_ads(
         Ad.competitor_id == competitor.id, Ad.platform == platform, Ad.status == AdStatus.ACTIVE
     )
 
+    # Meta: mesmo raciocínio do Google acima, um degrau mais tolerante — a
+    # busca por keyword + scroll limitado às vezes simplesmente não traz um
+    # anúncio real numa rodada específica (achado ao vivo revisando um
+    # undercount de anúncios ativos). Uma rodada perdida vira só um contador
+    # (`missed_scans`); só marca morto na SEGUNDA rodada seguida sem ver.
+    require_two_misses = platform == AdPlatform.META
+
     for ad in query.all():
         if ad.external_ad_id in seen_external_ids:
+            continue
+        if require_two_misses and ad.missed_scans < 1:
+            ad.missed_scans += 1
             continue
         ad.status = AdStatus.INACTIVE
         ad.killed_at = datetime.now(timezone.utc)

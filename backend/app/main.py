@@ -71,6 +71,14 @@ async def lifespan(app: FastAPI):
             text("ALTER TABLE ad_miner_scans ADD COLUMN IF NOT EXISTS operation VARCHAR(50) NOT NULL DEFAULT 'colombia'")
         )
 
+        # Revisão de segurança: scan avulso do Minerador de Anúncios não
+        # tinha dono nenhum — qualquer usuário logado lia o resultado de
+        # scan de OUTRA organização só incrementando o id (ver
+        # api/ad_miner.py:get_scan). Nullable porque scans já existentes não
+        # têm como saber quem criou; esses ficam visíveis só pra admin dali
+        # em diante (ver a própria checagem no endpoint).
+        conn.execute(text("ALTER TABLE ad_miner_scans ADD COLUMN IF NOT EXISTS user_id INTEGER"))
+
         # Multi-tenant, v2 — v1 (owner_id direto em competitors, coluna já
         # removida abaixo) dava cada usuário sua PRÓPRIA cópia do dado raspado;
         # veio feedback ao vivo: melhor um dado só por domínio (mais leve,
@@ -132,6 +140,39 @@ async def lifespan(app: FastAPI):
             )
         )
         conn.execute(text("ALTER TABLE competitors DROP COLUMN IF EXISTS scaling_products"))
+
+        # Revisão: anúncio da Meta sendo marcado "morto" só por não aparecer
+        # numa única rodada de scan (busca por keyword + scroll, não é 100%
+        # determinística) — contribuía pro undercount de "anúncios ativos"
+        # relatado pelo usuário. Ver services/ads_service.py:_mark_killed_ads.
+        conn.execute(text("ALTER TABLE ads ADD COLUMN IF NOT EXISTS missed_scans INTEGER NOT NULL DEFAULT 0"))
+
+        # Link de anúncio da Meta gravado sem `country=` — quem abrisse via
+        # é geo-inferido pela localização de QUEM CLICA, não pelo país da
+        # loja (bug relatado: produto do México abrindo a Ads Library com
+        # "Brasil" selecionado e "nenhum anúncio encontrado"). Backfill dos
+        # links já salvos usando o país de cada concorrente; idempotente
+        # (NOT LIKE '%country=%' já não bate depois da 1ª rodada).
+        conn.execute(
+            text(
+                """
+                UPDATE ads a
+                SET library_url = 'https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country='
+                    || CASE c.operation
+                        WHEN 'mexico' THEN 'MX'
+                        WHEN 'equador' THEN 'EC'
+                        WHEN 'guatemala' THEN 'GT'
+                        ELSE 'CO'
+                    END
+                    || '&id=' || a.external_ad_id
+                FROM competitors c
+                WHERE c.id = a.competitor_id
+                  AND UPPER(a.platform) = 'META'
+                  AND a.library_url IS NOT NULL
+                  AND a.library_url NOT LIKE '%country=%'
+                """
+            )
+        )
 
     yield
 

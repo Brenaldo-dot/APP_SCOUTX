@@ -17,6 +17,7 @@ import BuscarBarcode from './pages/BuscarBarcode.jsx'
 import EspionarLoja from './pages/EspionarLoja.jsx'
 import Historico from './pages/Historico.jsx'
 import Usuarios from './pages/Usuarios.jsx'
+import Organizacoes from './pages/Organizacoes.jsx'
 import Conta from './pages/Conta.jsx'
 
 // Quem não tem acesso ao núcleo do ScoutX não deve cair numa tela de "sem
@@ -61,12 +62,10 @@ export default function App() {
                 acessa, sem RouteGuard de permissão. */}
             <Route path="/conta" element={<Conta />} />
 
-            <Route element={<RouteGuard allow={(me) => me.isAdmin || me.canViewHistory} />}>
-              <Route path="/ferramentas/historico" element={<Historico />} />
-            </Route>
-
             <Route element={<RouteGuard allow={(me) => me.isAdmin} />}>
+              <Route path="/ferramentas/historico" element={<Historico />} />
               <Route path="/usuarios" element={<Usuarios />} />
+              <Route path="/organizacoes" element={<Organizacoes />} />
             </Route>
           </Route>
         </Routes>

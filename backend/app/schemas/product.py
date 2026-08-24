@@ -34,12 +34,14 @@ class ProductOut(BaseModel):
 
 class ProductWithAdCountOut(ProductOut):
     """Só pra /api/products (lista geral) — anúncios ativos por produto, pro
-    filtro/ordenação 'mais anúncios ativos' e pra mostrar o número no card.
-    Campo à parte de ProductOut (não direto na base) porque HotProductOut já
-    define active_ad_count com outra fonte de dado (ver api/products.py) —
-    colocar na base colidiria com o kwarg explícito que HotProductOut passa."""
+    filtro/ordenação 'mais anúncios ativos' e pra mostrar o número + o botão
+    "Ver anúncios" no card. Campo à parte de ProductOut (não direto na base)
+    porque HotProductOut já define active_ad_count com outra fonte de dado
+    (ver api/products.py) — colocar na base colidiria com o kwarg explícito
+    que HotProductOut passa."""
 
     active_ad_count: int = 0
+    latest_ad_library_url: str | None = None
 
 
 class ProductListOut(BaseModel):

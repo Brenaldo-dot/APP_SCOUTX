@@ -1,6 +1,8 @@
 """Histórico de alertas disparados."""
 
+import json
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
@@ -22,6 +24,11 @@ router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 # ver commit que corrigiu o "sumiço" de alerta antigo depois de uma rajada
 # de "novo anúncio" enterrar tudo além do limite antigo de 100-200 linhas).
 # Se mudar de um lado, muda do outro.
+# Plano Standard só vê as N notificações mais recentes na visão "Todos" —
+# sem separar por categoria (ver list_alerts abaixo). Pro/Enterprise/admin
+# (org_plan None ou != "solo") não têm esse teto.
+STANDARD_ALERT_LIMIT = 5
+
 ALERT_CATEGORY_TYPES: dict[str, list[AlertType]] = {
     "produto": [AlertType.NEW_PRODUCT, AlertType.PRODUCT_REMOVED],
     "fornecedor": [AlertType.VENDOR_CHANGED, AlertType.SUPPLIER_ID_CHANGED],
@@ -61,6 +68,15 @@ def list_alerts(
     query = _base_query(db, target_user, competitor_id, operation).options(
         selectinload(Alert.ad), selectinload(Alert.competitor), selectinload(Alert.product)
     )
+
+    # Plano Standard: sempre a visão "Todos" (ignora `category`, mesmo se
+    # alguém montar a URL na mão) e só as STANDARD_ALERT_LIMIT mais recentes,
+    # sem paginação — o front mostra as categorias e o total real (endpoint
+    # /counts abaixo não é restrito) só como vitrine de "isso existe no Pro".
+    if current_user.is_standard_plan:
+        items = query.order_by(Alert.created_at.desc()).limit(STANDARD_ALERT_LIMIT).all()
+        return AlertListOut(items=items, total=len(items))
+
     if category and category in ALERT_CATEGORY_TYPES:
         query = query.filter(Alert.alert_type.in_(ALERT_CATEGORY_TYPES[category]))
 
@@ -80,16 +96,43 @@ def alert_counts(
     competitor_id: int | None = None,
     operation: str | None = None,
     as_user_id: int | None = None,
+    since_map: str | None = None,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Contagem por categoria pros botões de filtro da aba Alertas — calculada
-    no banco sobre TODO o histórico, não só na página carregada (mesma razão
-    do endpoint acima)."""
+    """Contagem por categoria pros botões de filtro da aba Alertas — total
+    histórico por padrão (calculada no banco, não só na página carregada,
+    mesma razão do endpoint acima). Com `since_map` (JSON tipo
+    `{"escala": "2026-08-23T10:00:00"}`), cada categoria conta só o que foi
+    criado depois do PRÓPRIO corte dela — cada categoria tem sua marca de
+    "última vez vista" independente (ver utils/alertsVisit.js no front), pra
+    bolinha de não lido sumir categoria por categoria ao abrir cada uma, tipo
+    WhatsApp por conversa, em vez de tudo de uma vez só ao abrir a aba
+    (bug relatado: bolinha só sumia com refresh da página, e sumia tudo de
+    uma vez em vez de só a categoria acessada). Categoria fora do mapa (nunca
+    vista) conta tudo. Nesse modo `total` = soma do que tá não lido por
+    categoria, não o total histórico."""
     target_user = resolve_target_user(current_user, as_user_id)
     base = _base_query(db, target_user, competitor_id, operation)
-    by_category = {key: base.filter(Alert.alert_type.in_(types)).count() for key, types in ALERT_CATEGORY_TYPES.items()}
-    return AlertCountsOut(total=base.order_by(None).count(), by_category=by_category)
+
+    cutoffs: dict[str, datetime] = {}
+    if since_map:
+        try:
+            for key, value in json.loads(since_map).items():
+                if key in ALERT_CATEGORY_TYPES and value:
+                    cutoffs[key] = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            pass
+
+    by_category = {}
+    for key, types in ALERT_CATEGORY_TYPES.items():
+        q = base.filter(Alert.alert_type.in_(types))
+        if key in cutoffs:
+            q = q.filter(Alert.created_at >= cutoffs[key])
+        by_category[key] = q.count()
+
+    total = sum(by_category.values()) if since_map is not None else base.order_by(None).count()
+    return AlertCountsOut(total=total, by_category=by_category)
 
 
 @router.post("/test", response_model=AlertOut, status_code=201)

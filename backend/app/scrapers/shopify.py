@@ -12,7 +12,7 @@ import httpx
 from bs4 import BeautifulSoup
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
-from app.scrapers.http_client import build_async_client
+from app.scrapers.http_client import SSRFBlockedError, build_async_client
 from app.scrapers.supplier_id import pick_supplier_id_from_variants
 
 logger = logging.getLogger(__name__)
@@ -59,10 +59,10 @@ async def _get_products_page(client: httpx.AsyncClient, domain: str, page: int, 
 async def verify_is_shopify(domain: str) -> bool:
     """Módulo 1: confirma /products.json antes de aceitar o cadastro do concorrente."""
     try:
-        async with build_async_client() as client:
+        async with await build_async_client(domain) as client:
             await _get_products_page(client, domain, page=1, limit=1)
         return True
-    except (httpx.HTTPError, NotShopifyError, ValueError) as exc:
+    except (httpx.HTTPError, NotShopifyError, ValueError, SSRFBlockedError) as exc:
         logger.info("Domínio %s falhou na verificação Shopify: %s", domain, exc)
         return False
 
@@ -82,7 +82,7 @@ async def fetch_all_products(domain: str, delay_seconds: float = 1.5) -> list[di
     all_products: list[dict] = []
     page = 1
     last_page_first_id = None
-    async with build_async_client() as client:
+    async with await build_async_client(domain) as client:
         while True:
             try:
                 products = await _get_products_page(client, domain, page=page, limit=PRODUCTS_PAGE_LIMIT)
@@ -118,7 +118,7 @@ async def fetch_all_products(domain: str, delay_seconds: float = 1.5) -> list[di
 
 
 async def fetch_homepage_html(domain: str) -> str:
-    async with build_async_client() as client:
+    async with await build_async_client(domain) as client:
         response = await client.get(f"https://{domain}/")
         response.raise_for_status()
         return response.text

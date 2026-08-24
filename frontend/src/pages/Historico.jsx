@@ -30,8 +30,8 @@ export default function Historico() {
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 
-      <div className="flex gap-6">
-        <div className="w-72 shrink-0 space-y-2">
+      <div className="flex flex-col gap-6 lg:flex-row">
+        <div className="w-full space-y-2 lg:w-72 lg:shrink-0">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Usuários</h3>
           {users === null && <p className="text-sm text-[var(--text-muted)]">Carregando…</p>}
           {users?.length === 0 && <p className="text-sm text-[var(--text-muted)]">Nenhuma busca registrada ainda.</p>}
@@ -57,7 +57,7 @@ export default function Historico() {
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
             {selected ? `Buscas de ${selected.name}` : 'Selecione um usuário'}
           </h3>
-          <div className="overflow-hidden rounded-lg border border-[var(--border)]">
+          <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
             <table className="w-full text-left text-sm">
               <thead className="bg-[var(--bg-surface-2)] text-xs uppercase text-[var(--text-muted)]">
                 <tr>

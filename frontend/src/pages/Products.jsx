@@ -8,6 +8,7 @@ import { DuplicateBadge, ScalingBadge, SupplierIdTag } from '../components/Badge
 import ProductThumb from '../components/ProductThumb.jsx'
 import QuickPreview from '../components/QuickPreview.jsx'
 import { formatDate } from '../utils/date.js'
+import { metaAdsLibrarySearchUrl } from '../utils/adLibrary.js'
 import { useOperation } from '../context/OperationContext.jsx'
 
 const PAGE_SIZE = 100
@@ -17,7 +18,11 @@ export default function Products() {
   const { operation } = useOperation()
   const [searchParams, setSearchParams] = useSearchParams()
   const competitorId = searchParams.get('competitor_id') || ''
-  const scalingOnly = searchParams.get('scaling_only') === 'true'
+  // Antes filtrava Product.scaling (score 80+, só "Escalando" puro) — trocado
+  // pra "quente" (score 56+, Quente OU Escalando, mesmo corte da aba Produtos
+  // Quentes) a pedido do usuário: o filtro antigo escondia a maioria do que
+  // a pessoa já considera "quente" no resto do app.
+  const hotOnly = searchParams.get('hot_only') === 'true'
   const sort = SORT_VALUES.includes(searchParams.get('sort')) ? searchParams.get('sort') : 'recent'
   const q = searchParams.get('q') || ''
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1)
@@ -38,7 +43,7 @@ export default function Products() {
       .listProducts({
         competitor_id: competitorId || undefined,
         operation: competitorId ? undefined : operation,
-        scaling_only: scalingOnly || undefined,
+        hot_only: hotOnly || undefined,
         q: q || undefined,
         sort,
         page,
@@ -49,7 +54,7 @@ export default function Products() {
         setTotal(total)
       })
       .catch((e) => setError(e.message))
-  }, [competitorId, operation, scalingOnly, q, sort, page])
+  }, [competitorId, operation, hotOnly, q, sort, page])
 
   // Busca com debounce — sem isso dispararia 1 request por letra digitada.
   useEffect(() => {
@@ -79,10 +84,10 @@ export default function Products() {
     setSearchParams(next)
   }
 
-  function toggleScalingOnly(checked) {
+  function toggleHotOnly(checked) {
     const next = new URLSearchParams(searchParams)
-    if (checked) next.set('scaling_only', 'true')
-    else next.delete('scaling_only')
+    if (checked) next.set('hot_only', 'true')
+    else next.delete('hot_only')
     next.delete('page')
     setSearchParams(next)
   }
@@ -141,8 +146,8 @@ export default function Products() {
         </div>
 
         <label className="flex items-center gap-2 self-end pb-2 text-sm text-[var(--text-tertiary)]">
-          <input type="checkbox" checked={scalingOnly} onChange={(e) => toggleScalingOnly(e.target.checked)} />
-          🚀 Só produtos escalando
+          <input type="checkbox" checked={hotOnly} onChange={(e) => toggleHotOnly(e.target.checked)} />
+          🔥 Só produtos quentes
         </label>
       </div>
 
@@ -206,9 +211,35 @@ export default function Products() {
                   <td className="px-4 py-3">{p.variant_count}</td>
                   <td className="px-4 py-3">
                     {p.active_ad_count > 0 ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-2 py-0.5 text-xs font-medium text-blue-400">
-                        📣 {p.active_ad_count}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-2 py-0.5 text-xs font-medium text-blue-400">
+                          📣 {p.active_ad_count}
+                        </span>
+                        {(() => {
+                          // Sempre busca por DOMÍNIO da loja na Meta Ads
+                          // Library — nunca o link direto de um anúncio
+                          // específico (?id=...), que só mostra os anúncios
+                          // DAQUELE anunciante/página. Uma mesma loja costuma
+                          // ter vários anunciantes diferentes rodando anúncio
+                          // pra ela ao mesmo tempo (confirmado ao vivo pelo
+                          // usuário: buscar pelo domínio achou anúncio de 2
+                          // páginas diferentes pra mesma loja, buscar pelo
+                          // nome de só 1 delas perdia a outra inteira).
+                          const href = metaAdsLibrarySearchUrl(competitorDomains[p.competitor_id], operation)
+                          return (
+                            href && (
+                              <a
+                                href={href}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 rounded-full border border-violet-500/30 px-2 py-0.5 text-xs font-medium text-violet-400 transition-colors hover:bg-violet-500/10"
+                              >
+                                Ver anúncios ↗
+                              </a>
+                            )
+                          )
+                        })()}
+                      </div>
                     ) : (
                       <span className="text-xs text-[var(--text-muted)]">—</span>
                     )}

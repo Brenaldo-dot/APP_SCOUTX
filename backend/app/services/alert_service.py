@@ -66,11 +66,9 @@ async def create_alert(
         link_url = ad.library_url if ad and ad.library_url else None
         if link_url is None and product is not None:
             link_url = f"https://{competitor.domain}/products/{product.handle}"
-        alert.sent_to_discord = await discord.send_alert(competitor.name, alert_type, alert.message, link_url)
 
         # Canal pessoal (Módulo 9 — Minha Conta): todo usuário que rastreia
-        # ESSE concorrente e configurou o próprio webhook recebe também, na
-        # hora — além do canal global do admin acima, não em vez dele. Um
+        # ESSE concorrente e configurou o próprio webhook recebe aí. Um
         # concorrente pode ter vários rastreadores (dado compartilhado, ver
         # CompetitorTracker); dedup por URL pra não mandar 2x se por acaso
         # dois usuários colarem o mesmo webhook.
@@ -80,6 +78,7 @@ async def create_alert(
             .filter(CompetitorTracker.competitor_id == competitor.id)
             .all()
         ]
+        personal_webhooks: set[str] = set()
         if tracker_user_ids:
             personal_webhooks = {
                 row[0]
@@ -90,7 +89,22 @@ async def create_alert(
                 )
                 .all()
             }
+
+        # Revisão: o canal GLOBAL do admin (env DISCORD_WEBHOOK_URL) mandava
+        # SEMPRE, mesmo pra quem já tinha configurado o próprio webhook em
+        # Minha Conta — resultado era o mesmo alerta chegando duplicado (um
+        # pelo canal pessoal, outro pelo global). Pedido explícito do
+        # usuário pra tirar isso: o global agora só entra como RESERVA,
+        # quando NINGUÉM que rastreia esse concorrente configurou webhook
+        # próprio — continua funcionando pra quem nunca mexeu em Minha
+        # Conta, sem duplicar pra quem já configurou.
+        sent_to_discord = False
+        if personal_webhooks:
             for webhook_url in personal_webhooks:
-                await discord.send_alert(competitor.name, alert_type, alert.message, link_url, webhook_url=webhook_url)
+                sent = await discord.send_alert(competitor.name, alert_type, alert.message, link_url, webhook_url=webhook_url)
+                sent_to_discord = sent_to_discord or sent
+        else:
+            sent_to_discord = await discord.send_alert(competitor.name, alert_type, alert.message, link_url)
+        alert.sent_to_discord = sent_to_discord
 
     return alert

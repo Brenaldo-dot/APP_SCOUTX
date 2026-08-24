@@ -3,12 +3,26 @@ import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client.js'
 import EmptyState from '../components/EmptyState.jsx'
 import Pagination from '../components/Pagination.jsx'
+import Select from '../components/Select.jsx'
 import { DuplicateBadge, ScoreBadge, SignalChip, SupplierIdTag } from '../components/Badges.jsx'
 import LinkChip from '../components/LinkChip.jsx'
 import ProductThumb from '../components/ProductThumb.jsx'
+import { metaAdsLibrarySearchUrl } from '../utils/adLibrary.js'
 import { useOperation } from '../context/OperationContext.jsx'
 
 const PAGE_SIZE = 60
+
+// "Filtrar por mais escalados/anúncios ativos/tempo de anúncio ativo"
+// (pedido do usuário) são mutuamente exclusivos — vira um `sort` só, igual
+// um "ordenar por" — mesmo padrão (label + Select) já usado em Ads.jsx, mais
+// fácil de entender que um monte de chip do mesmo jeito lado a lado (era o
+// que tinha antes; usuário achou confuso). Fornecedor conectado e anúncios
+// crescendo são categóricos (tem ou não tem), por isso viram checkbox.
+const SORT_OPTIONS = [
+  { value: 'score', label: 'Mais escalados primeiro' },
+  { value: 'active_ads', label: 'Mais anúncios ativos primeiro' },
+  { value: 'ad_duration', label: 'Mais tempo de anúncio ativo primeiro' },
+]
 
 // score_date é uma data de calendário pura (sem hora), não um timestamp —
 // não passa por conversão de fuso (utils/date.js formatDate assume UTC e
@@ -24,6 +38,9 @@ export default function HotProducts() {
   const { operation } = useOperation()
   const [searchParams, setSearchParams] = useSearchParams()
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1)
+  const sort = searchParams.get('sort') || 'score'
+  const hasSupplier = searchParams.get('has_supplier') === '1'
+  const growingOnly = searchParams.get('growing_only') === '1'
 
   const [competitors, setCompetitors] = useState([])
   const [products, setProducts] = useState(null)
@@ -43,13 +60,21 @@ export default function HotProducts() {
 
   useEffect(() => {
     api
-      .listHotProducts({ min_score: 56, operation, page, limit: PAGE_SIZE })
+      .listHotProducts({
+        min_score: 56,
+        operation,
+        sort,
+        has_supplier: hasSupplier || undefined,
+        growing_only: growingOnly || undefined,
+        page,
+        limit: PAGE_SIZE,
+      })
       .then(({ items, total }) => {
         setProducts(items)
         setTotal(total)
       })
       .catch((e) => setError(e.message))
-  }, [operation, page])
+  }, [operation, sort, hasSupplier, growingOnly, page])
 
   function goToPage(nextPage) {
     const next = new URLSearchParams(searchParams)
@@ -57,6 +82,19 @@ export default function HotProducts() {
     else next.set('page', String(nextPage))
     setSearchParams(next)
     window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // Trocar filtro/ordenação sempre volta pra página 1 — mesma razão da
+  // troca de operação acima (a página atual pode simplesmente não existir
+  // mais no resultado filtrado).
+  function updateFilter(patch) {
+    const next = new URLSearchParams(searchParams)
+    for (const [key, value] of Object.entries(patch)) {
+      if (!value || value === 'score') next.delete(key)
+      else next.set(key, value)
+    }
+    next.delete('page')
+    setSearchParams(next)
   }
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -78,6 +116,36 @@ export default function HotProducts() {
           dia — ver <span className="font-mono text-xs">scoring_service.py</span>. Produto recém-visto começa em 0:
           todo sinal baseado em histórico só aparece depois de alguns dias de monitoramento.
         </p>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-4 rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-4">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-[var(--text-muted)]">Ordenar por</label>
+          <Select
+            className="w-64"
+            value={sort}
+            onChange={(v) => updateFilter({ sort: v })}
+            options={SORT_OPTIONS}
+          />
+        </div>
+
+        <label className="flex items-center gap-2 pb-2 text-sm text-[var(--text-tertiary)]">
+          <input
+            type="checkbox"
+            checked={hasSupplier}
+            onChange={(e) => updateFilter({ has_supplier: e.target.checked ? '1' : '' })}
+          />
+          Só com fornecedor conectado
+        </label>
+
+        <label className="flex items-center gap-2 pb-2 text-sm text-[var(--text-tertiary)]">
+          <input
+            type="checkbox"
+            checked={growingOnly}
+            onChange={(e) => updateFilter({ growing_only: e.target.checked ? '1' : '' })}
+          />
+          Só anúncios crescendo
+        </label>
       </div>
 
       {error && <EmptyState title="Não deu pra carregar os produtos quentes" subtitle={error} />}
@@ -141,10 +209,18 @@ export default function HotProducts() {
               )}
 
               <div className="mt-auto flex flex-wrap items-center gap-2 pt-1">
+                <LinkChip to={`/produtos?q=${encodeURIComponent(p.title)}`} variant="neutral">
+                  🔎 Buscar em Produtos
+                </LinkChip>
                 <LinkChip href={productUrl(p)} variant="brand">
                   🔗 Ver produto ↗
                 </LinkChip>
-                <LinkChip href={p.latest_ad_library_url} variant="violet">
+                {/* Sempre busca por DOMÍNIO — o link direto de um anúncio
+                    específico (?id=...) só mostra os anúncios daquela UMA
+                    página/anunciante, e uma mesma loja costuma ter vários
+                    anunciantes diferentes rodando anúncio pra ela ao mesmo
+                    tempo (confirmado ao vivo). */}
+                <LinkChip href={metaAdsLibrarySearchUrl(competitorDomains[p.competitor_id], operation)} variant="violet">
                   📣 Ver anúncio ↗
                 </LinkChip>
               </div>

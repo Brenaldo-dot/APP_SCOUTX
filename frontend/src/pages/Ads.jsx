@@ -261,13 +261,20 @@ export default function Ads() {
               <p className="line-clamp-3 text-sm text-[var(--text-secondary)]">
                 {ad.creative_text || 'Sem texto de criativo capturado'}
               </p>
-              <div className="mt-3 flex items-center justify-between gap-2 text-xs text-[var(--text-muted)]">
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--text-muted)]">
                 <span title={ad.started_at_raw ? 'Data informada pela própria biblioteca de anúncios' : 'Sem data de início confirmada pela biblioteca — contando desde que nosso sistema viu esse anúncio'}>
                   {ad.started_at_raw || (ad.days_active != null ? `${ad.days_active} dias sob nosso monitoramento` : '—')}
                 </span>
-                <LinkChip href={ad.library_url} variant="violet">
-                  📣 Ver na biblioteca ↗
-                </LinkChip>
+                <div className="flex flex-wrap items-center gap-2">
+                  {ad.product_title && (
+                    <LinkChip to={`/produtos?q=${encodeURIComponent(ad.product_title)}`} variant="neutral">
+                      🔎 Buscar em Produtos
+                    </LinkChip>
+                  )}
+                  <LinkChip href={ad.library_url} variant="violet">
+                    📣 Ver na biblioteca ↗
+                  </LinkChip>
+                </div>
               </div>
             </div>
           ))}

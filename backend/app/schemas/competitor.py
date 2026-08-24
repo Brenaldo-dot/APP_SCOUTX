@@ -40,6 +40,12 @@ class CompetitorOut(BaseModel):
     classification: ScaleClassification | None
     avg_daily_volume: float | None
     hot_products: int
+    # Data de criação (na Shopify, não no nosso banco) do produto ATIVO mais
+    # antigo dessa loja — proxy de "desde quando essa loja está no mercado"
+    # (ver competitors.py:list_competitors). Não é uma coluna do model, é
+    # calculado e atribuído no endpoint antes de serializar; None quando a
+    # loja não tem nenhum produto com essa data preenchida.
+    oldest_product_at: datetime | None = None
 
 
 class TechStackOut(BaseModel):

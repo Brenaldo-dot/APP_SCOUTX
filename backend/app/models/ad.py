@@ -62,6 +62,13 @@ class Ad(Base):
     started_at_raw: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[AdStatus] = mapped_column(Enum(AdStatus, native_enum=False), default=AdStatus.ACTIVE)
     killed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Revisão: achado ao vivo — anúncio real da Meta sumindo do "ativo" só
+    # porque uma rodada de scan não achou ele de novo (busca por keyword +
+    # scroll limitado, não é 100% determinística — mesma razão que já valia
+    # pro Google, ver _mark_killed_ads em services/ads_service.py). Exige 2
+    # rodadas seguidas sem ver o anúncio antes de marcar morto; zera assim
+    # que ele reaparece.
+    missed_scans: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_winning: Mapped[bool] = mapped_column(Boolean, default=False)  # ativo por 7+ dias
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

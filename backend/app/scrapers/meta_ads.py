@@ -133,13 +133,17 @@ _EXTRACT_CARDS_JS = """
   function destinationUrls(el) {
     const out = [];
     for (const a of el.querySelectorAll('a[href]')) {
-      const href = a.href;
-      const m = href.match(/[?&]u=([^&]+)/);
-      if (m) {
-        try { out.push(decodeURIComponent(m[1])); } catch (e) {}
-      } else if (/\\/products\\//.test(href)) {
-        out.push(href);
+      let href = a.href;
+      // O redirect da própria Meta (l.facebook.com/l.php?u=<destino>) às
+      // vezes vem encadeado (o destino decodificado é OUTRO redirect com seu
+      // próprio "u="), então decodifica de novo se ainda sobrar um "u=" —
+      // limitado a poucas voltas só por segurança contra loop.
+      for (let hop = 0; hop < 3; hop++) {
+        const m = href.match(/[?&]u=([^&]+)/);
+        if (!m) break;
+        try { href = decodeURIComponent(m[1]); } catch (e) { break; }
       }
+      if (/\\/(products|pages)\\//.test(href)) out.push(href);
     }
     return out;
   }
@@ -191,7 +195,7 @@ def build_advertiser_search_url(page_id: str, country: str = "CO") -> str:
     return f"{LIBRARY_BASE_URL}?active_status=active&ad_type=all&country={country}&view_all_page_id={page_id}"
 
 
-def _parse_card_text(text: str) -> dict | None:
+def _parse_card_text(text: str, country: str = "CO") -> dict | None:
     id_match = _ID_LABEL_RE.search(text)
     if not id_match:
         return None
@@ -218,7 +222,14 @@ def _parse_card_text(text: str) -> dict | None:
 
     return {
         "external_ad_id": external_id,
-        "library_url": f"{LIBRARY_BASE_URL}?id={external_id}",
+        # Revisão: achado ao vivo — sem `country=`, quem abre esse link vê o
+        # país da Ads Library INFERIDO pela localização do PRÓPRIO usuário
+        # (não o país que a gente pesquisou), e o anúncio simplesmente não
+        # aparece pra quem tá em outro país. `active_status=all` (não só
+        # `active`) porque a pessoa pode abrir o link semanas depois do
+        # anúncio ter sido pausado — sem isso o link vira uma página vazia
+        # mesmo estando correto.
+        "library_url": f"{LIBRARY_BASE_URL}?active_status=all&ad_type=all&country={country}&id={external_id}",
         "creative_text": creative_text,
         "started_at_raw": started_at_raw,
         "started_at": _parse_started_at(started_at_raw),
@@ -227,29 +238,41 @@ def _parse_card_text(text: str) -> dict | None:
     }
 
 
-_PRODUCT_HANDLE_RE = re.compile(r"/products/([^/?#]+)", re.IGNORECASE)
+# Revisão: achado ao vivo — "SOPLADOR DE AIRE INALAMBRICO" (compralinea.com.mx)
+# tinha 5 anúncios reais apontando pra mesma página, e só 2 batiam aqui. Dois
+# ajustes: aceita também subdomínio (tienda.loja.com) e o espelho Shopify
+# (loja.myshopify.com) — bem comum em anúncio de COD linkar direto pro
+# myshopify em vez do domínio próprio — e não fica só em /products/, um
+# anúncio pode linkar uma página de oferta/funil (/pages/...) que aponta pro
+# mesmo produto.
+_PRODUCT_HANDLE_RE = re.compile(r"/(?:products|pages)/([^/?#]+)", re.IGNORECASE)
 
 
 def _extract_product_handle(urls: list[str], domain: str) -> str | None:
     """
-    Match EXATO de produto por handle da URL de destino do anúncio — bem
-    mais confiável que tentar casar texto de criativo contra título salvo
-    (testado ao vivo: buscar pelo TÍTULO do produto na Ads Library retorna 0
+    Match de produto por handle da URL de destino do anúncio — bem mais
+    confiável que tentar casar texto de criativo contra título salvo (testado
+    ao vivo: buscar pelo TÍTULO do produto na Ads Library retorna 0
     resultados sempre, porque o texto do anúncio é copy de venda, não repete
     o título da página; ver docstring de `_EXTRACT_CARDS_JS`).
 
-    Só aceita URL do PRÓPRIO domínio da loja — um anúncio pode ter outros
-    links (Instagram, WhatsApp) que não devem virar match nenhum.
+    Só aceita URL do PRÓPRIO domínio da loja (ou subdomínio/espelho
+    myshopify dele) — um anúncio pode ter outros links (Instagram, WhatsApp)
+    que não devem virar match nenhum.
     """
     domain_lower = domain.lower().removeprefix("www.")
+    shop_name = domain_lower.split(".")[0]
     for url in urls:
         parsed = urlparse(url)
         host = parsed.netloc.lower().removeprefix("www.")
-        if host != domain_lower:
+        is_same_store = (
+            host == domain_lower or host.endswith(f".{domain_lower}") or host == f"{shop_name}.myshopify.com"
+        )
+        if not is_same_store:
             continue
         match = _PRODUCT_HANDLE_RE.search(parsed.path)
         if match:
-            return unquote(match.group(1)).lower()
+            return unquote(match.group(1)).strip().lower()
     return None
 
 
@@ -347,7 +370,7 @@ async def search_ads(
 
     results = []
     for card in cards_raw[:max_ads]:
-        parsed = _parse_card_text(card["text"])
+        parsed = _parse_card_text(card["text"], country)
         if parsed:
             # Handle do produto (match exato contra Product.handle) só faz
             # sentido quando sabemos QUAL domínio é da loja — sem isso não

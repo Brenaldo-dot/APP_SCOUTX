@@ -70,6 +70,15 @@ class Alert(Base):
         return self.product.main_image_url if self.product else None
 
     @property
+    def product_title(self) -> str | None:
+        # Usuário pediu um botão que leva pra aba Produtos já pesquisando
+        # esse nome — pra comparar em quantas lojas o mesmo produto aparece
+        # e se tá escalando em alguma delas. Precisa do título estruturado
+        # (não dava pra confiar em extrair de dentro do texto da mensagem,
+        # que muda de formato por tipo de alerta).
+        return self.product.title if self.product else None
+
+    @property
     def competitor_name(self) -> str:
         # Estruturado, não texto embutido na mensagem — usuário pediu a loja
         # visível em TODO alerta; confiar em cada f-string mencionar a loja

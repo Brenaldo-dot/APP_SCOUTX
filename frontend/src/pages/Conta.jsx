@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { rawApi } from '../api/rawClient.js'
 import { api } from '../api/client.js'
+import { useAuth } from '../context/AuthContext.jsx'
 import { useLanguage } from '../context/LanguageContext.jsx'
 import { LANGUAGES } from '../i18n/translations.js'
+import { initials, resizeImageToDataUrl } from '../utils/avatar.js'
+import { formatDate } from '../utils/date.js'
 import Select from '../components/Select.jsx'
 
 function Section({ title, description, children }) {
@@ -93,6 +96,14 @@ const DISCORD_STEPS = ['passo1', 'passo2', 'passo3', 'passo4', 'passo5']
 
 function DiscordCard() {
   const { t } = useLanguage()
+  const { me } = useAuth()
+  // Standard (chave interna "solo") não pode HABILITAR notificação no
+  // Discord — o back já recusa salvar/testar (backend/app/api/settings.py),
+  // isso aqui só deixa a tela clara sobre o motivo em vez de um erro seco
+  // depois de clicar em Salvar, e evita a pessoa nem tentar. `me?.plan`
+  // vem do /api/me (server.js) — chave crua, não o label, pra não depender
+  // do texto "Standard" mudar de novo num rebrand.
+  const isStandardPlan = me?.plan === 'solo'
   const [webhookUrl, setWebhookUrl] = useState(null)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(true)
@@ -157,7 +168,13 @@ function DiscordCard() {
 
   return (
     <Section title={t('conta.discord.titulo')} description={t('conta.discord.desc')}>
-      {!loading && (
+      {isStandardPlan && (
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-400">
+          🔒 {t('conta.discord.somentePro')}
+        </div>
+      )}
+
+      {!loading && !isStandardPlan && (
         <span
           className={`mb-3 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
             webhookUrl ? 'bg-emerald-500/15 text-emerald-400' : 'bg-[var(--hover-surface)] text-[var(--text-tertiary)]'
@@ -174,15 +191,21 @@ function DiscordCard() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={t('conta.discord.placeholder')}
-          className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 font-mono text-xs text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
+          disabled={isStandardPlan}
+          className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 font-mono text-xs text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
         />
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2.5">
-        <button onClick={handleSave} disabled={saving} className="btn-primary px-4 py-2 text-xs">
+        <button
+          onClick={handleSave}
+          disabled={saving || isStandardPlan}
+          title={isStandardPlan ? t('conta.discord.somentePro') : undefined}
+          className="btn-primary px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+        >
           {saving ? t('conta.discord.salvando') : t('conta.discord.salvar')}
         </button>
-        {webhookUrl && (
+        {webhookUrl && !isStandardPlan && (
           <>
             <button
               onClick={handleTest}
@@ -195,6 +218,11 @@ function DiscordCard() {
               {t('conta.discord.remover')}
             </button>
           </>
+        )}
+        {webhookUrl && isStandardPlan && (
+          <button onClick={handleRemove} className="text-xs font-medium text-[var(--text-muted)] hover:text-red-400">
+            {t('conta.discord.remover')}
+          </button>
         )}
       </div>
 
@@ -227,6 +255,113 @@ function DiscordCard() {
   )
 }
 
+function AvatarCard() {
+  const { t } = useLanguage()
+  const { me, refreshMe } = useAuth()
+  const fileInputRef = useRef(null)
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  async function handleFileChange(e) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // permite escolher o mesmo arquivo de novo depois
+    if (!file) return
+    setMsg(null)
+    setSaving(true)
+    try {
+      const dataUrl = await resizeImageToDataUrl(file)
+      await rawApi.updateMyAvatar(dataUrl)
+      await refreshMe()
+      setMsg({ type: 'success', text: t('conta.foto.sucesso') })
+    } catch (err) {
+      setMsg({ type: 'error', text: err.message || 'Erro' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleRemove() {
+    setMsg(null)
+    setSaving(true)
+    try {
+      await rawApi.removeMyAvatar()
+      await refreshMe()
+      setMsg({ type: 'success', text: t('conta.foto.sucessoRemover') })
+    } catch (err) {
+      setMsg({ type: 'error', text: err.message || 'Erro' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Section title={t('conta.foto.titulo')} description={t('conta.foto.desc')}>
+      <div className="flex items-center gap-4">
+        {me?.avatarUrl ? (
+          <img src={me.avatarUrl} alt="" className="h-16 w-16 shrink-0 rounded-full object-cover" />
+        ) : (
+          <span
+            className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-lg font-bold text-white"
+            style={{
+              background: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%)',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.35), 0 2px 8px rgba(59,130,246,0.4)',
+            }}
+          >
+            {initials(me?.name)}
+          </span>
+        )}
+        <div className="flex flex-col gap-2">
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={saving}
+            className="rounded-full border border-[var(--border)] px-3.5 py-2 text-xs font-medium text-[var(--text-tertiary)] hover:bg-[var(--hover-surface)] disabled:opacity-50"
+          >
+            {saving ? t('conta.foto.salvando') : t('conta.foto.escolher')}
+          </button>
+          {me?.avatarUrl && (
+            <button onClick={handleRemove} disabled={saving} className="text-left text-xs font-medium text-[var(--text-muted)] hover:text-red-400">
+              {t('conta.foto.remover')}
+            </button>
+          )}
+        </div>
+      </div>
+      <Feedback msg={msg} />
+    </Section>
+  )
+}
+
+// Pedido do usuário: mostrar até quando o plano da organização vale — admin
+// (dono da plataforma) não tem organização/plano nenhum, esse card some
+// pra ele (ver /api/me: planLabel fica null nesse caso).
+function PlanCard() {
+  const { t } = useLanguage()
+  const { me } = useAuth()
+  if (!me?.planLabel) return null
+
+  const expiresAt = me.planExpiresAt ? new Date(me.planExpiresAt) : null
+  const daysLeft = expiresAt ? Math.ceil((expiresAt.getTime() - Date.now()) / 86400000) : null
+  const expired = daysLeft !== null && daysLeft < 0
+  const soon = !expired && daysLeft !== null && daysLeft <= 7
+
+  return (
+    <Section title={t('conta.plano.titulo')} description={me.organizationName}>
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="rounded-full bg-brand-500/15 px-3 py-1 text-sm font-semibold text-brand-500">
+          {t('conta.plano.rotulo')} {me.planLabel}
+        </span>
+        {expiresAt && (
+          <span
+            className={`text-sm ${expired ? 'text-red-400' : soon ? 'text-amber-400' : 'text-[var(--text-muted)]'}`}
+          >
+            {expired ? t('conta.plano.vencido') : t('conta.plano.validoAte')} {formatDate(expiresAt)}
+          </span>
+        )}
+      </div>
+    </Section>
+  )
+}
+
 function LanguageCard() {
   const { language, changeLanguage, t } = useLanguage()
   return (
@@ -250,6 +385,8 @@ export default function Conta() {
         <p className="text-sm text-[var(--text-muted)]">{t('conta.subtitulo')}</p>
       </div>
 
+      <AvatarCard />
+      <PlanCard />
       <LanguageCard />
       <PasswordCard />
       <DiscordCard />

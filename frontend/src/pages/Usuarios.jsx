@@ -1,11 +1,105 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import {
+  AlertTriangle,
+  Ban,
+  Building2,
+  History,
+  KeyRound,
+  Lock,
+  RefreshCw,
+  RotateCcw,
+  ShieldCheck,
+  SlidersHorizontal,
+  Trash2,
+  UserPlus,
+} from 'lucide-react'
 import { rawApi } from '../api/rawClient.js'
 import { api } from '../api/client.js'
+import Select from '../components/Select.jsx'
+import StatCard from '../components/StatCard.jsx'
 import { operationLabel } from '../context/OperationContext.jsx'
-import { formatDateTime } from '../utils/date.js'
+import { formatDateTime, formatRelativeTime } from '../utils/date.js'
 
-const emptyForm = { name: '', email: '', password: '', admin: false }
+const SORT_OPTIONS = [
+  { value: 'name', label: 'Ordenar: cadastro (padrão)' },
+  { value: 'inactive', label: 'Ordenar: sem logar há mais tempo' },
+  { value: 'created', label: 'Ordenar: criado mais recente' },
+]
+
+// Tempo de conta — quanto tempo faz que essa pessoa tem acesso, não quantas
+// vezes usou (isso já é o "Buscas"/"Alertas gerados" ao lado). Ajuda a achar
+// conta velha que nunca foi revisada.
+function tenureLabel(createdAt) {
+  const days = Math.floor((Date.now() - new Date(createdAt).getTime()) / 86400000)
+  if (days < 1) return 'hoje'
+  if (days < 30) return `${days} dia${days === 1 ? '' : 's'}`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months} ${months === 1 ? 'mês' : 'meses'}`
+  const years = Math.floor(months / 12)
+  const remMonths = months % 12
+  return remMonths > 0 ? `${years}a ${remMonths}m` : `${years} ${years === 1 ? 'ano' : 'anos'}`
+}
+
+// Contas "Legado" (migração automática) ganham validade de 10 anos — mostrar
+// "vence em 3653 dias" fica um número gigante e sem sentido pra quem lê;
+// acima de 1 ano vira "X+ anos", sem contar dia a dia (não é o que importa
+// pra esse caso, é só sinalizar "não vence tão cedo").
+function expiryCountdownLabel(expiresAt) {
+  const days = Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86400000)
+  if (days > 365) {
+    const years = Math.floor(days / 365)
+    return `vence em ${years}+ ano${years === 1 ? '' : 's'}`
+  }
+  if (days > 60) {
+    const months = Math.floor(days / 30)
+    return `vence em ${months} ${months === 1 ? 'mês' : 'meses'}`
+  }
+  return `vence em ${days} dia${days === 1 ? '' : 's'}`
+}
+
+const AUDIT_ACTIONS = {
+  created: { icon: UserPlus, color: 'text-emerald-400', text: (a, t) => `${a} criou o usuário ${t}` },
+  promoted: { icon: ShieldCheck, color: 'text-brand-500', text: (a, t) => `${a} promoveu ${t} a admin` },
+  demoted: { icon: ShieldCheck, color: 'text-amber-400', text: (a, t) => `${a} removeu o admin de ${t}` },
+  suspended: { icon: Ban, color: 'text-red-400', text: (a, t) => `${a} suspendeu ${t}` },
+  reactivated: { icon: RotateCcw, color: 'text-emerald-400', text: (a, t) => `${a} reativou ${t}` },
+  password_reset: { icon: KeyRound, color: 'text-[var(--text-tertiary)]', text: (a, t) => `${a} redefiniu a senha de ${t}` },
+  deleted: { icon: Trash2, color: 'text-red-400', text: (a, t) => `${a} removeu o usuário ${t}` },
+  permission_changed: { icon: SlidersHorizontal, color: 'text-[var(--text-tertiary)]', text: (a, t) => `${a} alterou permissões de ${t}` },
+  org_created: { icon: Building2, color: 'text-emerald-400', text: (a, t) => `${a} criou a organização ${t}` },
+  org_renewed: { icon: RefreshCw, color: 'text-brand-500', text: (a, t) => `${a} renovou/mudou o plano de ${t}` },
+  org_expiry_edited: { icon: Building2, color: 'text-amber-400', text: (a, t) => `${a} editou a validade de ${t}` },
+}
+
+const emptyForm = { name: '', email: '', password: '', admin: false, organizationId: '' }
+
+const inputClass =
+  'rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none'
+
+// Switch próprio — checkbox nativo do navegador destoava do resto do app
+// (mesma razão dos outros componentes trocados por versão própria: Select,
+// LedIcon). Usado tanto nas permissões da tabela quanto no form de criação.
+function Toggle({ checked, onChange, title }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      title={title}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-block h-5 w-9 shrink-0 rounded-full border align-middle transition-colors ${
+        checked ? 'border-brand-500 bg-brand-500' : 'border-[var(--border)] bg-[var(--hover-surface)]'
+      }`}
+    >
+      <span
+        className={`absolute left-0.5 top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
+          checked ? 'translate-x-4' : 'translate-x-0'
+        }`}
+      />
+    </button>
+  )
+}
 
 export default function Usuarios() {
   const [users, setUsers] = useState(null)
@@ -18,6 +112,60 @@ export default function Usuarios() {
   const [competitorSummary, setCompetitorSummary] = useState(null)
   const [claiming, setClaiming] = useState(false)
   const [claimMsg, setClaimMsg] = useState(null)
+  const [search, setSearch] = useState('')
+  const [sortBy, setSortBy] = useState('name')
+  const [trackerQuery, setTrackerQuery] = useState('')
+  const [trackerResults, setTrackerResults] = useState(null)
+  const [auditLog, setAuditLog] = useState(null)
+  const [organizations, setOrganizations] = useState(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const orgFilter = searchParams.get('org') || ''
+
+  function setOrgFilter(value) {
+    const next = new URLSearchParams(searchParams)
+    if (value) next.set('org', value)
+    else next.delete('org')
+    setSearchParams(next)
+  }
+
+  useEffect(() => {
+    const q = trackerQuery.trim()
+    if (q.length < 2) {
+      setTrackerResults(null)
+      return
+    }
+    const t = setTimeout(() => {
+      api.searchCompetitorTrackers(q).then(setTrackerResults).catch(() => setTrackerResults([]))
+    }, 350)
+    return () => clearTimeout(t)
+  }, [trackerQuery])
+
+  const stats = useMemo(() => {
+    if (!users) return null
+    return {
+      total: users.length,
+      admins: users.filter((u) => u.role === 'admin').length,
+      suspended: users.filter((u) => u.suspended).length,
+      neverLoggedIn: users.filter((u) => !u.lastLoginAt).length,
+    }
+  }, [users])
+
+  const filteredUsers = useMemo(() => {
+    if (!users) return users
+    const term = search.trim().toLowerCase()
+    let list = term
+      ? users.filter((u) => u.name.toLowerCase().includes(term) || u.email.toLowerCase().includes(term))
+      : [...users]
+    if (orgFilter) list = list.filter((u) => String(u.organizationId) === orgFilter)
+    if (sortBy === 'inactive') {
+      // Nunca logou (null) primeiro — é exatamente quem mais precisa de
+      // atenção (conta criada e esquecida, ou nunca usada de propósito).
+      list.sort((a, b) => new Date(a.lastLoginAt || 0) - new Date(b.lastLoginAt || 0))
+    } else if (sortBy === 'created') {
+      list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    }
+    return list
+  }, [users, search, sortBy, orgFilter])
 
   async function handleClaimOrphaned() {
     setClaiming(true)
@@ -47,6 +195,14 @@ export default function Usuarios() {
       .getCompetitorSummaryByUser()
       .then(setCompetitorSummary)
       .catch(() => setCompetitorSummary([]))
+    rawApi
+      .listAuditLog()
+      .then(setAuditLog)
+      .catch(() => setAuditLog([]))
+    rawApi
+      .listOrganizations()
+      .then(setOrganizations)
+      .catch(() => setOrganizations([]))
   }
 
   useEffect(load, [])
@@ -57,6 +213,10 @@ export default function Usuarios() {
       setFormMsg({ type: 'error', text: 'Preencha nome, email e uma senha com pelo menos 8 caracteres.' })
       return
     }
+    if (!form.admin && !form.organizationId) {
+      setFormMsg({ type: 'error', text: 'Selecione a organização desse usuário (ou marque "Já criar como admin").' })
+      return
+    }
     setCreating(true)
     try {
       await rawApi.createUser({
@@ -64,6 +224,7 @@ export default function Usuarios() {
         email: form.email.trim(),
         password: form.password,
         role: form.admin ? 'admin' : 'collaborator',
+        organizationId: form.admin ? undefined : Number(form.organizationId),
       })
       setFormMsg({ type: 'success', text: 'Usuário criado! Envie o email e a senha combinada pra essa pessoa.' })
       setForm(emptyForm)
@@ -76,14 +237,18 @@ export default function Usuarios() {
   }
 
   async function togglePermission(user, field, value) {
+    if (field === 'role' && value && !confirm(`Dar acesso de ADMINISTRADOR pra ${user.name}? Isso dá acesso total ao app, inclusive a dados de outros usuários.`)) {
+      return
+    }
     const prev = users
     setUsers(users.map((u) => (u.id === user.id ? { ...u, [field]: value } : u)))
     try {
       const body = field === 'role' ? { role: value ? 'admin' : 'collaborator' } : { [field]: value }
       await rawApi.updateUser(user.id, body)
-    } catch {
+      load()
+    } catch (err) {
       setUsers(prev)
-      alert('Não foi possível salvar a alteração.')
+      alert(err.message || 'Não foi possível salvar a alteração.')
     }
   }
 
@@ -130,24 +295,94 @@ export default function Usuarios() {
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 
-      <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-5">
-        <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-amber-500">Concorrentes órfãos</h3>
-        <p className="mb-3.5 text-sm text-[var(--text-tertiary)]">
-          Concorrente sem NENHUM usuário rastreando (ex: cadastrados antes de cada um ter sua própria lista) fica
-          invisível pra todo mundo. Clique abaixo pra atribuir todos eles à SUA conta.
-        </p>
-        <button
-          onClick={handleClaimOrphaned}
-          disabled={claiming}
-          className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60"
-        >
-          {claiming ? 'Reivindicando…' : 'Reivindicar concorrentes órfãos'}
-        </button>
-        {claimMsg && (
-          <p className={`mt-3 text-sm ${claimMsg.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
-            {claimMsg.text}
+      {stats && (
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <StatCard icon="👥" label="Usuários" value={stats.total} />
+          <StatCard icon="🛡️" label="Administradores" value={stats.admins} />
+          <StatCard icon="🚫" label="Suspensos" value={stats.suspended} />
+          <StatCard icon="👻" label="Nunca logaram" value={stats.neverLoggedIn} />
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-5">
+          <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-amber-500">Concorrentes órfãos</h3>
+          <p className="mb-3.5 text-sm text-[var(--text-tertiary)]">
+            Concorrente sem NENHUM usuário rastreando (ex: cadastrados antes de cada um ter sua própria lista) fica
+            invisível pra todo mundo. Clique abaixo pra atribuir todos eles à SUA conta.
           </p>
-        )}
+          <button
+            onClick={handleClaimOrphaned}
+            disabled={claiming}
+            className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60"
+          >
+            {claiming ? 'Reivindicando…' : 'Reivindicar concorrentes órfãos'}
+          </button>
+          {claimMsg && (
+            <p className={`mt-3 text-sm ${claimMsg.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
+              {claimMsg.text}
+            </p>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
+          <h3 className="mb-3.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Criar novo usuário</h3>
+          {organizations?.length === 0 && (
+            <p className="mb-3.5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-500">
+              Nenhuma organização criada ainda — só dá pra criar usuário collaborator depois de ter uma. Crie a
+              organização primeiro na aba{' '}
+              <Link to="/organizacoes" className="underline">
+                Organizações
+              </Link>
+              .
+            </p>
+          )}
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            <input
+              type="text"
+              placeholder="Nome"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className={inputClass}
+            />
+            <input
+              type="email"
+              placeholder="Email"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+              className={inputClass}
+            />
+          </div>
+          <input
+            type="password"
+            placeholder="Senha (mín. 8 caracteres)"
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+            autoComplete="new-password"
+            className={`${inputClass} mt-2.5 w-full`}
+          />
+          {!form.admin && (
+            <Select
+              className="mt-2.5"
+              value={form.organizationId}
+              onChange={(v) => setForm({ ...form, organizationId: v })}
+              placeholder="Selecione a organização…"
+              options={(organizations || []).map((o) => ({ value: String(o.id), label: `${o.name} (${o.planLabel})` }))}
+            />
+          )}
+          <div className="mt-3.5 flex items-center justify-between gap-3">
+            <label className="flex items-center gap-3 text-sm text-[var(--text-secondary)]">
+              <Toggle checked={form.admin} onChange={(v) => setForm({ ...form, admin: v })} />
+              <span className="whitespace-nowrap">Já criar como admin</span>
+            </label>
+            <button onClick={handleCreate} disabled={creating} className="btn-primary px-4 py-2 text-sm">
+              {creating ? 'Criando…' : 'Criar usuário'}
+            </button>
+          </div>
+          {formMsg && (
+            <p className={`mt-3 text-sm ${formMsg.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>{formMsg.text}</p>
+          )}
+        </div>
       </div>
 
       <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
@@ -157,13 +392,78 @@ export default function Usuarios() {
           domínio cadastrado por duas pessoas conta pra cada uma (compartilham o dado raspado, mas cada uma tem sua
           própria lista).
         </p>
-        <div className="overflow-hidden rounded-lg border border-[var(--border)]">
+
+        <input
+          type="text"
+          placeholder="Buscar por domínio ou nome da loja — ex: naiastore.com"
+          value={trackerQuery}
+          onChange={(e) => setTrackerQuery(e.target.value)}
+          className={`${inputClass} mb-3.5 w-full max-w-sm`}
+        />
+
+        {trackerQuery.trim().length >= 2 && (
+          <div className="mb-3.5 overflow-x-auto rounded-lg border border-[var(--border)]">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-[var(--bg-surface-2)] text-xs uppercase text-[var(--text-muted)]">
+                <tr>
+                  <th className="px-3 py-2.5">Loja</th>
+                  <th className="px-3 py-2.5">Operação</th>
+                  <th className="px-3 py-2.5">Rastreada por</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--border)]">
+                {trackerResults === null && (
+                  <tr>
+                    <td colSpan={3} className="px-3 py-4 text-center text-[var(--text-muted)]">
+                      Buscando…
+                    </td>
+                  </tr>
+                )}
+                {trackerResults?.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="px-3 py-4 text-center text-[var(--text-muted)]">
+                      Nenhuma loja encontrada com esse termo.
+                    </td>
+                  </tr>
+                )}
+                {trackerResults?.map((row) => (
+                  <tr key={row.competitor_id}>
+                    <td className="px-3 py-2.5">
+                      <div className="text-[var(--text-primary)]">{row.name}</div>
+                      <div className="text-xs text-[var(--text-muted)]">{row.domain}</div>
+                    </td>
+                    <td className="px-3 py-2.5 text-[var(--text-tertiary)]">{operationLabel(row.operation)}</td>
+                    <td className="px-3 py-2.5">
+                      {row.tracker_user_ids.length === 0 ? (
+                        <span className="text-xs text-[var(--text-muted)]">Órfã (ninguém rastreando)</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {row.tracker_user_ids.map((uid) => (
+                            <span
+                              key={uid}
+                              className="rounded-full bg-[var(--hover-surface)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]"
+                            >
+                              {users?.find((u) => u.id === uid)?.name || `Usuário #${uid}`}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
           <table className="w-full text-left text-sm">
             <thead className="bg-[var(--bg-surface-2)] text-xs uppercase text-[var(--text-muted)]">
               <tr>
                 <th className="px-3 py-2.5">Usuário</th>
                 <th className="px-3 py-2.5">Por operação</th>
                 <th className="px-3 py-2.5">Total</th>
+                <th className="px-3 py-2.5">Alertas gerados</th>
                 <th className="px-3 py-2.5"></th>
               </tr>
             </thead>
@@ -179,6 +479,7 @@ export default function Usuarios() {
                         .join(' · ')}
                     </td>
                     <td className="px-3 py-2.5 text-[var(--text-primary)]">{row.total}</td>
+                    <td className="px-3 py-2.5 text-[var(--text-tertiary)]">{row.alerts_total ?? 0}</td>
                     <td className="px-3 py-2.5 text-right">
                       <Link
                         to={`/concorrentes?as_user_id=${row.user_id}`}
@@ -192,7 +493,7 @@ export default function Usuarios() {
               })}
               {competitorSummary?.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-3 py-4 text-center text-[var(--text-muted)]">
+                  <td colSpan={5} className="px-3 py-4 text-center text-[var(--text-muted)]">
                     Ninguém cadastrou nenhum concorrente ainda.
                   </td>
                 </tr>
@@ -202,51 +503,34 @@ export default function Usuarios() {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
-        <h3 className="mb-3.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Criar novo usuário</h3>
-        <div className="flex max-w-sm flex-col gap-2.5">
-          <input
-            type="text"
-            placeholder="Nome"
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-            className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
-          />
-          <input
-            type="email"
-            placeholder="Email"
-            value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-            className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
-          />
-          <input
-            type="password"
-            placeholder="Senha (mín. 8 caracteres)"
-            value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
-            autoComplete="new-password"
-            className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
-          />
-          <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-            <input type="checkbox" checked={form.admin} onChange={(e) => setForm({ ...form, admin: e.target.checked })} />
-            Já criar como admin
-          </label>
-          <button onClick={handleCreate} disabled={creating} className="btn-primary mt-1">
-            {creating ? 'Criando…' : 'Criar usuário'}
-          </button>
-        </div>
-        {formMsg && (
-          <p className={`mt-3 text-sm ${formMsg.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>{formMsg.text}</p>
-        )}
-      </div>
-
       <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)]">
         <div className="border-b border-[var(--border)] px-5 py-4">
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">🔒 Controle de acesso e segurança</h3>
+          <h3 className="flex items-center gap-1.5 text-sm font-semibold text-[var(--text-primary)]">
+            <ShieldCheck size={15} className="text-brand-500" /> Controle de acesso e segurança
+          </h3>
           <p className="mt-1 text-sm text-[var(--text-tertiary)]">
             Só administradores veem esta tabela. IP repetido em várias contas ou uma conta logando de muitos IPs
             diferentes pode indicar senha compartilhada ou acesso indevido — vale checar.
           </p>
+          <div className="mt-3.5 flex flex-wrap gap-2">
+            <input
+              type="text"
+              placeholder="Buscar por nome ou email"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className={`${inputClass} w-56 py-1.5`}
+            />
+            <Select
+              className="w-56"
+              value={orgFilter}
+              onChange={setOrgFilter}
+              options={[
+                { value: '', label: 'Todas as organizações' },
+                ...(organizations || []).map((o) => ({ value: String(o.id), label: o.name })),
+              ]}
+            />
+            <Select className="w-64" value={sortBy} onChange={setSortBy} options={SORT_OPTIONS} />
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
@@ -254,55 +538,93 @@ export default function Usuarios() {
               <tr>
                 <th className="px-4 py-3">Nome</th>
                 <th className="px-4 py-3">Email</th>
+                <th className="px-4 py-3">Organização</th>
                 <th className="px-4 py-3">Criado em</th>
                 <th className="px-4 py-3">Admin</th>
-                <th className="px-4 py-3">Vê histórico</th>
-                <th className="px-4 py-3">ScoutX</th>
-                <th className="px-4 py-3">Buscas</th>
+                <th className="px-4 py-3">Permissões</th>
+                <th className="px-4 py-3 text-right">Buscas</th>
                 <th className="px-4 py-3">Último login</th>
                 <th className="px-4 py-3">IPs usados</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border)]">
-              {users?.map((u) => {
+              {filteredUsers?.map((u) => {
                 const extraIps = Math.max(0, (u.allIps?.length || 0) - 3)
                 const risky = u.ipCount > 1
                 return (
                   <tr key={u.id} className="hover:bg-[var(--bg-surface-2)]">
                     <td className="px-4 py-3.5 font-medium text-[var(--text-primary)]">
-                      <div className="flex items-center gap-2">
-                        {u.name}
-                        {u.lockedUntil && (
-                          <span
-                            className="rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-400"
-                            title={u.lockedPermanently ? undefined : `Bloqueado até ${formatDateTime(u.lockedUntil)}`}
-                          >
-                            {u.lockedPermanently ? '🔒 Precisa de reset' : '🔒 Bloqueado'}
-                          </span>
-                        )}
-                      </div>
+                      <div>{u.name}</div>
+                      {(u.suspended || u.lockedUntil) && (
+                        <div className="mt-1 flex flex-col items-start gap-1">
+                          {u.suspended && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-400">
+                              <Ban size={10} /> Suspenso
+                            </span>
+                          )}
+                          {u.lockedUntil && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-400"
+                              title={u.lockedPermanently ? undefined : `Bloqueado até ${formatDateTime(u.lockedUntil)}`}
+                            >
+                              <Lock size={10} /> {u.lockedPermanently ? 'Precisa de reset' : 'Bloqueado'}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3.5 text-[var(--text-tertiary)]">{u.email}</td>
-                    <td className="px-4 py-3.5 text-xs text-[var(--text-muted)]">{formatDateTime(u.createdAt)}</td>
-                    <td className="px-4 py-3.5">
-                      <input type="checkbox" checked={u.role === 'admin'} onChange={(e) => togglePermission(u, 'role', e.target.checked)} />
+                    <td className="min-w-[9rem] px-4 py-3.5">
+                      {u.organizationName ? (
+                        <>
+                          <button
+                            onClick={() => setOrgFilter(String(u.organizationId))}
+                            className="text-left text-[var(--text-tertiary)] hover:text-brand-500 hover:underline"
+                            title="Filtrar por essa organização"
+                          >
+                            {u.organizationName}
+                          </button>
+                          <div className="mt-1 flex flex-wrap items-center gap-1">
+                            <span className="whitespace-nowrap rounded-full bg-brand-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-brand-500">
+                              {u.organizationPlan}
+                            </span>
+                            {u.organizationExpiresAt &&
+                              (new Date(u.organizationExpiresAt) < new Date() ? (
+                                <span className="whitespace-nowrap rounded-full bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-400">
+                                  vencido
+                                </span>
+                              ) : (
+                                <span className="whitespace-nowrap text-[10px] text-[var(--text-faint)]">
+                                  {expiryCountdownLabel(u.organizationExpiresAt)}
+                                </span>
+                              ))}
+                          </div>
+                        </>
+                      ) : (
+                        <span className="text-xs text-[var(--text-faint)]">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3.5 text-xs text-[var(--text-muted)]">
+                      {formatDateTime(u.createdAt)}
+                      <div className="text-[var(--text-faint)]">há {tenureLabel(u.createdAt)}</div>
                     </td>
                     <td className="px-4 py-3.5">
-                      <input
-                        type="checkbox"
-                        checked={u.canViewHistory}
-                        onChange={(e) => togglePermission(u, 'canViewHistory', e.target.checked)}
+                      <Toggle
+                        checked={u.role === 'admin'}
+                        title={u.roleChangedAt ? `Alterado por ${u.roleChangedByName || '—'} em ${formatDateTime(u.roleChangedAt)}` : undefined}
+                        onChange={(v) => togglePermission(u, 'role', v)}
                       />
                     </td>
-                    <td className="px-4 py-3.5">
-                      <input
-                        type="checkbox"
-                        checked={u.canAccessMinerador}
-                        onChange={(e) => togglePermission(u, 'canAccessMinerador', e.target.checked)}
-                      />
+                    <td className="min-w-[8.5rem] px-4 py-3.5">
+                      <div className="flex flex-col gap-2">
+                        <label className="flex items-center gap-3 text-xs text-[var(--text-tertiary)]">
+                          <Toggle checked={u.canAccessMinerador} onChange={(v) => togglePermission(u, 'canAccessMinerador', v)} />
+                          <span className="whitespace-nowrap">ScoutX</span>
+                        </label>
+                      </div>
                     </td>
-                    <td className="px-4 py-3.5 text-[var(--text-tertiary)]">{u.searchCount}</td>
+                    <td className="px-4 py-3.5 text-right tabular-nums text-[var(--text-tertiary)]">{u.searchCount}</td>
                     <td className="px-4 py-3.5 text-xs text-[var(--text-muted)]">{formatDateTime(u.lastLoginAt)}</td>
                     <td className="px-4 py-3.5">
                       {u.allIps?.length > 0 ? (
@@ -313,7 +635,7 @@ export default function Usuarios() {
                             risky ? 'bg-red-500/10 ring-1 ring-red-500/30' : 'hover:bg-[var(--hover-surface)]'
                           }`}
                         >
-                          {risky && <span title="Mais de um IP nessa conta">⚠️</span>}
+                          {risky && <AlertTriangle size={12} className="text-red-400" title="Mais de um IP nessa conta" />}
                           {u.allIps.slice(0, 3).map((ip) => (
                             <span
                               key={ip}
@@ -331,27 +653,86 @@ export default function Usuarios() {
                       )}
                     </td>
                     <td className="px-4 py-3.5 text-right">
-                      <div className="flex items-center justify-end gap-3">
-                        <button onClick={() => openPasswordEdit(u)} className="text-xs font-medium text-[var(--text-muted)] hover:text-brand-500">
-                          🔑 Senha
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => openPasswordEdit(u)}
+                          title="Trocar senha"
+                          className="rounded-lg p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--hover-surface)] hover:text-brand-500"
+                        >
+                          <KeyRound size={15} />
                         </button>
-                        <button onClick={() => handleDelete(u)} className="text-xs font-medium text-[var(--text-muted)] hover:text-red-400">
-                          🗑️ Remover
+                        <button
+                          onClick={() => togglePermission(u, 'suspended', !u.suspended)}
+                          title={u.suspended ? 'Reativar acesso' : 'Suspender acesso'}
+                          className="rounded-lg p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--hover-surface)] hover:text-amber-400"
+                        >
+                          {u.suspended ? <RotateCcw size={15} /> : <Ban size={15} />}
+                        </button>
+                        <button
+                          onClick={() => handleDelete(u)}
+                          title="Remover usuário"
+                          className="rounded-lg p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--hover-surface)] hover:text-red-400"
+                        >
+                          <Trash2 size={15} />
                         </button>
                       </div>
                     </td>
                   </tr>
                 )
               })}
+              {filteredUsers?.length === 0 && (
+                <tr>
+                  <td colSpan={10} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                    Nenhum usuário encontrado com esse termo.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
+        <h3 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+          <History size={14} /> Log de auditoria
+        </h3>
+        <p className="mb-3.5 text-sm text-[var(--text-tertiary)]">
+          Toda ação administrativa fica registrada aqui — quem promoveu, suspendeu, resetou senha ou removeu quem, e
+          quando. Últimas 100 ações.
+        </p>
+        {auditLog === null && <p className="text-sm text-[var(--text-muted)]">Carregando…</p>}
+        {auditLog?.length === 0 && <p className="text-sm text-[var(--text-muted)]">Nenhuma ação administrativa registrada ainda.</p>}
+        {auditLog && auditLog.length > 0 && (
+          <div className="max-h-96 space-y-1 overflow-y-auto pr-1">
+            {auditLog.map((entry) => {
+              const cfg = AUDIT_ACTIONS[entry.action] || AUDIT_ACTIONS.permission_changed
+              const Icon = cfg.icon
+              return (
+                <div key={entry.id} className="flex items-start gap-2.5 rounded-lg px-2 py-2 text-sm hover:bg-[var(--hover-surface)]">
+                  <Icon size={15} className={`mt-0.5 shrink-0 ${cfg.color}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[var(--text-secondary)]">{cfg.text(entry.actorName, entry.targetName)}</p>
+                    {entry.details && <p className="text-xs text-[var(--text-muted)]">{entry.details}</p>}
+                  </div>
+                  <span className="shrink-0 text-xs text-[var(--text-muted)]" title={formatDateTime(entry.createdAt)}>
+                    {formatRelativeTime(entry.createdAt)}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
       {ipDetail && (
-        <div>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">IPs usados por {ipDetail.user.name}</h3>
-          <div className="overflow-hidden rounded-lg border border-[var(--border)]">
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">IPs usados por {ipDetail.user.name}</h3>
+            <button onClick={() => setIpDetail(null)} className="text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-tertiary)]">
+              Fechar ✕
+            </button>
+          </div>
+          <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
             <table className="w-full text-left text-sm">
               <thead className="bg-[var(--bg-surface-2)] text-xs uppercase text-[var(--text-muted)]">
                 <tr>
@@ -408,7 +789,7 @@ export default function Usuarios() {
               onChange={(e) => setPasswordEdit({ ...passwordEdit, value: e.target.value, error: null })}
               onKeyDown={(e) => e.key === 'Enter' && submitPasswordEdit()}
               autoComplete="new-password"
-              className="mt-3 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
+              className={`${inputClass} mt-3 w-full`}
             />
             {passwordEdit.error && <p className="mt-2 text-xs text-red-400">{passwordEdit.error}</p>}
             <div className="mt-4 flex justify-end gap-2">

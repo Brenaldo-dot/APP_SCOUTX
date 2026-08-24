@@ -13,6 +13,10 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 _VALID_PREFIXES = ("https://discord.com/api/webhooks/", "https://discordapp.com/api/webhooks/")
 
+_DISCORD_PRO_ONLY_MESSAGE = (
+    "Alertas no Discord são exclusivos do plano Pro — assine o Pro pra habilitar essa notificação."
+)
+
 
 def _get_or_none(db: Session, user_id: int) -> UserNotificationSettings | None:
     return db.query(UserNotificationSettings).filter(UserNotificationSettings.user_id == user_id).first()
@@ -29,6 +33,12 @@ def set_discord_webhook(
     payload: DiscordWebhookUpdate, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)
 ):
     url = payload.discord_webhook_url.strip() if payload.discord_webhook_url else None
+    # Plano Standard só pode LIMPAR o campo (url=None) — nunca CONFIGURAR um
+    # webhook novo. Deixamos o GET/DELETE liberados (a pessoa continua vendo
+    # a tela e pode remover um webhook antigo de quando estava no Pro), só o
+    # "habilitar de verdade" é bloqueado aqui, ponto único de escrita.
+    if url and current_user.is_standard_plan:
+        raise HTTPException(403, _DISCORD_PRO_ONLY_MESSAGE)
     if url and not url.startswith(_VALID_PREFIXES):
         raise HTTPException(400, "Isso não parece uma URL de webhook do Discord válida (precisa começar com https://discord.com/api/webhooks/...).")
 
@@ -53,6 +63,8 @@ def remove_discord_webhook(db: Session = Depends(get_db), current_user: CurrentU
 
 @router.post("/discord/test")
 async def test_discord_webhook(db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
+    if current_user.is_standard_plan:
+        raise HTTPException(403, _DISCORD_PRO_ONLY_MESSAGE)
     row = _get_or_none(db, current_user.id)
     if not row or not row.discord_webhook_url:
         raise HTTPException(400, "Configure e salve o webhook do Discord antes de testar.")

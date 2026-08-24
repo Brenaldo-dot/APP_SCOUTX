@@ -26,6 +26,7 @@ const DICTS = {
     'nav.espionarLoja': 'Espionar Loja',
     'nav.historico': 'Histórico',
     'nav.usuarios': 'Usuários',
+    'nav.organizacoes': 'Organizações',
     'nav.minhaConta': 'Minha Conta',
     'nav.sair': 'Sair',
     'nav.recolherMenu': 'Recolher menu',
@@ -39,6 +40,19 @@ const DICTS = {
 
     'conta.titulo': 'Minha Conta',
     'conta.subtitulo': 'Configurações da sua conta — idioma, senha e notificações.',
+
+    'conta.foto.titulo': 'Foto de perfil',
+    'conta.foto.desc': 'Aparece no menu lateral e em outros lugares do app.',
+    'conta.foto.escolher': 'Escolher foto',
+    'conta.foto.remover': 'Remover foto',
+    'conta.foto.salvando': 'Salvando…',
+    'conta.foto.sucesso': 'Foto atualizada!',
+    'conta.foto.sucessoRemover': 'Foto removida.',
+
+    'conta.plano.titulo': 'Plano',
+    'conta.plano.rotulo': 'Plano',
+    'conta.plano.validoAte': 'Válido até',
+    'conta.plano.vencido': 'Vencido em',
 
     'conta.idioma.titulo': 'Idioma',
     'conta.idioma.desc': 'Idioma da interface do ScoutX (menu e esta tela). O resto do app ainda está só em português — mais idiomas chegam aos poucos.',
@@ -57,6 +71,7 @@ const DICTS = {
 
     'conta.discord.titulo': 'Notificações no Discord',
     'conta.discord.desc': 'Receba todos os alertas dos concorrentes que você rastreia direto num canal do seu Discord, em tempo real — sem precisar abrir o ScoutX pra saber que algo mudou.',
+    'conta.discord.somentePro': 'Disponível a partir do plano Pro — assine o Pro pra habilitar alertas no Discord.',
     'conta.discord.statusConectado': '🟢 Conectado',
     'conta.discord.statusDesconectado': '⚪ Não configurado',
     'conta.discord.label': 'URL do Webhook',
@@ -97,6 +112,7 @@ const DICTS = {
     'nav.espionarLoja': 'Spy Store',
     'nav.historico': 'History',
     'nav.usuarios': 'Users',
+    'nav.organizacoes': 'Organizations',
     'nav.minhaConta': 'My Account',
     'nav.sair': 'Log out',
     'nav.recolherMenu': 'Collapse menu',
@@ -110,6 +126,19 @@ const DICTS = {
 
     'conta.titulo': 'My Account',
     'conta.subtitulo': 'Your account settings — language, password and notifications.',
+
+    'conta.foto.titulo': 'Profile photo',
+    'conta.foto.desc': 'Shows up in the sidebar and other places across the app.',
+    'conta.foto.escolher': 'Choose photo',
+    'conta.foto.remover': 'Remove photo',
+    'conta.foto.salvando': 'Saving…',
+    'conta.foto.sucesso': 'Photo updated!',
+    'conta.foto.sucessoRemover': 'Photo removed.',
+
+    'conta.plano.titulo': 'Plan',
+    'conta.plano.rotulo': 'Plan',
+    'conta.plano.validoAte': 'Valid until',
+    'conta.plano.vencido': 'Expired on',
 
     'conta.idioma.titulo': 'Language',
     'conta.idioma.desc': "ScoutX interface language (menu and this screen). The rest of the app is still Portuguese-only — more languages are coming gradually.",
@@ -128,6 +157,7 @@ const DICTS = {
 
     'conta.discord.titulo': 'Discord notifications',
     'conta.discord.desc': "Get every alert from the competitors you track sent straight to a channel on your Discord, in real time — no need to open ScoutX to know something changed.",
+    'conta.discord.somentePro': 'Available from the Pro plan — subscribe to Pro to enable Discord alerts.',
     'conta.discord.statusConectado': '🟢 Connected',
     'conta.discord.statusDesconectado': '⚪ Not configured',
     'conta.discord.label': 'Webhook URL',
@@ -168,6 +198,7 @@ const DICTS = {
     'nav.espionarLoja': 'Espiar Tienda',
     'nav.historico': 'Historial',
     'nav.usuarios': 'Usuarios',
+    'nav.organizacoes': 'Organizaciones',
     'nav.minhaConta': 'Mi Cuenta',
     'nav.sair': 'Cerrar sesión',
     'nav.recolherMenu': 'Contraer menú',
@@ -181,6 +212,19 @@ const DICTS = {
 
     'conta.titulo': 'Mi Cuenta',
     'conta.subtitulo': 'Configuración de tu cuenta — idioma, contraseña y notificaciones.',
+
+    'conta.foto.titulo': 'Foto de perfil',
+    'conta.foto.desc': 'Aparece en el menú lateral y en otras partes de la app.',
+    'conta.foto.escolher': 'Elegir foto',
+    'conta.foto.remover': 'Quitar foto',
+    'conta.foto.salvando': 'Guardando…',
+    'conta.foto.sucesso': '¡Foto actualizada!',
+    'conta.foto.sucessoRemover': 'Foto eliminada.',
+
+    'conta.plano.titulo': 'Plan',
+    'conta.plano.rotulo': 'Plan',
+    'conta.plano.validoAte': 'Válido hasta',
+    'conta.plano.vencido': 'Vencido el',
 
     'conta.idioma.titulo': 'Idioma',
     'conta.idioma.desc': 'Idioma de la interfaz de ScoutX (menú y esta pantalla). El resto de la app todavía está solo en portugués — más idiomas llegarán poco a poco.',
@@ -199,6 +243,7 @@ const DICTS = {
 
     'conta.discord.titulo': 'Notificaciones en Discord',
     'conta.discord.desc': 'Recibe todas las alertas de los competidores que rastreas directo en un canal de tu Discord, en tiempo real — sin necesidad de abrir ScoutX para saber que algo cambió.',
+    'conta.discord.somentePro': 'Disponible desde el plan Pro — suscríbete al Pro para habilitar alertas en Discord.',
     'conta.discord.statusConectado': '🟢 Conectado',
     'conta.discord.statusDesconectado': '⚪ No configurado',
     'conta.discord.label': 'URL del Webhook',

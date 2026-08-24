@@ -90,11 +90,19 @@ async def score_product(
     # Sinal: tempo do ANÚNCIO no ar, não da página do produto (2º mais
     # forte). Teto (30d+) prova que VENDE, chega em "Quente" sozinho — não
     # em "Escalando", que fica reservado pro sinal de crescimento abaixo.
+    # A PONTUAÇÃO não muda depois de 30 dias (mesmo raciocínio do docstring
+    # do módulo: 30d já é "quase certeza de venda", mais dias não é mais
+    # sinal de ESCALA) — só o RÓTULO fica mais fino pedido pelo usuário
+    # (antes travava em "30D+" pra sempre, escondendo que um anúncio tá no
+    # ar há 95 dias em vez de 31).
     dias_anuncio = _oldest_active_ad_days(db, product.id)
     if dias_anuncio is not None:
         if dias_anuncio >= 30:
             score += 60
-            signals.append("anuncio_ativo_30d+")
+            for floor in (95, 85, 75, 65, 55, 45, 30):
+                if dias_anuncio >= floor:
+                    signals.append(f"anuncio_ativo_{floor}d+")
+                    break
         elif dias_anuncio >= 14:
             score += 35
             signals.append("anuncio_ativo_14d+")

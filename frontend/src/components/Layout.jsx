@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   Bell,
+  Building2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -11,24 +12,30 @@ import {
   LayoutDashboard,
   LogOut,
   Megaphone,
+  Menu,
   Moon,
   Package,
   Radar,
   ScanBarcode,
+  ShieldCheck,
   Store,
   Sun,
   UserCog,
   Users,
 } from 'lucide-react'
-import { OPERATIONS, useOperation } from '../context/OperationContext.jsx'
+import { OPERATIONS, requiredPlanForSlot, useOperation } from '../context/OperationContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useTheme } from '../context/ThemeContext.jsx'
 import { useLanguage } from '../context/LanguageContext.jsx'
+import { initials } from '../utils/avatar.js'
+import { readCategoryVisits } from '../utils/alertsVisit.js'
+import { api } from '../api/client.js'
 import Select from './Select.jsx'
 import scoutxLogo from '../assets/scoutx-logo.png'
 
 const ADD_CUSTOM_VALUE = '__add_custom__'
 const COLLAPSE_KEY = 'scoutx-sidebar-collapsed'
+const DESKTOP_QUERY = '(min-width: 1024px)' // mesmo ponto de corte do breakpoint `lg` do Tailwind
 
 // Grupos com cabeçalho + ícone de linha (não emoji) — cada item vira um LED
 // azul: ícone monocromático dentro de uma pastilha com brilho, igual em
@@ -109,40 +116,153 @@ function NavGroup({ label, collapsed, children }) {
 }
 
 export default function Layout() {
-  const { operation, setOperation, customOperations, addCustomOperation } = useOperation()
+  const {
+    operation,
+    setOperation,
+    customOperations,
+    addCustomOperation,
+    labelOverrides,
+    renameOperation,
+    planLimit,
+    isOperationLocked,
+    atOperationCap,
+  } = useOperation()
   const { me } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const { t } = useLanguage()
+  const location = useLocation()
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === 'true')
+  const [operationModal, setOperationModal] = useState(null)
+  const [alertsUnreadCount, setAlertsUnreadCount] = useState(0)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  // `collapsed` é preferência de DESKTOP (ícone-só) — abaixo de `lg` o menu
+  // vira um drawer que, quando aberto, precisa mostrar tudo por extenso
+  // (não faz sentido um overlay em tela cheia ficando em modo ícone-só só
+  // porque a pessoa tinha recolhido o menu antes, num notebook, semanas
+  // atrás). isDesktop decide qual das duas leituras vale a cada momento.
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia(DESKTOP_QUERY).matches : true
+  )
+  const effectiveCollapsed = collapsed && isDesktop
 
   useEffect(() => {
     localStorage.setItem(COLLAPSE_KEY, String(collapsed))
   }, [collapsed])
+
+  useEffect(() => {
+    const mq = window.matchMedia(DESKTOP_QUERY)
+    const handler = (e) => setIsDesktop(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+
+  // Fecha o drawer sozinho ao navegar — sem isso a próxima tela abriria com
+  // o menu ainda em cima dela.
+  useEffect(() => {
+    setMobileNavOpen(false)
+  }, [location.pathname])
+
+  // Trava o scroll de fundo enquanto o drawer tá aberto por cima do conteúdo.
+  useEffect(() => {
+    document.body.style.overflow = mobileNavOpen ? 'hidden' : ''
+    return () => {
+      document.body.style.overflow = ''
+    }
+  }, [mobileNavOpen])
+
+  // Bolinha de não lido no menu — soma o não lido de cada categoria (mesmo
+  // corte por categoria usado em Alerts.jsx), filtrado pela MESMA operação
+  // selecionada — sem isso a bolinha soma alerta de todo país junto enquanto
+  // a aba Alertas só mostra o país atual, e os números nunca batem (bug
+  // relatado: sobrava muito mais no menu do que o total visível na aba).
+  // Refaz ao trocar de rota ou de operação, e também na hora via evento
+  // customizado — clicar numa categoria dentro de /alertas só muda o
+  // ?categoria= da URL, sem trocar de rota, então só o pathname não seria
+  // suficiente pra pegar a atualização.
+  useEffect(() => {
+    function refresh() {
+      const visits = readCategoryVisits(operation)
+      api.getAlertCounts({ operation, since_map: JSON.stringify(visits) }).then((r) => setAlertsUnreadCount(r.total)).catch(() => {})
+    }
+    refresh()
+    window.addEventListener('scoutx:alerts-visited', refresh)
+    return () => window.removeEventListener('scoutx:alerts-visited', refresh)
+  }, [location.pathname, operation])
 
   function handleOperationChange(value) {
     if (value !== ADD_CUSTOM_VALUE) {
       setOperation(value)
       return
     }
-    const name = window.prompt('Nome do país/operação (ex: Chile, Peru…):')
-    if (name && name.trim()) addCustomOperation(name)
+    setOperationModal({ mode: 'add', value: null, label: '' })
   }
+
+  function handleEditOperation(option) {
+    setOperationModal({ mode: 'rename', value: option.value, label: option.label, originalLabel: option.label })
+  }
+
+  function submitOperationModal() {
+    const name = operationModal.label.trim()
+    if (!name) return
+    if (operationModal.mode === 'add') addCustomOperation(name)
+    else renameOperation(operationModal.value, name)
+    setOperationModal(null)
+  }
+
+  // Cada opção travada mostra o plano que REALMENTE destrava ela — não é
+  // "próximo plano geral", é por vaga: pra quem já usa 1 país, a 2ª e a 3ª
+  // opção travada cabem no Pro (até 3), a 4ª em diante só no Enterprise.
+  // `usedCount` conta o que a organização já usa de verdade; a partir dali
+  // cada opção travada, na ordem da lista, ocupa a próxima vaga.
+  const usedCount = planLimit?.usedOperations?.length || 0
+  let lockedSeen = 0
+  const operationOptions = [...OPERATIONS, ...customOperations].map((op) => {
+    const locked = isOperationLocked(op.value)
+    let lockedReason
+    if (locked) {
+      lockedSeen += 1
+      lockedReason = `Requer plano ${requiredPlanForSlot(usedCount + lockedSeen)}`
+    }
+    return {
+      value: op.value,
+      label: labelOverrides[op.value] || op.label,
+      icon: op.flag,
+      locked,
+      lockedReason,
+    }
+  })
+  // Um país novo (customizado) ocuparia a vaga logo depois da última travada.
+  const nextFreeSlot = usedCount + lockedSeen + 1
 
   const hasAccess = me?.isAdmin || me?.canAccessMinerador
 
   return (
     <div className="flex min-h-screen bg-[var(--bg-page)] text-[var(--text-primary)]">
+      {/* Fundo escurecido atrás do drawer — some junto com ele acima de `lg`,
+          onde o menu volta a ser fixo na tela em vez de sobrepor conteúdo. */}
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setMobileNavOpen(false)} />
+      )}
+
       <aside
-        className={`sidebar-edge relative flex shrink-0 flex-col bg-[var(--bg-surface)] p-4 transition-[width] duration-200 ${
-          collapsed ? 'w-[68px] px-2' : 'w-60'
-        }`}
+        // Revisão: achado ao vivo — "overflow-y-auto" aqui (mesmo sem
+        // "overflow-x" nenhum) faz o navegador tratar o eixo X TAMBÉM como
+        // não-visível (regra do CSS: overflow-x/-y não podem ficar um
+        // "visible" e outro não ao mesmo tempo) — cortava pela metade a
+        // "bolinha" de recolher, que fica de propósito -right-3 (parte pra
+        // fora da borda direita). O <nav> logo abaixo já tem seu PRÓPRIO
+        // overflow-y-auto pra rolar a lista de itens — o <aside> não
+        // precisa rolar nada sozinho, só empurrava esse corte sem motivo.
+        className={`sidebar-edge fixed inset-y-0 left-0 z-40 flex w-60 shrink-0 flex-col bg-[var(--bg-surface)] p-4 transition-all duration-200 lg:relative ${
+          mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        } ${collapsed ? 'lg:w-[68px] lg:px-2' : ''}`}
       >
-        {/* "Bolinha" de recolher — some com os rótulos pra quem quer a tela
-            livre pra fazer análise ao lado, deixando só os ícones. */}
+        {/* "Bolinha" de recolher — só faz sentido em tela larga, com o menu
+            fixo; no drawer mobile é tudo-ou-nada (aberto/fechado). */}
         <button
           onClick={() => setCollapsed((c) => !c)}
           title={collapsed ? t('nav.expandirMenu') : t('nav.recolherMenu')}
-          className="absolute -right-3 top-16 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-brand-500/40 bg-[var(--bg-surface-2)] text-brand-500 shadow-md transition-colors hover:bg-brand-500/15"
+          className="absolute -right-3 top-16 z-10 hidden h-6 w-6 items-center justify-center rounded-full border border-brand-500/40 bg-[var(--bg-surface-2)] text-brand-500 shadow-md transition-colors hover:bg-brand-500/15 lg:flex"
         >
           {collapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
         </button>
@@ -151,9 +271,9 @@ export default function Layout() {
           <img
             src={scoutxLogo}
             alt="ScoutX"
-            className={`rounded-2xl object-cover shadow-lg transition-all ${collapsed ? 'h-9 w-9' : 'h-20 w-20'}`}
+            className={`rounded-2xl object-cover shadow-lg transition-all ${effectiveCollapsed ? 'h-9 w-9' : 'h-20 w-20'}`}
           />
-          {!collapsed && (
+          {!effectiveCollapsed && (
             <button
               onClick={toggleTheme}
               title={theme === 'dark' ? 'Mudar pro tema claro' : 'Mudar pro tema escuro'}
@@ -164,86 +284,125 @@ export default function Layout() {
           )}
         </div>
 
-        <div className={`mb-2 px-2 ${hasAccess && !collapsed ? '' : 'hidden'}`}>
+        <div className={`mb-2 px-2 ${hasAccess && !effectiveCollapsed ? '' : 'hidden'}`}>
           <label className="mb-1 block text-xs font-medium text-[var(--text-muted)]">{t('nav.operacao')}</label>
           <Select
             value={operation}
             onChange={handleOperationChange}
-            options={[...OPERATIONS, ...customOperations].map((op) => ({ value: op.value, label: op.label, icon: op.flag }))}
-            extraOption={{ value: ADD_CUSTOM_VALUE, label: t('nav.adicionarPais') }}
+            onEditOption={handleEditOperation}
+            options={operationOptions}
+            extraOption={{
+              value: ADD_CUSTOM_VALUE,
+              label: t('nav.adicionarPais'),
+              locked: atOperationCap,
+              // Uma organização nova (customOperations vazio) teria essa
+              // adição como a 1ª vaga além das já usadas — mesma conta de
+              // "próxima vaga livre" usada nas opções acima.
+              lockedReason: atOperationCap ? `Requer plano ${requiredPlanForSlot(nextFreeSlot)}` : undefined,
+            }}
           />
         </div>
 
         <nav className="flex-1 overflow-y-auto">
           {hasAccess &&
             NAV_GROUPS.map((group) => (
-              <NavGroup key={group.labelKey} label={t(group.labelKey)} collapsed={collapsed}>
-                {group.items.map(({ to, labelKey, Icon, end }) => (
-                  <NavLink key={to} to={to} end={end} title={collapsed ? t(labelKey) : undefined} className={(state) => navLinkClass(state, collapsed)}>
-                    {({ isActive }) => (
-                      <>
-                        <NavIcon Icon={Icon} active={isActive} />
-                        {!collapsed && t(labelKey)}
-                      </>
-                    )}
-                  </NavLink>
-                ))}
+              <NavGroup key={group.labelKey} label={t(group.labelKey)} collapsed={effectiveCollapsed}>
+                {group.items.map(({ to, labelKey, Icon, end }) => {
+                  const unread = to === '/alertas' ? alertsUnreadCount : 0
+                  return (
+                    <NavLink key={to} to={to} end={end} title={effectiveCollapsed ? t(labelKey) : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
+                      {({ isActive }) => (
+                        <>
+                          <span className="relative shrink-0">
+                            <NavIcon Icon={Icon} active={isActive} />
+                            {/* Recolhido: só a bolinha, sem número — não tem
+                                espaço pro número do lado do ícone sozinho. */}
+                            {unread > 0 && effectiveCollapsed && (
+                              <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-[var(--bg-surface)]" />
+                            )}
+                          </span>
+                          {!effectiveCollapsed && (
+                            <span className="flex flex-1 items-center justify-between gap-2">
+                              {t(labelKey)}
+                              {unread > 0 && (
+                                <span className="flex h-5 min-w-[1.25rem] shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                                  {unread > 99 ? '99+' : unread}
+                                </span>
+                              )}
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </NavLink>
+                  )
+                })}
               </NavGroup>
             ))}
 
-          {!collapsed && (
+          {!effectiveCollapsed && (
             <p className="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-faint)]">{t('nav.ferramentas')}</p>
           )}
-          <div className={`space-y-1 ${collapsed ? 'mt-2' : ''}`}>
+          <div className={`space-y-1 ${effectiveCollapsed ? 'mt-2' : ''}`}>
             {hasAccess && (
-              <NavLink to="/minerador-de-anuncios" title={collapsed ? t('nav.mineradorAnuncios') : undefined} className={(state) => navLinkClass(state, collapsed)}>
+              <NavLink to="/minerador-de-anuncios" title={effectiveCollapsed ? t('nav.mineradorAnuncios') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
                 {({ isActive }) => (
                   <>
                     <NavIcon Icon={Radar} active={isActive} />
-                    {!collapsed && t('nav.mineradorAnuncios')}
+                    {!effectiveCollapsed && t('nav.mineradorAnuncios')}
                   </>
                 )}
               </NavLink>
             )}
             {TOOL_ITEMS.map(({ to, labelKey, Icon }) => (
-              <NavLink key={to} to={to} title={collapsed ? t(labelKey) : undefined} className={(state) => navLinkClass(state, collapsed)}>
+              <NavLink key={to} to={to} title={effectiveCollapsed ? t(labelKey) : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
                 {({ isActive }) => (
                   <>
                     <NavIcon Icon={Icon} active={isActive} />
-                    {!collapsed && t(labelKey)}
+                    {!effectiveCollapsed && t(labelKey)}
                   </>
                 )}
               </NavLink>
             ))}
 
-            {me?.canViewHistory && (
-              <NavLink to="/ferramentas/historico" title={collapsed ? t('nav.historico') : undefined} className={(state) => navLinkClass(state, collapsed)}>
+            {me?.isAdmin && (
+              <NavLink to="/ferramentas/historico" title={effectiveCollapsed ? t('nav.historico') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
                 {({ isActive }) => (
                   <>
                     <NavIcon Icon={History} active={isActive} />
-                    {!collapsed && t('nav.historico')}
+                    {!effectiveCollapsed && t('nav.historico')}
                   </>
                 )}
               </NavLink>
             )}
 
             {me?.isAdmin && (
-              <NavLink to="/usuarios" title={collapsed ? t('nav.usuarios') : undefined} className={(state) => navLinkClass(state, collapsed)}>
+              <NavLink to="/usuarios" title={effectiveCollapsed ? t('nav.usuarios') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
                 {({ isActive }) => (
                   <>
                     <NavIcon Icon={Users} active={isActive} />
-                    {!collapsed && t('nav.usuarios')}
+                    {!effectiveCollapsed && t('nav.usuarios')}
+                  </>
+                )}
+              </NavLink>
+            )}
+
+            {me?.isAdmin && (
+              <NavLink to="/organizacoes" title={effectiveCollapsed ? t('nav.organizacoes') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
+                {({ isActive }) => (
+                  <>
+                    <NavIcon Icon={Building2} active={isActive} />
+                    {!effectiveCollapsed && t('nav.organizacoes')}
                   </>
                 )}
               </NavLink>
             )}
 
             {me && (
-              <NavLink to="/conta" title={collapsed ? t('nav.minhaConta') : undefined} className={(state) => navLinkClass(state, collapsed)}>
+              <NavLink to="/conta" title={effectiveCollapsed ? t('nav.minhaConta') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
                 {({ isActive }) => (
                   <>
                     <NavIcon Icon={UserCog} active={isActive} />
-                    {!collapsed && t('nav.minhaConta')}
+                    {!effectiveCollapsed && t('nav.minhaConta')}
                   </>
                 )}
               </NavLink>
@@ -252,25 +411,110 @@ export default function Layout() {
         </nav>
 
         {me && (
-          <div className={`mt-4 border-t border-[var(--border)] pt-3 ${collapsed ? 'flex flex-col items-center gap-2' : 'px-2'}`}>
-            {!collapsed && <p className="truncate text-xs text-[var(--text-muted)]">{me.name}</p>}
+          <div className={`mt-4 border-t border-[var(--border)] pt-3 ${effectiveCollapsed ? 'flex flex-col items-center gap-2' : 'px-2'}`}>
+            <Link
+              to="/conta"
+              className={`flex items-center gap-2.5 rounded-xl transition-colors hover:bg-[var(--hover-surface)] ${effectiveCollapsed ? '' : 'p-1.5'}`}
+              title={effectiveCollapsed ? me.name : 'Trocar foto em Minha Conta'}
+            >
+              {me.avatarUrl ? (
+                <img src={me.avatarUrl} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />
+              ) : (
+                <span
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                  style={{
+                    background: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%)',
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.35), 0 2px 8px rgba(59,130,246,0.4)',
+                  }}
+                >
+                  {initials(me.name)}
+                </span>
+              )}
+              {!effectiveCollapsed && (
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-semibold text-[var(--text-primary)]">{me.name}</p>
+                  {me.isAdmin ? (
+                    <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-brand-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-brand-500">
+                      <ShieldCheck size={9} /> Admin
+                    </span>
+                  ) : me.planLabel ? (
+                    <span className="mt-0.5 inline-block rounded-full bg-brand-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-brand-500">
+                      Plano {me.planLabel}
+                    </span>
+                  ) : null}
+                </div>
+              )}
+            </Link>
             <a
               href="/logout"
               title={t('nav.sair')}
               className={
-                collapsed
+                effectiveCollapsed
                   ? 'flex h-7 w-7 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover-surface)] hover:text-red-400'
-                  : 'text-xs font-medium text-[var(--text-muted)] hover:text-red-400'
+                  : 'mt-1.5 flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-[var(--text-muted)] hover:bg-[var(--hover-surface)] hover:text-red-400'
               }
             >
-              {collapsed ? <LogOut size={14} /> : t('nav.sair')}
+              <LogOut size={effectiveCollapsed ? 14 : 12} />
+              {!effectiveCollapsed && t('nav.sair')}
             </a>
           </div>
         )}
       </aside>
-      <main className="flex-1 overflow-y-auto p-8">
-        <Outlet />
-      </main>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Barra só-mobile: sem ela não teria como abrir o drawer abaixo de
+            `lg`, já que a sidebar fica fora da tela até alguém tocar aqui. */}
+        <div className="sticky top-0 z-20 flex items-center justify-between border-b border-[var(--border)] bg-[var(--bg-surface)] px-4 py-3 lg:hidden">
+          <button
+            onClick={() => setMobileNavOpen(true)}
+            title={t('nav.expandirMenu')}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text-tertiary)] hover:bg-[var(--hover-surface)]"
+          >
+            <Menu size={20} />
+          </button>
+          <img src={scoutxLogo} alt="ScoutX" className="h-8 w-8 rounded-xl object-cover shadow" />
+          <span className="w-9" />
+        </div>
+
+        <main className="flex-1 overflow-y-auto p-4 lg:p-8">
+          <Outlet />
+        </main>
+      </div>
+
+      {operationModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setOperationModal(null)}>
+          <div className="w-full max-w-sm rounded-2xl bg-[var(--bg-surface)] p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+              {operationModal.mode === 'add' ? 'Adicionar país' : 'Renomear país'}
+            </h3>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
+              {operationModal.mode === 'add'
+                ? 'Só muda como aparece no menu — não afeta nada já cadastrado.'
+                : `Isso só muda como "${operationModal.originalLabel}" aparece pra você — os concorrentes já cadastrados continuam no mesmo lugar.`}
+            </p>
+            <input
+              type="text"
+              autoFocus
+              placeholder="Nome do país/operação (ex: Chile, Peru…)"
+              value={operationModal.label}
+              onChange={(e) => setOperationModal({ ...operationModal, label: e.target.value })}
+              onKeyDown={(e) => e.key === 'Enter' && submitOperationModal()}
+              className="mt-3 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setOperationModal(null)}
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--text-tertiary)] hover:bg-[var(--hover-surface)]"
+              >
+                Cancelar
+              </button>
+              <button onClick={submitOperationModal} className="btn-primary px-4 py-2 text-xs">
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

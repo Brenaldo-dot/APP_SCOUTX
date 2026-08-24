@@ -2,6 +2,26 @@ const { Pool, Client } = require("pg");
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
+// Planos de venda do ScoutX — 3 planos fixos, não precisa ser configurável
+// pelo admin. maxOperations/maxCompetitors em Infinity = sem limite
+// (Enterprise). Se um dia mudar preço/limite, é troca de constante aqui, não
+// de schema. As CHAVES (solo/pro/agencia) são só o identificador interno,
+// gravado em organizations.plan — não mudam com o rebrand dos nomes de
+// venda (Solo → Standard, Pro → Pro, Agência → Enterprise), só o "label"
+// exibido pra pessoa muda.
+//
+// maxUsers é sempre 1 nos três planos — decisão de negócio: cada conta é de
+// UMA equipe (1 login), não de N colaboradores dividindo uma assinatura;
+// o que muda de plano pra plano é só o número de países/concorrentes.
+// Fixo em 1 (não uma constante à parte) de propósito, pra não sobrar
+// nenhuma trilha de "plano X permite N usuários" pra reintroduzir sem querer.
+const PLAN_LIMITS = {
+  solo: { label: "Standard", maxUsers: 1, maxOperations: 1, maxCompetitors: 70 },
+  pro: { label: "Pro", maxUsers: 1, maxOperations: 3, maxCompetitors: 250 },
+  agencia: { label: "Enterprise", maxUsers: 1, maxOperations: Infinity, maxCompetitors: Infinity },
+};
+const BILLING_CYCLE_DAYS = { mensal: 30, trimestral: 90, anual: 365 };
+
 // O backend Python do Mega Minerador precisa do próprio banco, separado das
 // tabelas deste app. Em vez de pedir pra alguém criar isso manualmente no
 // mesmo servidor Postgres, criamos aqui no boot (idempotente — não faz nada
@@ -59,6 +79,28 @@ async function migrate() {
   // failedLoginAttempt/checkLoginLock em server.js.
   await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0;`);
   await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ;`);
+  // Revisão de segurança: sessão hoje é só um cookie assinado com validade
+  // de 30 dias, sem nenhuma lista de revogação — trocar a senha não
+  // invalidava sessões já abertas em outro lugar (nem uma sessão roubada).
+  // token_version vai dentro do cookie no login (auth.js/setSessionCookie);
+  // toda troca de senha incrementa esse número (updateUserPassword, abaixo)
+  // — qualquer cookie assinado com o número antigo passa a ser rejeitado
+  // (requireAuth), mesmo com assinatura válida e prazo não vencido.
+  await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0;`);
+  // Suspensão reversível — diferente de excluir: bloqueia login na hora
+  // (checado em /login) sem apagar histórico/permissões, útil pra investigar
+  // algo suspeito sem perder o usuário. role_changed_by_id/at é auditoria de
+  // quem promoveu/rebaixou quem admin — dar admin é a ação mais sensível da
+  // tela e antes disso não ficava registrado em lugar nenhum.
+  await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS suspended BOOLEAN NOT NULL DEFAULT false;`);
+  // Foto de perfil (Minha Conta) — guardada como data URI já redimensionada
+  // no navegador (~256px, JPEG) antes de subir, então cabe tranquilo num
+  // TEXT do Postgres sem precisar de storage de arquivo (S3 etc.) só pra
+  // isso. TEXT sem limite de tamanho fixo — o teto de verdade é aplicado no
+  // PATCH /api/me/avatar (server.js), não aqui.
+  await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS avatar_url TEXT;`);
+  await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS role_changed_by_id INTEGER;`);
+  await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS role_changed_at TIMESTAMPTZ;`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS search_logs (
       id SERIAL PRIMARY KEY,
@@ -80,6 +122,65 @@ async function migrate() {
     );
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_login_events_user ON login_events(app_user_id);`);
+
+  // Log de auditoria administrativa — pedido do usuário pra rastrear quem
+  // fez o quê entre vários admins (promoveu, suspendeu, resetou senha,
+  // excluiu). actor/target_name são um SNAPSHOT do nome no momento da ação
+  // (não FK) de propósito: um usuário excluído não pode deixar o log
+  // ilegível ("Usuário #47 excluiu Usuário #52") só porque uma das duas
+  // pontas sumiu depois.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_audit_log (
+      id SERIAL PRIMARY KEY,
+      actor_id INTEGER,
+      actor_name TEXT NOT NULL,
+      target_id INTEGER,
+      target_name TEXT NOT NULL,
+      action TEXT NOT NULL,
+      details TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_admin_audit_log_created ON admin_audit_log(created_at DESC);`);
+
+  // Planos de venda — cada organização agrupa N logins (app_users) sob um
+  // plano/ciclo/validade só. expires_at vencido bloqueia login de TODO
+  // mundo da organização (checado em requireAuth/login, ver server.js).
+  // notes é texto livre do admin (valor pago, canal de venda) — sem campo
+  // estruturado de preço nessa fase (ativação ainda é manual).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS organizations (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      plan TEXT NOT NULL,
+      billing_cycle TEXT NOT NULL,
+      started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      notes TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id);`);
+
+  // Backfill: todo usuário collaborator que já existia antes dessa revisão
+  // (e qualquer um sem organização por algum motivo) recebe uma organização
+  // própria de "Legado", plano Enterprise (sem limite) e validade 10 anos no
+  // futuro — ninguém trava no dia desse deploy. O admin reorganiza quem
+  // realmente compartilha uma assinatura só depois, pela tela de
+  // Organizações. Contas admin (role='admin') nunca recebem organização —
+  // seguem sem limite, é o modelo delas hoje.
+  const orphaned = await pool.query(
+    "SELECT id, name FROM app_users WHERE organization_id IS NULL AND role != 'admin'"
+  );
+  for (const user of orphaned.rows) {
+    const org = await pool.query(
+      `INSERT INTO organizations (name, plan, billing_cycle, expires_at, notes)
+       VALUES ($1, 'agencia', 'anual', now() + interval '10 years', 'Criada automaticamente na migração de planos — reorganizar se necessário')
+       RETURNING id`,
+      [`Legado — ${user.name}`]
+    );
+    await pool.query("UPDATE app_users SET organization_id = $1 WHERE id = $2", [org.rows[0].id, user.id]);
+  }
 }
 
 async function countUsers() {
@@ -87,21 +188,55 @@ async function countUsers() {
   return res.rows[0].n;
 }
 
-async function createUser({ name, email, passwordHash, role }) {
+// Admin suspenso não conta — senão "o último admin ATIVO" ficaria escondido
+// atrás de um admin que já nem consegue logar, e a trava deixaria de
+// proteger contra o cenário real (ninguém com acesso de fato).
+async function countActiveAdmins() {
+  const res = await pool.query("SELECT COUNT(*)::int AS n FROM app_users WHERE role = 'admin' AND suspended = false");
+  return res.rows[0].n;
+}
+
+async function createUser({ name, email, passwordHash, role, createdById, organizationId }) {
+  const isAdmin = role === "admin";
+  // Colaborador preso a uma organização é cliente pagante — ScoutX é o
+  // PRÓPRIO produto vendido, não faz sentido nascer sem acesso a ele e
+  // depender do admin lembrar de destravar depois manualmente (bug real:
+  // usuário do plano Standard criado sem conseguir nem ver o app até alguém
+  // notar e mexer no toggle). Admin continua sem esse campo fazer sentido
+  // (já tem acesso total por ser admin).
+  const canAccessMinerador = !isAdmin && !!organizationId;
   const res = await pool.query(
-    "INSERT INTO app_users (name, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING *",
-    [name, email.toLowerCase().trim(), passwordHash, role || "collaborator"]
+    `INSERT INTO app_users (name, email, password_hash, role, role_changed_by_id, role_changed_at, organization_id, can_access_minerador)
+     VALUES ($1, $2, $3, $4, $5, ${isAdmin ? "now()" : "NULL"}, $6, $7) RETURNING *`,
+    [
+      name,
+      email.toLowerCase().trim(),
+      passwordHash,
+      role || "collaborator",
+      isAdmin ? createdById || null : null,
+      isAdmin ? null : organizationId || null,
+      canAccessMinerador,
+    ]
   );
   return res.rows[0];
 }
 
+// org_plan/org_expires_at vêm junto (LEFT JOIN) porque requireAuth e /login
+// checam o vencimento do plano a cada request — sem isso seria uma query a
+// mais em todo request autenticado só pra saber se o plano venceu.
+const USER_WITH_ORG_SELECT = `
+  SELECT u.*, o.plan AS org_plan, o.expires_at AS org_expires_at, o.name AS org_name
+  FROM app_users u
+  LEFT JOIN organizations o ON o.id = u.organization_id
+`;
+
 async function findUserByEmail(email) {
-  const res = await pool.query("SELECT * FROM app_users WHERE email = $1", [email.toLowerCase().trim()]);
+  const res = await pool.query(`${USER_WITH_ORG_SELECT} WHERE u.email = $1`, [email.toLowerCase().trim()]);
   return res.rows[0] || null;
 }
 
 async function getAppUserById(id) {
-  const res = await pool.query("SELECT * FROM app_users WHERE id = $1", [id]);
+  const res = await pool.query(`${USER_WITH_ORG_SELECT} WHERE u.id = $1`, [id]);
   return res.rows[0] || null;
 }
 
@@ -110,8 +245,11 @@ async function listUsersWithCounts() {
   // manda a lista inteira de uma vez (tabela de admin é pequena, não compensa
   // 1 request por usuário só pra popular isso na tela principal).
   const res = await pool.query(`
-    SELECT u.id, u.name, u.email, u.role, u.can_view_history, u.can_access_minerador, u.created_at,
-           u.failed_login_attempts, u.locked_until,
+    SELECT u.id, u.name, u.email, u.role, u.can_access_minerador, u.created_at,
+           u.failed_login_attempts, u.locked_until, u.suspended, u.role_changed_at,
+           u.organization_id, o.name AS organization_name, o.plan AS organization_plan,
+           o.expires_at AS organization_expires_at,
+           (SELECT c.name FROM app_users c WHERE c.id = u.role_changed_by_id) AS role_changed_by_name,
            COUNT(DISTINCT s.id)::int AS search_count,
            COUNT(DISTINCT l.ip)::int AS ip_count,
            (
@@ -132,7 +270,8 @@ async function listUsersWithCounts() {
     FROM app_users u
     LEFT JOIN search_logs s ON s.app_user_id = u.id
     LEFT JOIN login_events l ON l.app_user_id = u.id
-    GROUP BY u.id
+    LEFT JOIN organizations o ON o.id = u.organization_id
+    GROUP BY u.id, o.name, o.plan, o.expires_at
     ORDER BY u.created_at ASC
   `);
   return res.rows;
@@ -154,21 +293,32 @@ async function ipSummaryForUser(appUserId) {
   return res.rows;
 }
 
-async function updateUserPermissions(id, { role, canViewHistory, canAccessMinerador }) {
+async function updateUserPermissions(id, { role, canAccessMinerador, suspended, changedById }) {
   const fields = [];
   const values = [];
   let i = 1;
   if (role !== undefined) {
     fields.push(`role = $${i++}`);
     values.push(role);
-  }
-  if (canViewHistory !== undefined) {
-    fields.push(`can_view_history = $${i++}`);
-    values.push(canViewHistory);
+    // Auditoria: quem promoveu/rebaixou quem, e quando — mostrado na tabela
+    // de Usuários pro admin saber depois "quem deu admin pra fulano".
+    fields.push(`role_changed_by_id = $${i++}`);
+    values.push(changedById || null);
+    fields.push(`role_changed_at = now()`);
   }
   if (canAccessMinerador !== undefined) {
     fields.push(`can_access_minerador = $${i++}`);
     values.push(canAccessMinerador);
+  }
+  if (suspended !== undefined) {
+    fields.push(`suspended = $${i++}`);
+    values.push(suspended);
+    if (suspended) {
+      // Mesmo mecanismo da troca de senha: mata qualquer sessão já aberta
+      // na hora, senão o cookie já emitido (válido por até 30 dias) seguiria
+      // funcionando normalmente apesar da suspensão.
+      fields.push(`token_version = token_version + 1`);
+    }
   }
   if (fields.length === 0) return;
   values.push(id);
@@ -212,14 +362,28 @@ async function resetFailedLogins(userId) {
 async function updateUserPassword(id, passwordHash) {
   // Redefinir a senha (admin OU a própria pessoa) sempre destrava a conta —
   // é o "escape hatch" do bloqueio permanente, ver LOGIN_LOCK_TIERS acima.
-  await pool.query(
-    "UPDATE app_users SET password_hash = $1, failed_login_attempts = 0, locked_until = NULL WHERE id = $2",
+  // token_version +1 invalida toda sessão aberta em outro lugar (ou
+  // roubada) na hora — ver nota em migrate() sobre isso. Devolve a versão
+  // nova pra quem chamou poder emitir um cookie novo válido pra sessão
+  // ATUAL (autoatendimento não pode deslogar a própria pessoa que acabou
+  // de trocar a senha com sucesso).
+  const res = await pool.query(
+    "UPDATE app_users SET password_hash = $1, failed_login_attempts = 0, locked_until = NULL, token_version = token_version + 1 WHERE id = $2 RETURNING token_version",
     [passwordHash, id]
   );
+  return res.rows[0].token_version;
 }
 
 async function deleteUser(id) {
   await pool.query("DELETE FROM app_users WHERE id = $1", [id]);
+}
+
+async function updateUserAvatar(id, avatarUrl) {
+  const res = await pool.query("UPDATE app_users SET avatar_url = $1 WHERE id = $2 RETURNING avatar_url", [
+    avatarUrl,
+    id,
+  ]);
+  return res.rows[0]?.avatar_url ?? null;
 }
 
 async function logSearch(appUserId, tool, domain, url) {
@@ -229,6 +393,106 @@ async function logSearch(appUserId, tool, domain, url) {
     domain,
     url,
   ]);
+}
+
+async function logAdminAction(actorId, actorName, targetId, targetName, action, details) {
+  await pool.query(
+    "INSERT INTO admin_audit_log (actor_id, actor_name, target_id, target_name, action, details) VALUES ($1, $2, $3, $4, $5, $6)",
+    [actorId, actorName, targetId, targetName, action, details || null]
+  );
+}
+
+async function listAdminAuditLog(limit = 100) {
+  const res = await pool.query("SELECT * FROM admin_audit_log ORDER BY created_at DESC LIMIT $1", [limit]);
+  return res.rows;
+}
+
+function planLimitsFor(plan) {
+  return PLAN_LIMITS[plan] || PLAN_LIMITS.solo;
+}
+
+async function createOrganization({ name, plan, billingCycle, notes }) {
+  const days = BILLING_CYCLE_DAYS[billingCycle];
+  const res = await pool.query(
+    `INSERT INTO organizations (name, plan, billing_cycle, expires_at, notes)
+     VALUES ($1, $2, $3, now() + ($4 || ' days')::interval, $5) RETURNING *`,
+    [name, plan, billingCycle, days, notes || null]
+  );
+  return res.rows[0];
+}
+
+async function getOrganizationById(id) {
+  const res = await pool.query("SELECT * FROM organizations WHERE id = $1", [id]);
+  return res.rows[0] || null;
+}
+
+async function countUsersInOrg(organizationId) {
+  const res = await pool.query("SELECT COUNT(*)::int AS n FROM app_users WHERE organization_id = $1", [
+    organizationId,
+  ]);
+  return res.rows[0].n;
+}
+
+async function getOrgMemberIds(organizationId) {
+  const res = await pool.query("SELECT id FROM app_users WHERE organization_id = $1", [organizationId]);
+  return res.rows.map((r) => r.id);
+}
+
+async function listOrganizationsWithCounts() {
+  const res = await pool.query(`
+    SELECT o.*, COUNT(u.id)::int AS user_count
+    FROM organizations o
+    LEFT JOIN app_users u ON u.organization_id = o.id
+    GROUP BY o.id
+    ORDER BY o.created_at DESC
+  `);
+  return res.rows;
+}
+
+// Renovar ANTES de vencer estende a partir da validade atual (não perde o
+// tempo que ainda restava); renovar DEPOIS de vencer (relapso) conta a
+// partir de agora (não empilha em cima de uma data já bem no passado).
+// Também é o caminho usado pra trocar de plano — muda plano+ciclo junto,
+// nunca separado, pra não deixar uma combinação plano-A/ciclo-B inconsistente.
+async function renewOrganization(id, plan, billingCycle) {
+  const org = await getOrganizationById(id);
+  if (!org) return null;
+  const days = BILLING_CYCLE_DAYS[billingCycle];
+  const base = new Date(org.expires_at) > new Date() ? "expires_at" : "now()";
+  const res = await pool.query(
+    `UPDATE organizations SET plan = $1, billing_cycle = $2, expires_at = ${base} + ($3 || ' days')::interval
+     WHERE id = $4 RETURNING *`,
+    [plan, billingCycle, days, id]
+  );
+  return res.rows[0];
+}
+
+// Escape-hatch manual — cortesia de renovação, correção, ou cancelamento
+// antecipado (setar pro passado bloqueia o login na hora, mesmo sem
+// cancelamento formal).
+async function updateOrganizationExpiry(id, expiresAt) {
+  const res = await pool.query("UPDATE organizations SET expires_at = $1 WHERE id = $2 RETURNING *", [
+    expiresAt,
+    id,
+  ]);
+  return res.rows[0];
+}
+
+async function updateOrganizationDetails(id, { name, notes }) {
+  const fields = [];
+  const values = [];
+  let i = 1;
+  if (name !== undefined) {
+    fields.push(`name = $${i++}`);
+    values.push(name);
+  }
+  if (notes !== undefined) {
+    fields.push(`notes = $${i++}`);
+    values.push(notes);
+  }
+  if (fields.length === 0) return;
+  values.push(id);
+  await pool.query(`UPDATE organizations SET ${fields.join(", ")} WHERE id = $${i}`, values);
 }
 
 async function historySummaryForUser(appUserId) {
@@ -245,9 +509,13 @@ async function historySummaryForUser(appUserId) {
 
 module.exports = {
   pool,
+  PLAN_LIMITS,
+  BILLING_CYCLE_DAYS,
+  planLimitsFor,
   migrate,
   ensureMineradorDatabase,
   countUsers,
+  countActiveAdmins,
   createUser,
   findUserByEmail,
   getAppUserById,
@@ -257,8 +525,19 @@ module.exports = {
   recordFailedLogin,
   resetFailedLogins,
   deleteUser,
+  updateUserAvatar,
   logSearch,
   historySummaryForUser,
   logLogin,
   ipSummaryForUser,
+  logAdminAction,
+  listAdminAuditLog,
+  createOrganization,
+  getOrganizationById,
+  countUsersInOrg,
+  getOrgMemberIds,
+  listOrganizationsWithCounts,
+  renewOrganization,
+  updateOrganizationExpiry,
+  updateOrganizationDetails,
 };

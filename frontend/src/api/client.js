@@ -22,6 +22,10 @@ async function request(path, options = {}) {
 
 export const api = {
   getDashboardSummary: (params = {}) => request(`/api/dashboard/summary?${buildQuery(params)}`),
+  getDashboardHighlights: (params = {}) => request(`/api/dashboard/highlights?${buildQuery(params)}`),
+  getActivityHeatmap: (params = {}) => request(`/api/dashboard/activity-heatmap?${buildQuery(params)}`),
+  getAlertsByCompetitor: (params = {}) => request(`/api/dashboard/alerts-by-competitor?${buildQuery(params)}`),
+  getAlertsByCategory: (params = {}) => request(`/api/dashboard/alerts-by-category?${buildQuery(params)}`),
   getNewProductsTimeline: (params = {}) => request(`/api/dashboard/new-products-timeline?${buildQuery(params)}`),
   getAdsTimeline: (params = {}) => request(`/api/dashboard/ads-timeline?${buildQuery(params)}`),
   getScoreDistribution: (params = {}) => request(`/api/dashboard/score-distribution?${buildQuery(params)}`),
@@ -34,6 +38,9 @@ export const api = {
   rescanAds: (id) => request(`/api/competitors/${id}/rescan-ads`, { method: 'POST' }),
   rescoreCompetitor: (id) => request(`/api/competitors/${id}/rescore`, { method: 'POST' }),
   getCompetitorSummaryByUser: () => request('/api/competitors/summary-by-user'),
+  getMyOperationsLimit: () => request('/api/competitors/my-operations-limit'),
+  searchCompetitorTrackers: (q) => request(`/api/competitors/search-trackers?${buildQuery({ q })}`),
+  getOperationsUsage: (userIds) => request(`/api/competitors/operations-usage?${buildQuery({ user_ids: userIds.join(',') })}`),
   claimOrphanedCompetitors: () => request('/api/competitors/claim-orphaned', { method: 'POST' }),
 
   listProducts: (params = {}) => request(`/api/products?${buildQuery(params)}`),

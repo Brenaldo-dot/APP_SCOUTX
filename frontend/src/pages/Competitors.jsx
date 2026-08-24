@@ -2,9 +2,43 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client.js'
 import EmptyState from '../components/EmptyState.jsx'
+import Select from '../components/Select.jsx'
 import { ClassificationBadge, StatusBadge } from '../components/Badges.jsx'
 import { formatDateTime } from '../utils/date.js'
 import { operationLabel, useOperation } from '../context/OperationContext.jsx'
+
+// "Ordenar por" — mesmo padrão de HotProducts.jsx/Ads.jsx (Select em vez de
+// vários botões/chip lado a lado). `default` é a ordem que o backend já
+// devolve (created_at desc, mais recente cadastrado primeiro); as outras 3
+// são só um sort client-side em cima da lista que já veio inteira (não é
+// paginado, então não precisa ida-e-volta no back pra reordenar).
+const SORT_OPTIONS = [
+  { value: 'default', label: 'Mais recentes primeiro' },
+  { value: 'products', label: 'Loja com mais produtos' },
+  { value: 'hot', label: 'Lojas com mais produtos quentes' },
+  { value: 'oldest', label: 'Lojas mais antigas no mercado' },
+]
+
+function sortCompetitors(list, sort) {
+  const sorted = [...list]
+  if (sort === 'products') {
+    sorted.sort((a, b) => (b.total_products || 0) - (a.total_products || 0))
+  } else if (sort === 'hot') {
+    sorted.sort((a, b) => (b.hot_products || 0) - (a.hot_products || 0))
+  } else if (sort === 'oldest') {
+    // "Mais antiga no mercado" = data de criação (na Shopify) do produto
+    // ATIVO mais antigo da loja (oldest_product_at, calculado no backend) —
+    // não a data em que NÓS cadastramos a loja. Loja sem nenhum produto com
+    // essa data preenchida (raro, mas acontece) vai pro final, não pro topo.
+    sorted.sort((a, b) => {
+      if (!a.oldest_product_at && !b.oldest_product_at) return 0
+      if (!a.oldest_product_at) return 1
+      if (!b.oldest_product_at) return -1
+      return new Date(a.oldest_product_at) - new Date(b.oldest_product_at)
+    })
+  }
+  return sorted
+}
 
 // Sem campo de logo no backend — puxa o favicon direto do domínio via
 // serviço do Google (sem chave, funciona pra qualquer site). Se falhar
@@ -30,7 +64,7 @@ function CompetitorLogo({ domain, name }) {
 }
 
 export default function Competitors() {
-  const { operation } = useOperation()
+  const { operation, planLimit, atCompetitorCap } = useOperation()
   const [searchParams, setSearchParams] = useSearchParams()
   // Só admin consegue popular isso de verdade (link vem da tela de
   // Usuários) — o backend também confere (resolve_target_user em
@@ -38,14 +72,13 @@ export default function Competitors() {
   // somente leitura, não faz sentido admin cadastrar/excluir em nome de
   // outra pessoa.
   const asUserId = searchParams.get('as_user_id')
+  const sort = searchParams.get('sort') || 'default'
   const [competitors, setCompetitors] = useState(null)
   const [error, setError] = useState(null)
   const [form, setForm] = useState({ domain: '', name: '', niche: '' })
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
-  const [rescoringId, setRescoringId] = useState(null)
-  const [rescoreMessage, setRescoreMessage] = useState(null)
   const pollRef = useRef(null)
 
   function load() {
@@ -93,20 +126,6 @@ export default function Competitors() {
     }
   }
 
-  async function handleRescore(c) {
-    setRescoringId(c.id)
-    setRescoreMessage(null)
-    try {
-      await api.rescoreCompetitor(c.id)
-      setRescoreMessage(`Recalculando score de "${c.name}" — atualiza em alguns segundos.`)
-      setTimeout(load, 8000)
-    } catch (err) {
-      setRescoreMessage(`Não deu pra recalcular: ${err.message}`)
-    } finally {
-      setRescoringId(null)
-    }
-  }
-
   async function handleDelete(c) {
     if (!window.confirm(`Excluir "${c.name}" (${c.domain})? Isso apaga todo o histórico de produtos, anúncios e alertas dessa loja — não dá pra desfazer.`)) {
       return
@@ -145,6 +164,13 @@ export default function Competitors() {
         </div>
       )}
 
+      {!asUserId && atCompetitorCap && (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
+          📦 Sua organização atingiu o limite de {planLimit.maxCompetitors} concorrentes cadastrados do plano — fale
+          com um administrador pra liberar mais, ou remova um concorrente antes de cadastrar outro.
+        </div>
+      )}
+
       {!asUserId && (
         <form
           onSubmit={handleSubmit}
@@ -178,14 +204,29 @@ export default function Competitors() {
               className="w-40 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
             />
           </div>
-          <button type="submit" disabled={submitting} className="btn-primary">
+          <button type="submit" disabled={submitting || atCompetitorCap} className="btn-primary">
             {submitting ? 'Adicionando…' : '+ Adicionar concorrente'}
           </button>
           {formError && <p className="w-full text-sm text-red-600">{formError}</p>}
         </form>
       )}
 
-      {rescoreMessage && <p className="text-xs text-[var(--text-muted)]">{rescoreMessage}</p>}
+      {competitors && competitors.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-[var(--text-muted)]">Ordenar por</label>
+          <Select
+            className="w-64"
+            value={sort}
+            onChange={(v) => {
+              const next = new URLSearchParams(searchParams)
+              if (!v || v === 'default') next.delete('sort')
+              else next.set('sort', v)
+              setSearchParams(next)
+            }}
+            options={SORT_OPTIONS}
+          />
+        </div>
+      )}
 
       {error && <EmptyState title="Não deu pra carregar os concorrentes" subtitle={error} />}
 
@@ -198,7 +239,7 @@ export default function Competitors() {
 
       {competitors && competitors.length > 0 && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {competitors.map((c) => (
+          {sortCompetitors(competitors, sort).map((c) => (
             <div
               key={c.id}
               className="group relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border-2 border-[var(--border)] bg-[var(--bg-surface)] p-3.5 transition-colors hover:border-brand-500/50"
@@ -245,16 +286,6 @@ export default function Competitors() {
 
               {!asUserId && (
                 <div className="mt-auto flex items-center justify-end gap-2.5 pt-0.5">
-                  {c.status !== 'checking' && (
-                    <button
-                      onClick={() => handleRescore(c)}
-                      disabled={rescoringId === c.id || c.status !== 'active'}
-                      title="Recalcula o score de todos os produtos agora, sem esperar o snapshot diário (6h)"
-                      className="text-[11px] font-medium text-[var(--text-muted)] hover:text-brand-500 disabled:opacity-50"
-                    >
-                      {rescoringId === c.id ? 'Recalculando…' : '📊 Recalcular'}
-                    </button>
-                  )}
                   <button
                     onClick={() => handleDelete(c)}
                     disabled={deletingId === c.id}
