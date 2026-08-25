@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client.js'
+import { useAuth } from './AuthContext.jsx'
 
 const STORAGE_KEY = 'mega-minerador-operation'
 const CUSTOM_STORAGE_KEY = 'mega-minerador-custom-operations'
@@ -62,16 +63,64 @@ function loadLabelOverrides() {
 
 const OperationContext = createContext(null)
 
+// BUG corrigido (achado ao vivo, 2026-08-25): a chave de storage era global
+// pro NAVEGADOR, não por CONTA — quem testasse uma conta nova no mesmo
+// navegador que já tinha usado o ScoutX antes (como admin ou outra conta)
+// herdava o país que já estava salvo ali, e o país "certo" da conta nova
+// nunca virava a seleção ativa (o checkmark ficava preso no valor antigo,
+// consumindo vaga de plano à toa). Escopar por email da conta logada
+// resolve: cada conta tem sua própria chave, sem depender do navegador
+// estar "limpo".
+function operationKeyFor(email) {
+  return email ? `${STORAGE_KEY}:${email}` : STORAGE_KEY
+}
+
 export function OperationProvider({ children }) {
+  const { me } = useAuth()
+  const email = me?.email || null
+
   // `operation` continua com um valor válido desde o primeiro render (nunca
   // fica null) — o resto do app (dashboard, concorrentes, etc.) não precisa
-  // saber que ninguém escolheu nada ainda, continua funcionando igual.
-  // `needsCountryPick` é só um aviso pra UI: true quando essa pessoa NUNCA
-  // escolheu um país de verdade nesse navegador (nada gravado ainda) — o
-  // Layout usa isso pra mostrar o seletor inicial de país, em vez de deixar
-  // a conta presa em "Colômbia" sem avisar (era o comportamento antigo).
+  // saber que ninguém escolheu nada ainda, continua funcionando igual. No
+  // instante inicial ainda não sabemos o email da conta (useAuth carrega
+  // /api/me de forma assíncrona), então parte do valor "solto" antigo só
+  // como placeholder — o efeito abaixo corrige pro valor DA CONTA assim
+  // que o email chega, antes de qualquer interação real ser possível.
+  // `needsCountryPick` é só um aviso pra UI: true quando ESSA CONTA nunca
+  // escolheu um país de verdade — o Layout usa isso pra mostrar o seletor
+  // inicial de país, em vez de deixar a conta presa em "Colômbia" sem
+  // avisar (era o comportamento antigo).
   const [operation, setOperationRaw] = useState(() => localStorage.getItem(STORAGE_KEY) || 'colombia')
   const [needsCountryPick, setNeedsCountryPick] = useState(() => localStorage.getItem(STORAGE_KEY) === null)
+  const initializedForEmail = useRef(null)
+
+  useEffect(() => {
+    if (!email || initializedForEmail.current === email) return
+    initializedForEmail.current = email
+    const scoped = localStorage.getItem(operationKeyFor(email))
+    if (scoped) {
+      setOperationRaw(scoped)
+      setNeedsCountryPick(false)
+      return
+    }
+    // Migração pontual: cliente de verdade que já usava o app ANTES dessa
+    // trava por conta existir tinha o país salvo na chave antiga (global do
+    // navegador) — aproveita esse valor uma única vez em vez de obrigar
+    // escolher de novo, e CONSOME a chave antiga na sequência (removeItem)
+    // pra ela não vazar pra uma segunda conta testada no mesmo navegador
+    // depois (era exatamente o bug relatado).
+    const legacy = localStorage.getItem(STORAGE_KEY)
+    if (legacy) {
+      setOperationRaw(legacy)
+      setNeedsCountryPick(false)
+      localStorage.setItem(operationKeyFor(email), legacy)
+      localStorage.removeItem(STORAGE_KEY)
+      return
+    }
+    // Nem chave escopada nem chave antiga: essa conta é tratada como se
+    // fosse realmente a primeira vez, ponto final.
+    setNeedsCountryPick(true)
+  }, [email])
 
   function setOperation(value) {
     setNeedsCountryPick(false)
@@ -126,9 +175,11 @@ export function OperationProvider({ children }) {
     // faria o aviso de "escolher país" sumir sozinho no próximo carregamento,
     // sem a pessoa ter escolhido nada. Só grava depois que setOperation()
     // (via clique num país ou "adicionar país") passar por aqui de propósito.
-    if (needsCountryPick) return
-    localStorage.setItem(STORAGE_KEY, operation)
-  }, [operation, needsCountryPick])
+    // Sem email ainda (carregando /api/me) também não grava — evitaria
+    // gravar na chave global antiga por engano antes de saber de quem é.
+    if (needsCountryPick || !email) return
+    localStorage.setItem(operationKeyFor(email), operation)
+  }, [operation, needsCountryPick, email])
 
   useEffect(() => {
     localStorage.setItem(CUSTOM_STORAGE_KEY, JSON.stringify(customOperations))
