@@ -124,8 +124,6 @@ export default function Layout() {
     labelOverrides,
     renameOperation,
     planLimit,
-    isOperationLocked,
-    atOperationCap,
     needsCountryPick,
   } = useOperation()
   const { me } = useAuth()
@@ -210,41 +208,36 @@ export default function Layout() {
     setOperationModal(null)
   }
 
-  // Cada opção travada mostra o plano que REALMENTE destrava ela — não é
-  // "próximo plano geral", é por vaga: pra quem já usa 1 país, a 2ª e a 3ª
-  // opção travada cabem no Pro (até 3), a 4ª em diante só no Enterprise.
-  // `usedCount` conta o que a organização já usa de verdade; a partir dali
-  // cada opção travada, na ordem da lista, ocupa a próxima vaga.
-  const usedCount = planLimit?.usedOperations?.length || 0
-  let lockedSeen = 0
-  // O país que a conta REALMENTE está usando agora vem primeiro na lista,
-  // não importa se é um dos 5 fixos ou um customizado — reportado ao vivo:
-  // conta que escolheu um país customizado via seletor inicial via ver esse
-  // país jogado lá embaixo, depois de Espanha, com Colômbia continuando em
-  // primeiro só por ser o item #1 do array fixo (sem relação nenhuma com o
-  // que a conta usa de verdade).
+  // Revisão (achado ao vivo, 2026-08-25): a trava era "por toque" — só
+  // fechava a Nª opção depois que a conta já tinha CLICADO em N países
+  // diferentes, então logo depois de um upgrade (antes de escolher
+  // qualquer país extra) tudo aparecia liberado, mesmo num plano com teto.
+  // Trocado pra trava por POSIÇÃO na lista: as N primeiras posições (N =
+  // maxOperations do plano) ficam liberadas na hora, o resto trava direto
+  // com "Requer plano X" — sem precisar a conta "gastar" vaga clicando
+  // pra revelar o travamento. O país que a conta já usa sempre ocupa a
+  // 1ª posição (orderedOperations, ver acima), então ele nunca é o que
+  // trava.
   const allOperations = [...OPERATIONS, ...customOperations]
   const orderedOperations = [
     ...allOperations.filter((op) => op.value === operation),
     ...allOperations.filter((op) => op.value !== operation),
   ]
-  const operationOptions = orderedOperations.map((op) => {
-    const locked = isOperationLocked(op.value)
-    let lockedReason
-    if (locked) {
-      lockedSeen += 1
-      lockedReason = `Requer plano ${requiredPlanForSlot(usedCount + lockedSeen)}`
-    }
+  const maxOps = planLimit?.maxOperations
+  const operationOptions = orderedOperations.map((op, index) => {
+    const locked = Number.isFinite(maxOps) && index >= maxOps
     return {
       value: op.value,
       label: labelOverrides[op.value] || op.label,
       icon: op.flag,
       locked,
-      lockedReason,
+      lockedReason: locked ? `Requer plano ${requiredPlanForSlot(index + 1)}` : undefined,
     }
   })
-  // Um país novo (customizado) ocuparia a vaga logo depois da última travada.
-  const nextFreeSlot = usedCount + lockedSeen + 1
+  // Um país novo (customizado) entraria na próxima posição livre — mesma
+  // regra acima: só cabe se ainda sobrar vaga por posição.
+  const atOperationCap = Number.isFinite(maxOps) && orderedOperations.length >= maxOps
+  const nextFreeSlot = orderedOperations.length + 1
 
   const hasAccess = me?.isAdmin || me?.canAccessMinerador
 
