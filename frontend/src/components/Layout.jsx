@@ -217,7 +217,18 @@ export default function Layout() {
   // cada opção travada, na ordem da lista, ocupa a próxima vaga.
   const usedCount = planLimit?.usedOperations?.length || 0
   let lockedSeen = 0
-  const operationOptions = [...OPERATIONS, ...customOperations].map((op) => {
+  // O país que a conta REALMENTE está usando agora vem primeiro na lista,
+  // não importa se é um dos 5 fixos ou um customizado — reportado ao vivo:
+  // conta que escolheu um país customizado via seletor inicial via ver esse
+  // país jogado lá embaixo, depois de Espanha, com Colômbia continuando em
+  // primeiro só por ser o item #1 do array fixo (sem relação nenhuma com o
+  // que a conta usa de verdade).
+  const allOperations = [...OPERATIONS, ...customOperations]
+  const orderedOperations = [
+    ...allOperations.filter((op) => op.value === operation),
+    ...allOperations.filter((op) => op.value !== operation),
+  ]
+  const operationOptions = orderedOperations.map((op) => {
     const locked = isOperationLocked(op.value)
     let lockedReason
     if (locked) {
