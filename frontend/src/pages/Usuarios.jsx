@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
+  ArrowRightLeft,
   Ban,
   Building2,
   History,
   KeyRound,
   Lock,
+  PlusCircle,
   RefreshCw,
   RotateCcw,
   ShieldCheck,
@@ -76,6 +78,21 @@ const AUDIT_ACTIONS = {
 
 const emptyForm = { name: '', email: '', password: '', admin: false, organizationId: '' }
 
+// Mesmas chaves/labels de Organizacoes.jsx (não veio pra um arquivo
+// compartilhado de propósito, pra não criar acoplamento entre as duas
+// telas por causa de uma lista de 3 itens que quase nunca muda).
+const PLAN_OPTIONS = [
+  { value: 'solo', label: 'Standard: 1 país, até 50 concorrentes' },
+  { value: 'pro', label: 'Pro: até 3 países, até 250 concorrentes' },
+  { value: 'agencia', label: 'Enterprise: países e concorrentes ilimitados' },
+]
+
+const CYCLE_OPTIONS = [
+  { value: 'mensal', label: 'Mensal' },
+  { value: 'trimestral', label: 'Trimestral' },
+  { value: 'anual', label: 'Anual' },
+]
+
 const inputClass =
   'rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none'
 
@@ -112,6 +129,7 @@ export default function Usuarios() {
   const [ipDetail, setIpDetail] = useState(null)
   const [passwordEdit, setPasswordEdit] = useState(null)
   const [orgPicker, setOrgPicker] = useState(null)
+  const [planEditor, setPlanEditor] = useState(null)
   const [competitorSummary, setCompetitorSummary] = useState(null)
   const [claiming, setClaiming] = useState(false)
   const [claimMsg, setClaimMsg] = useState(null)
@@ -265,7 +283,16 @@ export default function Usuarios() {
   }
 
   function openOrgPicker(user) {
-    setOrgPicker({ user, value: user.organizationId ? String(user.organizationId) : '', demoting: false, saving: false, error: null })
+    // Admin não tem organização por definição — colocar essa conta num
+    // plano sempre passa por tirar o admin dela também (mesma trava do
+    // backend, ver server.js).
+    setOrgPicker({
+      user,
+      value: user.organizationId ? String(user.organizationId) : '',
+      demoting: user.role === 'admin',
+      saving: false,
+      error: null,
+    })
   }
 
   async function submitOrgPicker() {
@@ -282,6 +309,38 @@ export default function Usuarios() {
       load()
     } catch (err) {
       setOrgPicker({ ...orgPicker, saving: false, error: err.message || 'Não foi possível salvar.' })
+    }
+  }
+
+  // "Alterar plano" na tela de Usuários muda o plano da ORGANIZAÇÃO dessa
+  // pessoa (o plano vive lá, não no usuário) — atalho pra não precisar ir
+  // até Organizações só pra isso. Mesma rota/lógica do modal de lá.
+  function openPlanEditor(user) {
+    const org = (organizations || []).find((o) => o.id === user.organizationId)
+    setPlanEditor({
+      user,
+      organizationId: user.organizationId,
+      plan: org?.plan || 'solo',
+      billingCycle: org?.billingCycle || 'mensal',
+      extendValidity: false,
+      saving: false,
+      error: null,
+    })
+  }
+
+  async function submitPlanEditor() {
+    if (!planEditor) return
+    setPlanEditor({ ...planEditor, saving: true, error: null })
+    try {
+      await rawApi.updateOrganization(planEditor.organizationId, {
+        plan: planEditor.plan,
+        billingCycle: planEditor.billingCycle,
+        extendValidity: planEditor.extendValidity,
+      })
+      setPlanEditor(null)
+      load()
+    } catch (err) {
+      setPlanEditor({ ...planEditor, saving: false, error: err.message || 'Não foi possível salvar.' })
     }
   }
 
@@ -608,17 +667,17 @@ export default function Usuarios() {
                       )}
                     </td>
                     <td className="px-4 py-3.5 text-[var(--text-tertiary)]">{u.email}</td>
-                    <td className="min-w-[9rem] px-4 py-3.5">
+                    <td className="min-w-[12rem] px-4 py-3.5">
                       {u.organizationName ? (
-                        <>
+                        <div className="flex flex-col gap-1.5">
                           <button
                             onClick={() => setOrgFilter(String(u.organizationId))}
-                            className="text-left text-[var(--text-tertiary)] hover:text-brand-500 hover:underline"
+                            className="text-left font-medium text-[var(--text-secondary)] hover:text-brand-500 hover:underline"
                             title="Filtrar por essa organização"
                           >
                             {u.organizationName}
                           </button>
-                          <div className="mt-1 flex flex-wrap items-center gap-1">
+                          <div className="flex flex-wrap items-center gap-1">
                             <span className="whitespace-nowrap rounded-full bg-brand-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-brand-500">
                               {u.organizationPlan}
                             </span>
@@ -633,15 +692,31 @@ export default function Usuarios() {
                                 </span>
                               ))}
                           </div>
-                          <button
-                            onClick={() => openOrgPicker(u)}
-                            className="mt-1 text-[10px] text-[var(--text-faint)] hover:text-brand-500 hover:underline"
-                          >
-                            mover pra outra organização
-                          </button>
-                        </>
+                          <div className="flex flex-wrap gap-1.5">
+                            <button
+                              onClick={() => openPlanEditor(u)}
+                              title="Trocar o plano dessa organização (ex: upgrade)"
+                              className="inline-flex items-center gap-1 rounded-md border border-brand-500/30 bg-brand-500/10 px-2 py-1 text-[10px] font-semibold text-brand-500 transition-colors hover:border-brand-500/60 hover:bg-brand-500/20"
+                            >
+                              <RefreshCw size={11} /> Alterar plano
+                            </button>
+                            <button
+                              onClick={() => openOrgPicker(u)}
+                              title="Mover essa pessoa pra outra organização"
+                              className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-[10px] font-medium text-[var(--text-faint)] transition-colors hover:border-brand-500/40 hover:text-brand-500"
+                            >
+                              <ArrowRightLeft size={11} /> Trocar organização
+                            </button>
+                          </div>
+                        </div>
                       ) : (
-                        <span className="text-xs text-[var(--text-faint)]">—</span>
+                        <button
+                          onClick={() => openOrgPicker(u)}
+                          title={u.role === 'admin' ? 'Tira o admin dessa conta e coloca num plano' : 'Coloca essa pessoa numa organização/plano'}
+                          className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-[var(--border)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-faint)] transition-colors hover:border-brand-500/60 hover:bg-brand-500/10 hover:text-brand-500"
+                        >
+                          <PlusCircle size={12} /> Adicionar plano
+                        </button>
                       )}
                     </td>
                     <td className="px-4 py-3.5 text-xs text-[var(--text-muted)]">
@@ -877,6 +952,56 @@ export default function Usuarios() {
               </button>
               <button onClick={submitOrgPicker} disabled={orgPicker.saving} className="btn-primary px-4 py-2 text-xs">
                 {orgPicker.saving ? 'Salvando…' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {planEditor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPlanEditor(null)}>
+          <div
+            className="w-full max-w-sm rounded-2xl bg-[var(--bg-surface)] p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Alterar plano de {planEditor.user.organizationName}</h3>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
+              {planEditor.extendValidity
+                ? 'Se ainda não venceu, a validade nova soma em cima da atual. Se já venceu, conta a partir de hoje.'
+                : 'Só troca o plano, a data de validade continua exatamente a mesma que já estava.'}
+            </p>
+            <div className="mt-3 flex flex-col gap-2.5">
+              <Select value={planEditor.plan} onChange={(v) => setPlanEditor({ ...planEditor, plan: v })} options={PLAN_OPTIONS} />
+              <Select
+                value={planEditor.billingCycle}
+                onChange={(v) => setPlanEditor({ ...planEditor, billingCycle: v })}
+                options={CYCLE_OPTIONS}
+              />
+              <label className="flex items-center gap-2 text-xs text-[var(--text-tertiary)]">
+                <input
+                  type="checkbox"
+                  checked={planEditor.extendValidity}
+                  onChange={(e) => setPlanEditor({ ...planEditor, extendValidity: e.target.checked })}
+                />
+                Estender a validade (renovação de verdade, entrou dinheiro novo)
+              </label>
+              {!planEditor.extendValidity && (
+                <p className="text-xs text-amber-500">
+                  Upgrade/downgrade no meio do ciclo: use isso quando o cliente já pagou a diferença por fora e não deve
+                  ganhar nem perder dias de validade.
+                </p>
+              )}
+            </div>
+            {planEditor.error && <p className="mt-2 text-xs text-red-400">{planEditor.error}</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setPlanEditor(null)}
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--text-tertiary)] hover:bg-[var(--hover-surface)]"
+              >
+                Cancelar
+              </button>
+              <button onClick={submitPlanEditor} disabled={planEditor.saving} className="btn-primary px-4 py-2 text-xs">
+                {planEditor.saving ? 'Salvando…' : 'Salvar'}
               </button>
             </div>
           </div>
