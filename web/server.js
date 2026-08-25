@@ -236,6 +236,17 @@ setInterval(() => {
 // bloqueia troca de senha) se a API estiver fora do ar ou lenta: é
 // ferramenta interna de time, não vale travar o acesso de alguém por causa
 // de uma dependência externa instável.
+//
+// AJUSTADO (2026-08-25): bloquear em QUALQUER ocorrência (mesmo 1x, em
+// qualquer vazamento antigo de qualquer site) rejeitava quase toda senha
+// plausível — a base do HIBP tem 900M+ entradas, e senha decente comum
+// (ex: "Scoutx2026!") já teve alguma chance de aparecer uma vez em algum
+// dump antigo sem isso significar que ela é fraca. Só bloqueia agora se a
+// contagem de ocorrências for alta (era usada MUITAS vezes por gente
+// diferente — sinal real de senha fraca tipo "123456"/"password1"), não
+// qualquer aparição isolada.
+const PWNED_COUNT_THRESHOLD = 20;
+
 async function isPasswordPwned(password) {
   const hash = crypto.createHash("sha1").update(password, "utf8").digest("hex").toUpperCase();
   const prefix = hash.slice(0, 5);
@@ -247,7 +258,10 @@ async function isPasswordPwned(password) {
     });
     if (!response.ok) return false;
     const text = await response.text();
-    return text.split("\n").some((line) => line.split(":")[0].trim() === suffix);
+    const line = text.split("\n").find((l) => l.split(":")[0].trim() === suffix);
+    if (!line) return false;
+    const count = Number(line.split(":")[1]) || 0;
+    return count >= PWNED_COUNT_THRESHOLD;
   } catch {
     return false;
   }
