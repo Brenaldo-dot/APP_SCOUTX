@@ -121,7 +121,7 @@ export default function Organizacoes() {
   }
 
   function openRenew(org) {
-    setRenewModal({ org, plan: org.plan, billingCycle: org.billingCycle, saving: false, error: null })
+    setRenewModal({ org, plan: org.plan, billingCycle: org.billingCycle, extendValidity: true, saving: false, error: null })
   }
 
   async function submitRenew() {
@@ -131,6 +131,7 @@ export default function Organizacoes() {
       await rawApi.updateOrganization(renewModal.org.id, {
         plan: renewModal.plan,
         billingCycle: renewModal.billingCycle,
+        extendValidity: renewModal.extendValidity,
       })
       setRenewModal(null)
       load()
@@ -301,7 +302,9 @@ export default function Organizacoes() {
           <div className="w-full max-w-sm rounded-2xl bg-[var(--bg-surface)] p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-sm font-semibold text-[var(--text-primary)]">Renovar / mudar plano de {renewModal.org.name}</h3>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
-              Se ainda não venceu, a validade nova soma em cima da atual. Se já venceu, conta a partir de hoje.
+              {renewModal.extendValidity
+                ? 'Se ainda não venceu, a validade nova soma em cima da atual. Se já venceu, conta a partir de hoje.'
+                : 'Só troca o plano, a data de validade continua exatamente a mesma que já estava.'}
             </p>
             <div className="mt-3 flex flex-col gap-2.5">
               <Select value={renewModal.plan} onChange={(v) => setRenewModal({ ...renewModal, plan: v })} options={PLAN_OPTIONS} />
@@ -310,6 +313,20 @@ export default function Organizacoes() {
                 onChange={(v) => setRenewModal({ ...renewModal, billingCycle: v })}
                 options={CYCLE_OPTIONS}
               />
+              <label className="flex items-center gap-2 text-xs text-[var(--text-tertiary)]">
+                <input
+                  type="checkbox"
+                  checked={renewModal.extendValidity}
+                  onChange={(e) => setRenewModal({ ...renewModal, extendValidity: e.target.checked })}
+                />
+                Estender a validade (renovação de verdade, entrou dinheiro novo)
+              </label>
+              {!renewModal.extendValidity && (
+                <p className="text-xs text-amber-500">
+                  Upgrade/downgrade no meio do ciclo: use isso quando o cliente já pagou a diferença por fora e não deve
+                  ganhar nem perder dias de validade.
+                </p>
+              )}
             </div>
             {renewModal.error && <p className="mt-2 text-xs text-red-400">{renewModal.error}</p>}
             <div className="mt-4 flex justify-end gap-2">

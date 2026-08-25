@@ -335,7 +335,7 @@ async function ipSummaryForUser(appUserId) {
   return res.rows;
 }
 
-async function updateUserPermissions(id, { role, canAccessMinerador, suspended, changedById }) {
+async function updateUserPermissions(id, { role, canAccessMinerador, suspended, changedById, organizationId }) {
   const fields = [];
   const values = [];
   let i = 1;
@@ -347,6 +347,14 @@ async function updateUserPermissions(id, { role, canAccessMinerador, suspended, 
     fields.push(`role_changed_by_id = $${i++}`);
     values.push(changedById || null);
     fields.push(`role_changed_at = now()`);
+  }
+  // organizationId: null explícito tira o usuário de qualquer organização
+  // (admin não pertence a nenhuma) — undefined significa "não mexer nisso".
+  // A checagem de limite de usuários do plano/organização de destino já foi
+  // feita antes de chamar isto, em server.js (mesma regra do POST /api/admin/users).
+  if (organizationId !== undefined) {
+    fields.push(`organization_id = $${i++}`);
+    values.push(organizationId);
   }
   if (canAccessMinerador !== undefined) {
     fields.push(`can_access_minerador = $${i++}`);
@@ -589,6 +597,18 @@ async function renewOrganization(id, plan, billingCycle) {
   return res.rows[0];
 }
 
+// Upgrade/downgrade de plano SEM mexer na validade — diferente de
+// renewOrganization: usado quando o cliente já pagou a diferença fora do
+// app (ex: upgrade no meio do ciclo) e não deve ganhar dias extras de
+// brinde nem perder o que já pagou só porque trocou de plano.
+async function changeOrganizationPlan(id, plan, billingCycle) {
+  const res = await pool.query(
+    `UPDATE organizations SET plan = $1, billing_cycle = $2 WHERE id = $3 RETURNING *`,
+    [plan, billingCycle, id]
+  );
+  return res.rows[0];
+}
+
 // Escape-hatch manual — cortesia de renovação, correção, ou cancelamento
 // antecipado (setar pro passado bloqueia o login na hora, mesmo sem
 // cancelamento formal).
@@ -667,6 +687,7 @@ module.exports = {
   getOrgMemberIds,
   listOrganizationsWithCounts,
   renewOrganization,
+  changeOrganizationPlan,
   updateOrganizationExpiry,
   updateOrganizationDetails,
 };

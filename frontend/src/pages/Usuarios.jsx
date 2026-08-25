@@ -70,6 +70,8 @@ const AUDIT_ACTIONS = {
   org_created: { icon: Building2, color: 'text-emerald-400', text: (a, t) => `${a} criou a organização ${t}` },
   org_renewed: { icon: RefreshCw, color: 'text-brand-500', text: (a, t) => `${a} renovou/mudou o plano de ${t}` },
   org_expiry_edited: { icon: Building2, color: 'text-amber-400', text: (a, t) => `${a} editou a validade de ${t}` },
+  org_changed: { icon: Building2, color: 'text-brand-500', text: (a, t) => `${a} mudou a organização de ${t}` },
+  org_plan_changed: { icon: RefreshCw, color: 'text-brand-500', text: (a, t) => `${a} mudou o plano de ${t} (validade mantida)` },
 }
 
 const emptyForm = { name: '', email: '', password: '', admin: false, organizationId: '' }
@@ -109,6 +111,7 @@ export default function Usuarios() {
   const [creating, setCreating] = useState(false)
   const [ipDetail, setIpDetail] = useState(null)
   const [passwordEdit, setPasswordEdit] = useState(null)
+  const [orgPicker, setOrgPicker] = useState(null)
   const [competitorSummary, setCompetitorSummary] = useState(null)
   const [claiming, setClaiming] = useState(false)
   const [claimMsg, setClaimMsg] = useState(null)
@@ -240,6 +243,15 @@ export default function Usuarios() {
     if (field === 'role' && value && !confirm(`Dar acesso de ADMINISTRADOR pra ${user.name}? Isso dá acesso total ao app, inclusive a dados de outros usuários.`)) {
       return
     }
+    // Rebaixar admin pra colaborador sem organização nenhuma deixaria a
+    // conta sem plano (o backend recusa) — em vez de mostrar só o erro,
+    // já abre o seletor de organização, que também confirma e salva o
+    // rebaixamento junto (evita 2 passos separados: rebaixar, depois
+    // descobrir que precisa escolher organização).
+    if (field === 'role' && value === false && !user.organizationId) {
+      setOrgPicker({ user, value: '', demoting: true, saving: false, error: null })
+      return
+    }
     const prev = users
     setUsers(users.map((u) => (u.id === user.id ? { ...u, [field]: value } : u)))
     try {
@@ -249,6 +261,27 @@ export default function Usuarios() {
     } catch (err) {
       setUsers(prev)
       alert(err.message || 'Não foi possível salvar a alteração.')
+    }
+  }
+
+  function openOrgPicker(user) {
+    setOrgPicker({ user, value: user.organizationId ? String(user.organizationId) : '', demoting: false, saving: false, error: null })
+  }
+
+  async function submitOrgPicker() {
+    if (!orgPicker || !orgPicker.value) {
+      setOrgPicker({ ...orgPicker, error: 'Selecione uma organização.' })
+      return
+    }
+    setOrgPicker({ ...orgPicker, saving: true, error: null })
+    try {
+      const body = { organizationId: Number(orgPicker.value) }
+      if (orgPicker.demoting) body.role = 'collaborator'
+      await rawApi.updateUser(orgPicker.user.id, body)
+      setOrgPicker(null)
+      load()
+    } catch (err) {
+      setOrgPicker({ ...orgPicker, saving: false, error: err.message || 'Não foi possível salvar.' })
     }
   }
 
@@ -600,6 +633,12 @@ export default function Usuarios() {
                                 </span>
                               ))}
                           </div>
+                          <button
+                            onClick={() => openOrgPicker(u)}
+                            className="mt-1 text-[10px] text-[var(--text-faint)] hover:text-brand-500 hover:underline"
+                          >
+                            mover pra outra organização
+                          </button>
                         </>
                       ) : (
                         <span className="text-xs text-[var(--text-faint)]">—</span>
@@ -801,6 +840,43 @@ export default function Usuarios() {
               </button>
               <button onClick={submitPasswordEdit} disabled={passwordEdit.saving} className="btn-primary px-4 py-2 text-xs">
                 {passwordEdit.saving ? 'Salvando…' : 'Salvar nova senha'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {orgPicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setOrgPicker(null)}>
+          <div
+            className="w-full max-w-sm rounded-2xl bg-[var(--bg-surface)] p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+              {orgPicker.demoting ? `Tirar admin de ${orgPicker.user.name}` : `Mover ${orgPicker.user.name} de organização`}
+            </h3>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
+              {orgPicker.demoting
+                ? 'Selecione a organização/plano que essa pessoa vai usar como cliente. Sem isso, a conta fica sem plano nenhum.'
+                : 'A pessoa passa a herdar o plano e os limites da organização escolhida.'}
+            </p>
+            <Select
+              className="mt-3"
+              value={orgPicker.value}
+              onChange={(v) => setOrgPicker({ ...orgPicker, value: v, error: null })}
+              placeholder="Selecione a organização…"
+              options={(organizations || []).map((o) => ({ value: String(o.id), label: `${o.name} (${o.planLabel})` }))}
+            />
+            {orgPicker.error && <p className="mt-2 text-xs text-red-400">{orgPicker.error}</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setOrgPicker(null)}
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--text-tertiary)] hover:bg-[var(--hover-surface)]"
+              >
+                Cancelar
+              </button>
+              <button onClick={submitOrgPicker} disabled={orgPicker.saving} className="btn-primary px-4 py-2 text-xs">
+                {orgPicker.saving ? 'Salvando…' : 'Salvar'}
               </button>
             </div>
           </div>

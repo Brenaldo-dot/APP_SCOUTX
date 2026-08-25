@@ -994,7 +994,7 @@ function createApp() {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: "id inválido" });
 
-    const { role, canAccessMinerador, suspended, password } = req.body || {};
+    const { role, canAccessMinerador, suspended, password, organizationId } = req.body || {};
     if (role !== undefined && role !== "admin" && role !== "collaborator") {
       return res.status(400).json({ error: "role deve ser 'admin' ou 'collaborator'" });
     }
@@ -1019,11 +1019,59 @@ function createApp() {
     const before = await db.getAppUserById(id);
     if (!before) return res.status(404).json({ error: "Usuário não encontrado." });
 
+    // Papel final depois desse PATCH (pode não estar mudando agora, ex:
+    // só trocando a organização de um colaborador que já era colaborador).
+    const finalRole = role !== undefined ? role : before.role;
+
+    // organizationId só faz sentido combinado com o papel final: admin
+    // nunca tem organização (mesma regra do POST /api/admin/users), e
+    // colaborador sempre precisa de uma pra herdar plano/limite. Cobre
+    // tanto "rebaixar admin pra virar cliente" quanto "mover colaborador
+    // pra outra organização".
+    let finalOrganizationId; // undefined = não mexe
+    if (finalRole === "admin") {
+      finalOrganizationId = null;
+    } else if (organizationId !== undefined) {
+      const orgId = Number(organizationId);
+      if (!Number.isInteger(orgId)) {
+        return res.status(400).json({ error: "Selecione uma organização válida." });
+      }
+      const organization = await db.getOrganizationById(orgId);
+      if (!organization) return res.status(400).json({ error: "Organização não encontrada." });
+      if (orgId !== before.organization_id) {
+        const currentCount = await db.countUsersInOrg(orgId);
+        const limits = db.planLimitsFor(organization.plan);
+        if (currentCount >= limits.maxUsers) {
+          return res.status(400).json({
+            error: `A organização "${organization.name}" já está no limite de ${limits.maxUsers} usuário(s) do plano ${limits.label}, mude o plano ou remova outro usuário antes.`,
+          });
+        }
+      }
+      finalOrganizationId = orgId;
+    } else if (role === "collaborator" && before.role === "admin" && !before.organization_id) {
+      // Rebaixando admin pra colaborador sem escolher organização: precisa
+      // de uma, senão a conta fica sem plano nenhum (mesma trava do POST
+      // /api/admin/users).
+      return res.status(400).json({ error: "Selecione a organização desse usuário antes de tirar o admin dele." });
+    }
+
+    // Colaborador que ganha organização (seja recém-criada por essa troca,
+    // seja movida de outra) já sai liberado pro ScoutX, mesma regra de
+    // db.createUser — senão a pessoa muda de plano e continua sem acesso
+    // até alguém lembrar de destravar manualmente.
+    const finalCanAccessMinerador =
+      typeof canAccessMinerador === "boolean"
+        ? canAccessMinerador
+        : finalOrganizationId != null && before.organization_id !== finalOrganizationId
+        ? true
+        : undefined;
+
     await db.updateUserPermissions(id, {
       role,
-      canAccessMinerador: typeof canAccessMinerador === "boolean" ? canAccessMinerador : undefined,
+      canAccessMinerador: finalCanAccessMinerador,
       suspended,
       changedById: req.appUser.id,
+      organizationId: finalOrganizationId,
     });
     // Senha muda em query separada (updateUserPermissions só monta SET pros
     // campos de permissão) — admin resetando a senha de outra pessoa, ex:
@@ -1045,6 +1093,12 @@ function createApp() {
     }
     if (typeof canAccessMinerador === "boolean" && canAccessMinerador !== before.can_access_minerador) {
       logs.push(["permission_changed", `ScoutX: ${canAccessMinerador ? "liberado" : "removido"}`]);
+    }
+    if (finalOrganizationId !== undefined && finalOrganizationId !== before.organization_id) {
+      const orgLabel = finalOrganizationId
+        ? (await db.getOrganizationById(finalOrganizationId))?.name || `#${finalOrganizationId}`
+        : "nenhuma";
+      logs.push(["org_changed", `Organização: ${orgLabel}`]);
     }
     if (password !== undefined) {
       logs.push(["password_reset", null]);
@@ -1129,7 +1183,7 @@ function createApp() {
     const org = await db.getOrganizationById(id);
     if (!org) return res.status(404).json({ error: "Organização não encontrada." });
 
-    const { plan, billingCycle, expiresAt, name, notes } = req.body || {};
+    const { plan, billingCycle, expiresAt, name, notes, extendValidity } = req.body || {};
     let updated = org;
 
     if (plan !== undefined || billingCycle !== undefined) {
@@ -1144,16 +1198,35 @@ function createApp() {
       // organizar/remover quem sobra.
       const newLimits = db.planLimitsFor(plan);
       const currentCount = await db.countUsersInOrg(id);
-      updated = await db.renewOrganization(id, plan, billingCycle);
-      await db.logAdminAction(
-        req.appUser.id,
-        req.appUser.name,
-        null,
-        org.name,
-        "org_renewed",
-        `${db.planLimitsFor(org.plan).label} → ${newLimits.label} · ${billingCycle}` +
-          (currentCount > newLimits.maxUsers ? ` (⚠️ já tem ${currentCount} usuário(s), acima do novo limite)` : "")
-      );
+      // extendValidity=false: upgrade/downgrade de plano no meio do ciclo,
+      // cliente já pagou a diferença por fora — troca só o plano, mantém a
+      // validade como está (não empurra pra frente um ciclo inteiro de
+      // brinde, nem o cliente perde o que já pagou). Default (undefined ou
+      // true) continua sendo o comportamento de sempre: renovação de
+      // verdade, estende a validade.
+      if (extendValidity === false) {
+        updated = await db.changeOrganizationPlan(id, plan, billingCycle);
+        await db.logAdminAction(
+          req.appUser.id,
+          req.appUser.name,
+          null,
+          org.name,
+          "org_plan_changed",
+          `${db.planLimitsFor(org.plan).label} → ${newLimits.label} · ${billingCycle} (upgrade, validade mantida)` +
+            (currentCount > newLimits.maxUsers ? ` (⚠️ já tem ${currentCount} usuário(s), acima do novo limite)` : "")
+        );
+      } else {
+        updated = await db.renewOrganization(id, plan, billingCycle);
+        await db.logAdminAction(
+          req.appUser.id,
+          req.appUser.name,
+          null,
+          org.name,
+          "org_renewed",
+          `${db.planLimitsFor(org.plan).label} → ${newLimits.label} · ${billingCycle}` +
+            (currentCount > newLimits.maxUsers ? ` (⚠️ já tem ${currentCount} usuário(s), acima do novo limite)` : "")
+        );
+      }
 
       // Revisão de segurança: rebaixar pra Standard tinha que travar alerta
       // no Discord na hora do PRÓXIMO envio (ver settings.py::set_discord_webhook),
