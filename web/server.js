@@ -384,10 +384,13 @@ function authPage({ title, subtitle, action, error, showNameField, confirmPasswo
   }
   /* Campo de senha com o botão de olho por dentro do input, à direita —
      padding-right no input abre espaço pro botão sem sobrepor o texto.
-     top/bottom:0 (em vez de top:50%+transform) porque a altura do
-     .pw-field já exclui o margin-bottom do input (margin não conta pra
-     altura do pai), então o botão cobre exatamente a caixa do input e o
-     flex centraliza o ícone nela com precisão, sem cálculo manual de offset. */
+     PEGADINHA: <input> é inline-block, então a margin-bottom dele NÃO
+     colapsa com o .pw-field (isso só vale pra elementos block) — ela conta
+     pra altura do .pw-field igual o resto. Por isso "bottom: 0" no botão
+     ficava 16px alto demais (cobrindo a margin junto), centralizando o
+     ícone uns 8px abaixo do centro visual real do input. "bottom: 16px"
+     (mesmo valor da margin-bottom do input) corta essa sobra fora e faz o
+     botão bater exatamente na caixa visível do input, ponta a ponta. */
   .pw-field { position: relative; }
   .pw-field input { padding-right: 44px; }
   /* Edge (Windows) e alguns Chrome/Safari põem o PRÓPRIO ícone de "revelar
@@ -398,7 +401,7 @@ function authPage({ title, subtitle, action, error, showNameField, confirmPasswo
   .pw-field input::-webkit-credentials-auto-fill-button,
   .pw-field input::-webkit-strong-password-auto-fill-button { display: none !important; visibility: hidden; }
   .pw-toggle {
-    all: unset; position: absolute; top: 0; right: 3px; bottom: 0; width: 36px;
+    all: unset; position: absolute; top: 0; right: 3px; bottom: 16px; width: 36px;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer; color: #9ca3af; border-radius: 8px; line-height: 0;
   }
