@@ -101,6 +101,14 @@ async function migrate() {
   await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS avatar_url TEXT;`);
   await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS role_changed_by_id INTEGER;`);
   await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS role_changed_at TIMESTAMPTZ;`);
+  // Conta criada pelo webhook da Cakto nasce com uma senha aleatória que
+  // NINGUÉM sabe (nem a gente guarda em lugar nenhum) — essa flag marca
+  // que ela ainda precisa passar por /registrar (a pessoa prova que é dona
+  // da compra digitando o mesmo email, e escolhe a própria senha ali,
+  // ver POST /registrar em server.js). Evita depender de correlacionar um
+  // refId entre o redirect da Cakto e o webhook, que na prática não bateu
+  // certo no teste real (ver HANDOFF.md).
+  await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS needs_password_setup BOOLEAN NOT NULL DEFAULT false;`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS search_logs (
       id SERIAL PRIMARY KEY,
@@ -198,22 +206,6 @@ async function migrate() {
     );
   `);
 
-  // Ponte entre o webhook (servidor a servidor) e a página /bem-vindo (que o
-  // navegador do comprador abre depois do redirect da Cakto): a senha gerada
-  // fica aqui em texto puro só até a página buscar UMA vez (consumeCaktoCredential
-  // zera password_plain depois de entregar) ou expirar. Nunca deve acumular
-  // linha permanente com senha em texto puro.
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS cakto_pending_credentials (
-      ref_id TEXT PRIMARY KEY,
-      email TEXT NOT NULL,
-      password_plain TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      expires_at TIMESTAMPTZ NOT NULL,
-      retrieved_at TIMESTAMPTZ
-    );
-  `);
-
   // Backfill: todo usuário collaborator que já existia antes dessa revisão
   // (e qualquer um sem organização por algum motivo) recebe uma organização
   // própria de "Legado", plano Enterprise (sem limite) e validade 10 anos no
@@ -262,7 +254,7 @@ async function countActiveAdmins() {
   return res.rows[0].n;
 }
 
-async function createUser({ name, email, passwordHash, role, createdById, organizationId }) {
+async function createUser({ name, email, passwordHash, role, createdById, organizationId, needsPasswordSetup }) {
   const isAdmin = role === "admin";
   // Colaborador preso a uma organização é cliente pagante — ScoutX é o
   // PRÓPRIO produto vendido, não faz sentido nascer sem acesso a ele e
@@ -272,8 +264,8 @@ async function createUser({ name, email, passwordHash, role, createdById, organi
   // (já tem acesso total por ser admin).
   const canAccessMinerador = !isAdmin && !!organizationId;
   const res = await pool.query(
-    `INSERT INTO app_users (name, email, password_hash, role, role_changed_by_id, role_changed_at, organization_id, can_access_minerador)
-     VALUES ($1, $2, $3, $4, $5, ${isAdmin ? "now()" : "NULL"}, $6, $7) RETURNING *`,
+    `INSERT INTO app_users (name, email, password_hash, role, role_changed_by_id, role_changed_at, organization_id, can_access_minerador, needs_password_setup)
+     VALUES ($1, $2, $3, $4, $5, ${isAdmin ? "now()" : "NULL"}, $6, $7, $8) RETURNING *`,
     [
       name,
       email.toLowerCase().trim(),
@@ -282,7 +274,21 @@ async function createUser({ name, email, passwordHash, role, createdById, organi
       isAdmin ? createdById || null : null,
       isAdmin ? null : organizationId || null,
       canAccessMinerador,
+      !!needsPasswordSetup,
     ]
+  );
+  return res.rows[0];
+}
+
+// Usado só por POST /registrar (server.js) — a pessoa prova que é dona da
+// compra digitando o mesmo email que usou na Cakto, escolhe a própria
+// senha, e essa flag nunca mais volta a true pra essa conta.
+async function completePasswordSetup(id, passwordHash) {
+  const res = await pool.query(
+    `UPDATE app_users SET password_hash = $1, needs_password_setup = false,
+       failed_login_attempts = 0, locked_until = NULL, token_version = token_version + 1
+     WHERE id = $2 RETURNING *`,
+    [passwordHash, id]
   );
   return res.rows[0];
 }
@@ -548,34 +554,6 @@ async function updateCaktoEventStatus(purchaseId, event, status, detail) {
   );
 }
 
-async function storePendingCaktoCredential({ refId, email, password, ttlMinutes }) {
-  await pool.query(
-    `INSERT INTO cakto_pending_credentials (ref_id, email, password_plain, expires_at)
-     VALUES ($1, $2, $3, now() + ($4 || ' minutes')::interval)
-     ON CONFLICT (ref_id) DO UPDATE SET email = $2, password_plain = $3, expires_at = now() + ($4 || ' minutes')::interval, retrieved_at = NULL`,
-    [refId, email, password, ttlMinutes]
-  );
-}
-
-// Entrega de uso único: o UPDATE só afeta a linha se ainda não foi
-// retirada e ainda não expirou — em concorrência, só uma chamada consegue
-// "ganhar" essa transição (garantia do próprio Postgres por linha), as
-// outras caem no res.rows.length === 0. Zera a senha em texto puro logo
-// depois de ler, numa segunda query — não deixa rastro no banco além do
-// necessário pra entregar uma vez.
-async function consumeCaktoCredential(refId) {
-  const res = await pool.query(
-    `UPDATE cakto_pending_credentials SET retrieved_at = now()
-     WHERE ref_id = $1 AND retrieved_at IS NULL AND expires_at > now()
-     RETURNING email, password_plain`,
-    [refId]
-  );
-  if (res.rows.length === 0) return null;
-  const { email, password_plain } = res.rows[0];
-  await pool.query("UPDATE cakto_pending_credentials SET password_plain = NULL WHERE ref_id = $1", [refId]);
-  return { email, password: password_plain };
-}
-
 async function getOrganizationById(id) {
   const res = await pool.query("SELECT * FROM organizations WHERE id = $1", [id]);
   return res.rows[0] || null;
@@ -705,8 +683,7 @@ module.exports = {
   findOrganizationByCaktoEmail,
   recordCaktoEvent,
   updateCaktoEventStatus,
-  storePendingCaktoCredential,
-  consumeCaktoCredential,
+  completePasswordSetup,
   getOrganizationById,
   countUsersInOrg,
   getOrgMemberIds,

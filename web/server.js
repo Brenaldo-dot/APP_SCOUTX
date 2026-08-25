@@ -157,24 +157,24 @@ function recordIpLoginFailure(ip) {
   ipLoginFailures.set(ip, entry);
 }
 
-// Rate limit próprio (separado do de login) pra GET /api/cakto/credentials:
-// a página /bem-vindo faz polling legítimo (até ~25 tentativas em ~75s por
-// visita), então o limite aqui é mais generoso que o de login, mas ainda
-// impede alguém de tentar adivinhar refId em massa (o refId tem entropia
-// razoável e a credencial é de uso único, mas isso é uma camada a mais).
-const CAKTO_CRED_WINDOW_MS = 10 * 60 * 1000;
-const CAKTO_CRED_LIMIT = 60;
-const caktoCredAttempts = new Map();
+// Rate limit próprio (separado do de login) pra POST /registrar — sem
+// isso, alguém poderia tentar um monte de emails em sequência só pra
+// descobrir (pelas mensagens de erro diferentes) quais são clientes de
+// verdade da Cakto. Mais generoso que o de login (não é senha sendo
+// testada, é só "esse email existe"), mas ainda limita o volume.
+const REGISTER_WINDOW_MS = 10 * 60 * 1000;
+const REGISTER_LIMIT = 20;
+const registerAttempts = new Map();
 
-function checkCaktoCredRateLimit(ip) {
+function checkRegisterRateLimit(ip) {
   const now = Date.now();
-  let entry = caktoCredAttempts.get(ip);
-  if (!entry || now - entry.windowStart > CAKTO_CRED_WINDOW_MS) {
+  let entry = registerAttempts.get(ip);
+  if (!entry || now - entry.windowStart > REGISTER_WINDOW_MS) {
     entry = { count: 0, windowStart: now };
   }
   entry.count += 1;
-  caktoCredAttempts.set(ip, entry);
-  return entry.count > CAKTO_CRED_LIMIT;
+  registerAttempts.set(ip, entry);
+  return entry.count > REGISTER_LIMIT;
 }
 
 function resetIpLoginFailures(ip) {
@@ -395,90 +395,6 @@ function authPage({ title, subtitle, action, error, showNameField }) {
 </body></html>`;
 }
 
-// Página pública (sem login) que a Cakto abre depois do pagamento aprovado
-// (redirecionamento pós-compra configurado no painel dela, com ?ref=<refId>
-// na URL). Reaproveita o visual de authPage() mas não é formulário: só
-// busca a senha gerada pelo webhook via bemvindo.js (polling em
-// /api/cakto/credentials) e mostra assim que estiver pronta.
-function welcomePage() {
-  return `<!doctype html>
-<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ScoutX, bem-vindo</title>
-<style>
-  * { box-sizing: border-box; }
-  body {
-    font-family: system-ui, sans-serif; background: #05070d; color: #f3f4f6;
-    display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0;
-    position: relative; overflow: hidden;
-  }
-  body::after {
-    content: ""; position: absolute; inset: 0; pointer-events: none;
-    background:
-      radial-gradient(circle at 12% 8%, rgba(59,130,246,0.35) 0%, transparent 42%),
-      radial-gradient(circle at 88% 92%, rgba(34,211,238,0.22) 0%, transparent 40%);
-  }
-  .card {
-    position: relative; z-index: 1;
-    background: linear-gradient(180deg, rgba(18,20,30,0.88), rgba(10,12,20,0.92));
-    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(96,165,250,0.18);
-    padding: 34px 32px; border-radius: 20px; width: 380px;
-    box-shadow: 0 24px 70px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.02) inset;
-    text-align: center;
-  }
-  h1 { font-size: 20px; margin: 0 0 6px; letter-spacing: -0.2px; }
-  p { color: #9ca3af; font-size: 13px; margin: 0 0 8px; line-height: 1.5; }
-  .hidden { display: none; }
-  .spinner {
-    width: 30px; height: 30px; margin: 18px auto; border-radius: 50%;
-    border: 3px solid rgba(96,165,250,0.2); border-top-color: #22d3ee;
-    animation: spin 0.8s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .cred-box {
-    margin-top: 18px; padding: 14px; border-radius: 12px;
-    background: rgba(5,7,13,0.7); border: 1px solid rgba(96,165,250,0.16); text-align: left;
-  }
-  .cred-box label { display: block; font-size: 11px; font-weight: 600; color: #93c5fd; margin: 0 0 3px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .cred-box .value { font-size: 14px; font-family: ui-monospace, monospace; word-break: break-all; margin: 0 0 12px; }
-  .cred-box .value:last-child { margin-bottom: 0; }
-  a.btn {
-    display: inline-block; margin-top: 18px; padding: 11px 22px; border-radius: 9999px; text-decoration: none;
-    background: linear-gradient(90deg, #1d4ed8 0%, #3b82f6 50%, #22d3ee 100%);
-    color: #fff; font-weight: 600; font-size: 14px;
-  }
-</style></head>
-<body>
-<div class="card">
-  <div id="loading">
-    <h1>Preparando seu acesso</h1>
-    <p>Já confirmamos seu pagamento, estamos criando sua conta no ScoutX. Isso leva só alguns segundos.</p>
-    <div class="spinner"></div>
-  </div>
-  <div id="ready" class="hidden">
-    <h1>Sua conta está pronta</h1>
-    <p>Guarde essas credenciais, você pode trocar a senha depois em Minha Conta.</p>
-    <div class="cred-box">
-      <label>Email</label>
-      <p class="value" id="cred-email"></p>
-      <label>Senha</label>
-      <p class="value" id="cred-password"></p>
-    </div>
-    <a class="btn" href="/login">Entrar no ScoutX</a>
-  </div>
-  <div id="fallback" class="hidden">
-    <h1>Estamos finalizando</h1>
-    <p>Sua compra foi aprovada, mas o acesso ainda está sendo preparado. Em alguns minutos você recebe as instruções, se precisar de ajuda entre em contato com o suporte.</p>
-  </div>
-  <div id="missing-ref" class="hidden">
-    <h1>Link incompleto</h1>
-    <p>Essa página precisa vir do redirecionamento da Cakto depois da compra. Se você chegou aqui direto, entre em contato com o suporte.</p>
-  </div>
-</div>
-<script src="/cakto-assets/bemvindo.js"></script>
-</body></html>`;
-}
-
 function createApp() {
   const app = express();
   app.set("trust proxy", 1);
@@ -606,14 +522,14 @@ function createApp() {
   // isValidSecret). Nunca retorna detalhe do motivo de falha pro chamador
   // além do status HTTP, pra não dar pista útil a alguém tentando forjar
   // uma compra.
-  // Blindagem extra (defesa em profundidade): mesmo handleCaktoWebhook e
-  // consumeCaktoCredential já tratando seus próprios erros internamente,
-  // qualquer coisa inesperada que escape ainda vira uma promise rejeitada
-  // sem dono nessas duas rotas async — e isso derruba o processo Node
-  // inteiro (não tem handler global de unhandledRejection configurado),
-  // tirando o app inteiro do ar, não só a automação Cakto (foi exatamente
-  // isso que aconteceu em produção em 2026-08-25, ver cakto.js). Todo
-  // handler async novo que mexe com banco deveria ter esse try/catch.
+  // Blindagem extra (defesa em profundidade): mesmo handleCaktoWebhook já
+  // tratando seus próprios erros internamente, qualquer coisa inesperada
+  // que escape ainda vira uma promise rejeitada sem dono nessa rota async
+  // — e isso derruba o processo Node inteiro (não tem handler global de
+  // unhandledRejection configurado), tirando o app inteiro do ar, não só a
+  // automação Cakto (foi exatamente isso que aconteceu em produção em
+  // 2026-08-25, ver cakto.js). Todo handler async novo que mexe com banco
+  // deveria ter esse try/catch.
   app.post("/api/webhooks/cakto", async (req, res) => {
     try {
       const { status, body } = await handleCaktoWebhook(req.body);
@@ -624,29 +540,51 @@ function createApp() {
     }
   });
 
-  // Página pública que a Cakto abre depois do pagamento (ver welcomePage()).
-  app.get("/bem-vindo", (req, res) => {
-    res.send(welcomePage());
+  // Página pública (sem login) que a Cakto abre depois do pagamento
+  // aprovado (URL fixa configurada no painel dela, SEM parâmetro nenhum —
+  // diferente da tentativa anterior com ?ref=<refId>, que dependia de um
+  // valor da Cakto bater exatamente com o que o webhook recebeu, e no teste
+  // real não bateu, ver HANDOFF.md). Aqui a pessoa PROVA que é dona da
+  // compra digitando o mesmo email usado na Cakto, e escolhe a própria
+  // senha — sem depender de nenhuma correlação frágil entre redirect e
+  // webhook.
+  const REGISTER_SUBTITLE = "Já confirmamos seu pagamento. Digite o email que você usou na compra e escolha sua senha.";
+
+  app.get("/registrar", (req, res) => {
+    res.send(authPage({ title: "Criar sua senha", subtitle: REGISTER_SUBTITLE, action: "/registrar" }));
   });
 
-  app.use("/cakto-assets", express.static(path.join(__dirname, "public-cakto")));
+  app.post("/registrar", async (req, res) => {
+    const email = String(req.body.email || "").trim();
+    const password = String(req.body.password || "");
+    const rerender = (status, error) =>
+      res.status(status).send(authPage({ title: "Criar sua senha", subtitle: REGISTER_SUBTITLE, action: "/registrar", error }));
 
-  // Entrega de uso único da senha gerada pelo webhook, buscada pela página
-  // /bem-vindo via polling (bemvindo.js). Resposta igual (404) tanto pra
-  // "ainda não chegou" quanto pra "ref inválido/expirado/já usado" — não dá
-  // pra distinguir de fora, o que também evita virar um oráculo pra alguém
-  // testando refIds.
-  app.get("/api/cakto/credentials", async (req, res) => {
+    if (checkRegisterRateLimit(req.ip)) {
+      return rerender(429, "Muitas tentativas vindas daqui, tenta de novo daqui a pouco.");
+    }
+    if (!email) return rerender(400, "Digite o email que você usou na compra.");
+    if (password.length < 8) return rerender(400, "A senha precisa ter no mínimo 8 caracteres.");
+
     try {
-      const refId = String(req.query.ref || "").trim();
-      if (!refId) return res.status(400).json({ error: "ref obrigatório" });
-      if (checkCaktoCredRateLimit(req.ip)) return res.status(429).json({ error: "too_many_requests" });
-      const result = await db.consumeCaktoCredential(refId);
-      if (!result) return res.status(404).json({ pending: true });
-      res.json({ email: result.email, password: result.password });
+      const user = await db.findUserByEmail(email);
+      if (!user) {
+        return rerender(404, "Não encontramos uma compra pendente pra esse email. Confira se digitou certo, ou fale com o suporte.");
+      }
+      if (!user.needs_password_setup) {
+        return rerender(400, "Essa conta já tem senha definida. Faça login normal, ou use \"Esqueci minha senha\" se precisar trocar.");
+      }
+      if (await isPasswordPwned(password)) {
+        return rerender(400, "Essa senha já apareceu em vazamentos conhecidos, escolha outra.");
+      }
+      const passwordHash = await bcrypt.hash(password, 10);
+      const updated = await db.completePasswordSetup(user.id, passwordHash);
+      db.logLogin(user.id, req.ip).catch((e) => console.error("log login:", e));
+      setSessionCookie(res, user.id, updated.token_version);
+      res.redirect("/");
     } catch (err) {
-      console.error("Webhook Cakto: erro inesperado buscando credencial:", err);
-      res.status(500).json({ error: "internal error" });
+      console.error("Erro inesperado em POST /registrar:", err);
+      rerender(500, "Erro inesperado, tenta de novo em instantes.");
     }
   });
 

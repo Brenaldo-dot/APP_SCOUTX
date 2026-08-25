@@ -32,10 +32,15 @@ const CAKTO_OFFER_PLAN_MAP = {
 // avisa.
 const CANCELLATION_EVENTS = new Set(["refund", "chargeback", "subscription_canceled"]);
 
-function generateRandomPassword() {
-  // 12 chars, alfanumérico (base64url sem = / _ / - pra não confundir
-  // gente lendo/digitando na tela de "bem-vindo").
-  return crypto.randomBytes(9).toString("base64url").replace(/[-_]/g, "").slice(0, 12);
+// Senha PLACEHOLDER — ninguém nunca vê esse valor, nem loga, nem entrega
+// em lugar nenhum. Existe só porque password_hash é NOT NULL. A conta
+// nasce com needs_password_setup=true (ver createUser abaixo); a pessoa
+// escolhe a PRÓPRIA senha de verdade em POST /registrar (server.js),
+// provando que é dona da compra ao digitar o mesmo email usado na Cakto.
+// Longa e aleatória de propósito — mesmo sendo descartada, não custa nada
+// ela ser inadivinhável enquanto existir.
+function generateUnusablePlaceholderPassword() {
+  return crypto.randomBytes(32).toString("base64url");
 }
 
 // Compara o secret do corpo do webhook contra CAKTO_WEBHOOK_SECRET.
@@ -96,8 +101,7 @@ async function handlePurchaseApproved(data) {
     );
   }
 
-  const password = generateRandomPassword();
-  const passwordHash = await bcrypt.hash(password, 10);
+  const passwordHash = await bcrypt.hash(generateUnusablePlaceholderPassword(), 10);
   const org = await db.createOrganizationFromCakto({
     name: `${name} (Cakto)`,
     plan: mapping.plan,
@@ -112,15 +116,8 @@ async function handlePurchaseApproved(data) {
     passwordHash,
     role: "collaborator",
     organizationId: org.id,
+    needsPasswordSetup: true,
   });
-  // refId é o identificador curto que a Cakto usa na URL de checkout/
-  // redirecionamento pós-compra — é o que a página /bem-vindo vai mandar de
-  // volta pra buscar a senha (ver rota GET /api/cakto/credentials).
-  if (data.refId) {
-    await db.storePendingCaktoCredential({ refId: data.refId, email, password, ttlMinutes: 30 });
-  } else {
-    console.error(`Webhook Cakto: compra ${data.id} sem refId, não dá pra entregar a senha pela página /bem-vindo. Senha gerada: ${password} (anote e apague este log depois de repassar pro cliente).`);
-  }
   await db.logAdminAction(
     null,
     "Cakto (automático)",
