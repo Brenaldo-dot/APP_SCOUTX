@@ -162,6 +162,48 @@ async function migrate() {
   `);
   await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id);`);
 
+  // Automação Cakto: cakto_purchase_id/cakto_customer_email identificam qual
+  // organização veio de qual compra, pra um evento de cancelamento/reembolso
+  // futuro (que só traz o ID da compra ou o email do comprador) achar a
+  // organização certa pra suspender. NULL pras organizações criadas
+  // manualmente pelo admin (a maioria hoje).
+  await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS cakto_purchase_id TEXT;`);
+  await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS cakto_customer_email TEXT;`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_organizations_cakto_purchase ON organizations(cakto_purchase_id) WHERE cakto_purchase_id IS NOT NULL;`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_organizations_cakto_email ON organizations(cakto_customer_email) WHERE cakto_customer_email IS NOT NULL;`);
+
+  // Idempotência do webhook: a Cakto pode reenviar o mesmo evento (timeout,
+  // retry automático dela) — sem isso, um reenvio de "purchase_approved"
+  // criaria uma segunda organização/usuário pra mesma compra. Chave composta
+  // (id da compra + evento) porque a MESMA compra gera vários eventos ao
+  // longo do tempo (aprovada, depois talvez reembolsada).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS cakto_events (
+      purchase_id TEXT NOT NULL,
+      event TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'received',
+      detail TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (purchase_id, event)
+    );
+  `);
+
+  // Ponte entre o webhook (servidor a servidor) e a página /bem-vindo (que o
+  // navegador do comprador abre depois do redirect da Cakto): a senha gerada
+  // fica aqui em texto puro só até a página buscar UMA vez (consumeCaktoCredential
+  // zera password_plain depois de entregar) ou expirar. Nunca deve acumular
+  // linha permanente com senha em texto puro.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS cakto_pending_credentials (
+      ref_id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      password_plain TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      retrieved_at TIMESTAMPTZ
+    );
+  `);
+
   // Backfill: todo usuário collaborator que já existia antes dessa revisão
   // (e qualquer um sem organização por algum motivo) recebe uma organização
   // própria de "Legado", plano Enterprise (sem limite) e validade 10 anos no
@@ -421,6 +463,86 @@ async function createOrganization({ name, plan, billingCycle, notes }) {
   return res.rows[0];
 }
 
+// Mesmo formato de createOrganization, mas grava a referência da compra
+// Cakto que originou essa organização (ver colunas cakto_* em migrate()) —
+// é o que permite um evento de cancelamento/reembolso futuro achar essa
+// organização de volta.
+async function createOrganizationFromCakto({ name, plan, billingCycle, notes, purchaseId, customerEmail }) {
+  const days = BILLING_CYCLE_DAYS[billingCycle];
+  const res = await pool.query(
+    `INSERT INTO organizations (name, plan, billing_cycle, expires_at, notes, cakto_purchase_id, cakto_customer_email)
+     VALUES ($1, $2, $3, now() + ($4 || ' days')::interval, $5, $6, $7) RETURNING *`,
+    [name, plan, billingCycle, days, notes || null, purchaseId, customerEmail]
+  );
+  return res.rows[0];
+}
+
+async function findOrganizationByCaktoPurchaseId(purchaseId) {
+  const res = await pool.query("SELECT * FROM organizations WHERE cakto_purchase_id = $1", [purchaseId]);
+  return res.rows[0] || null;
+}
+
+// Fallback pra quando o evento de cancelamento/reembolso não referencia o
+// mesmo purchase_id da compra original (ex: é o ID da assinatura, não da
+// transação) — busca pelo email do comprador. Mais de uma organização pode
+// bater (ex: reembolso parcial num histórico antigo) — devolve a mais
+// recente, quem chama decide se faz sentido.
+async function findOrganizationByCaktoEmail(email) {
+  const res = await pool.query(
+    "SELECT * FROM organizations WHERE cakto_customer_email = $1 ORDER BY created_at DESC LIMIT 1",
+    [email.toLowerCase().trim()]
+  );
+  return res.rows[0] || null;
+}
+
+// Idempotência: devolve true só na primeira vez que esse (purchase_id, event)
+// é visto — reenvios da Cakto (retry automático dela) batem no
+// ON CONFLICT DO NOTHING e voltam false, sinal pra quem chamou responder
+// 200 sem reprocessar (criar organização/usuário duplicado).
+async function recordCaktoEvent(purchaseId, event) {
+  const res = await pool.query(
+    `INSERT INTO cakto_events (purchase_id, event) VALUES ($1, $2)
+     ON CONFLICT (purchase_id, event) DO NOTHING RETURNING purchase_id`,
+    [purchaseId, event]
+  );
+  return res.rows.length > 0;
+}
+
+async function updateCaktoEventStatus(purchaseId, event, status, detail) {
+  await pool.query(
+    "UPDATE cakto_events SET status = $1, detail = $2 WHERE purchase_id = $3 AND event = $4",
+    [status, detail || null, purchaseId, event]
+  );
+}
+
+async function storePendingCaktoCredential({ refId, email, password, ttlMinutes }) {
+  await pool.query(
+    `INSERT INTO cakto_pending_credentials (ref_id, email, password_plain, expires_at)
+     VALUES ($1, $2, $3, now() + ($4 || ' minutes')::interval)
+     ON CONFLICT (ref_id) DO UPDATE SET email = $2, password_plain = $3, expires_at = now() + ($4 || ' minutes')::interval, retrieved_at = NULL`,
+    [refId, email, password, ttlMinutes]
+  );
+}
+
+// Entrega de uso único: o UPDATE só afeta a linha se ainda não foi
+// retirada e ainda não expirou — em concorrência, só uma chamada consegue
+// "ganhar" essa transição (garantia do próprio Postgres por linha), as
+// outras caem no res.rows.length === 0. Zera a senha em texto puro logo
+// depois de ler, numa segunda query — não deixa rastro no banco além do
+// necessário pra entregar uma vez.
+async function consumeCaktoCredential(refId) {
+  const res = await pool.query(
+    `UPDATE cakto_pending_credentials SET retrieved_at = now()
+     WHERE ref_id = $1 AND retrieved_at IS NULL AND expires_at > now()
+     RETURNING email, password_plain`,
+    [refId]
+  );
+  if (res.rows.length === 0) return null;
+  const { email, password_plain } = res.rows[0];
+  await pool.query("UPDATE cakto_pending_credentials SET password_plain = NULL WHERE ref_id = $1", [refId]);
+  return { email, password: password_plain };
+}
+
 async function getOrganizationById(id) {
   const res = await pool.query("SELECT * FROM organizations WHERE id = $1", [id]);
   return res.rows[0] || null;
@@ -533,6 +655,13 @@ module.exports = {
   logAdminAction,
   listAdminAuditLog,
   createOrganization,
+  createOrganizationFromCakto,
+  findOrganizationByCaktoPurchaseId,
+  findOrganizationByCaktoEmail,
+  recordCaktoEvent,
+  updateCaktoEventStatus,
+  storePendingCaktoCredential,
+  consumeCaktoCredential,
   getOrganizationById,
   countUsersInOrg,
   getOrgMemberIds,

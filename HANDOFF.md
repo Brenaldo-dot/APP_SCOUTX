@@ -73,6 +73,25 @@ RAILWAY_TOKEN="<...>" npx @railway/cli logs --service mega-minerador --latest --
 # procurar "Application startup complete" sem traceback/erro depois
 ```
 
+**ARMADILHA CRÍTICA (causou uma queda real em produção em 2026-08-25):** o
+`railway up` respeita o `.gitignore` do repositório quando roda dentro de
+uma pasta que é (ou está dentro de) um clone git — e `web/public-minerador/`
+está no `.gitignore` (é gerado, não versionado). Ou seja, mesmo fazendo o
+build do frontend e copiando certinho pra lá ANTES de rodar `railway up`,
+o deploy sobe **sem** essa pasta, silenciosamente, sem erro nenhum no
+comando. O app inteiro quebra (`GET /` cai no fallback `res.status(503)`
+"ScoutX ainda não está disponível neste ambiente") e não tem nada nos logs
+de build/deploy que avise disso. Sempre use `--no-gitignore` no `railway up`
+do serviço `vigilant-curiosity` quando estiver rodando de dentro de um
+clone git (não precisa dessa flag pra `mega-minerador`, que não tem pasta
+gerada nenhuma). Exemplo do fluxo completo, com a flag:
+
+```bash
+cd frontend && npm run build
+cd .. && rm -rf web/public-minerador && cp -r frontend/dist web/public-minerador
+cd web && RAILWAY_TOKEN="<pedir pro Samuel>" npx @railway/cli up --service vigilant-curiosity --no-gitignore --detach
+```
+
 Importante: **não existe interpretador Python neste ambiente de dev** — toda
 mudança no `backend/` (Python) é verificada só por revisão de código
 cuidadosa + deploy real + log limpo, nunca rodada localmente. O Node
