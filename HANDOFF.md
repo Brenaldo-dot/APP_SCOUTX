@@ -130,31 +130,53 @@ mais atual disponível (assumindo que o commit que acompanha este HANDOFF.md
 foi enviado com sucesso; se não, pergunte ao Samuel se ele conseguiu rodar o
 `git push` manualmente).
 
-## Trabalho em aberto agora (24/08, fim da sessão anterior)
+## Automação Cakto (25/08, implementada e testada com compra real)
 
-**Automação Cakto (não iniciada ainda)** — o Samuel vende os planos do
-ScoutX pela Cakto (plataforma de checkout brasileira) e quer um webhook que
-automatize criar/renovar/cancelar organização quando alguém compra. Ele quer
-manter o fluxo manual (admin cria organização/usuário na aba Organizações/
-Usuários) funcionando em paralelo, não substituir. **Faltam informações
-essenciais que foram pedidas ao Samuel e ainda não vieram**:
-1. Payload/documentação do webhook da Cakto (nome dos eventos: compra
-   aprovada, renovação, cancelamento, reembolso; quais campos vêm — email do
-   comprador, produto/plano).
-2. Se cada plano (Standard/Pro/Enterprise) é um produto separado na Cakto.
-3. Se a automação deve criar só a organização (admin cria usuário depois) ou
-   organização + usuário com senha já prontos (e como a senha chega até o
-   comprador).
-4. Se cancelamento/reembolso deve suspender o acesso automaticamente ou só
-   avisar pra revisão manual.
-5. Como autenticar que o webhook é mesmo da Cakto (assinatura/segredo,
-   header HMAC, ou token na URL) — sem isso, qualquer um poderia chamar a
-   rota e "comprar" um plano de graça.
+Webhook em `web/cakto.js` (rota `POST /api/webhooks/cakto`, registrada em
+`server.js`), autenticado pelo campo `secret` no corpo do payload (não é
+HMAC/header — é assim mesmo que a Cakto funciona, confirmado na doc oficial
+`docs.cakto.com.br/conceitos/webhooks.md`), comparado com
+`CAKTO_WEBHOOK_SECRET` (variável de ambiente no Railway, pedir pro Samuel —
+nunca gravar em arquivo nenhum).
 
-**Não comece a implementar isso sem essas respostas** — o risco de montar a
-automação errada (ex: sem verificar autenticidade do webhook = brecha de
-segurança grave, dando plano de graça pra qualquer requisição forjada) é
-alto.
+- **`purchase_approved`**: mapeia `data.offer.id` → plano/ciclo via
+  `CAKTO_OFFER_PLAN_MAP` (9 links, 3 planos × 3 ciclos — se um link novo for
+  criado na Cakto, precisa adicionar a chave aqui manualmente, ver comentário
+  no arquivo). Cria organização + usuário com o email da compra, mas **sem
+  senha entregável** — o usuário nasce com `needs_password_setup = true` e
+  uma senha placeholder aleatória que ninguém nunca vê.
+- **`refund` / `chargeback` / `subscription_canceled`**: suspende a
+  organização (`expires_at` pro passado).
+- **`subscription_renewed`**: estende a validade.
+- Resto dos eventos (boleto/pix gerado, etc.): só loga, não faz nada.
+
+**Entrega de acesso — `GET`/`POST /registrar`** (troca de rota feita
+25/08, depois de uma tentativa anterior com `/bem-vindo?ref={refId}` FALHAR
+num teste de compra real — o `{refId}` que a Cakto substitui no redirect
+não bateu com o `data.refId` do webhook, a pessoa ficou presa numa tela de
+"estamos finalizando" pra sempre). O fluxo atual não depende de correlacionar
+nada: a Cakto redireciona pra uma URL **fixa**
+(`https://app.scoutx.com.br/registrar`, configurada na oferta, aba
+Upsell/Downsell → campo de página de obrigado — **confirme que está exatamente
+essa URL, com `app.` e o caminho `/registrar`**, um teste anterior tinha só
+`https://scoutx.com.br/` errado e a Cakto reportava "200 OK" mesmo assim,
+porque bateu numa página qualquer nossa, não no webhook). Na página, a
+pessoa digita o mesmo email da compra + escolhe a própria senha — só
+funciona se existir conta com esse email e `needs_password_setup = true`.
+
+**Pendente / não confirmado ainda**:
+- Os 3 eventos de cancelamento (`refund`/`chargeback`/`subscription_canceled`)
+  nunca foram testados contra um disparo real da Cakto, só existem porque a
+  doc oficial confirma esses nomes — dispare um teste de cada um no painel
+  antes de confiar 100%.
+- `subscription_renewal_refused` (pagamento de renovação recusado) não tem
+  tratamento nenhum ainda — decidir com o Samuel se deve suspender ou só
+  avisar.
+- Contas criadas ANTES dessa mudança de 25/08 (via o mecanismo antigo do
+  refId) ficaram com uma senha aleatória que foi gerada mas nunca entregue
+  (`needs_password_setup` fica `false` nelas, então `/registrar` não
+  funciona) — precisam de reset manual de senha pela aba Usuários (🔑) se
+  alguém reclamar de não conseguir entrar.
 
 ## Contexto de segurança já resolvido (não precisa re-investigar do zero)
 
