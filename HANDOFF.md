@@ -92,6 +92,20 @@ cd .. && rm -rf web/public-minerador && cp -r frontend/dist web/public-minerador
 cd web && RAILWAY_TOKEN="<pedir pro Samuel>" npx @railway/cli up --service vigilant-curiosity --no-gitignore --detach
 ```
 
+**OUTRA ARMADILHA (derrubou o `mega-minerador` em 2026-08-25, mesma sessão):**
+`git config core.autocrlf` está `true` nesse ambiente Windows — todo
+checkout converte `\n` pra `\r\n` sozinho nos arquivos de texto, inclusive
+`backend/start_all.sh` e `backend/run_local.sh`. O conteúdo no GIT sempre
+esteve certo (LF), o problema é só o arquivo NO DISCO depois do checkout —
+e `railway up` sobe o disco, não o git. Resultado: o container sobe e o
+`start_all.sh` falha com erros tipo `set: -: invalid option` e
+`$'\r': command not found`, o serviço nunca fica saudável. Já existe um
+`.gitattributes` na raiz do repo forçando `*.sh text eol=lf` — isso deveria
+bastar num clone novo, mas se algum dia esse erro voltar a aparecer nos logs
+do `mega-minerador` depois de um deploy, confira com `file backend/*.sh`
+(tem que dizer só "UTF-8 text executable", sem "with CRLF line
+terminators") antes de gastar tempo procurando o bug no código Python.
+
 Importante: **não existe interpretador Python neste ambiente de dev** — toda
 mudança no `backend/` (Python) é verificada só por revisão de código
 cuidadosa + deploy real + log limpo, nunca rodada localmente. O Node
