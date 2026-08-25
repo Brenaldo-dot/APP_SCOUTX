@@ -327,9 +327,12 @@ function authPage({ title, subtitle, action, error, showNameField, confirmPasswo
     background: linear-gradient(180deg, rgba(18,20,30,0.88), rgba(10,12,20,0.92));
     backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
     border: 1px solid rgba(96,165,250,0.18);
-    padding: 34px 32px; border-radius: 20px; width: 348px;
+    padding: 34px 32px; border-radius: 20px; width: 348px; max-width: calc(100vw - 32px);
     box-shadow: 0 24px 70px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.02) inset;
     overflow: hidden;
+  }
+  @media (max-width: 420px) {
+    .card { padding: 26px 20px; }
   }
   /* Linha de "scan" cruzando o topo do card ao carregar — reforço temático
      leve (é uma ferramenta de vigilância de concorrentes), não decoração à
@@ -380,16 +383,27 @@ function authPage({ title, subtitle, action, error, showNameField, confirmPasswo
     color: #f87171; font-size: 12px; margin: -12px 0 12px; display: none;
   }
   /* Campo de senha com o botão de olho por dentro do input, à direita —
-     padding-right no input abre espaço pro botão sem sobrepor o texto. */
+     padding-right no input abre espaço pro botão sem sobrepor o texto.
+     top/bottom:0 (em vez de top:50%+transform) porque a altura do
+     .pw-field já exclui o margin-bottom do input (margin não conta pra
+     altura do pai), então o botão cobre exatamente a caixa do input e o
+     flex centraliza o ícone nela com precisão, sem cálculo manual de offset. */
   .pw-field { position: relative; }
-  .pw-field input { padding-right: 42px; }
+  .pw-field input { padding-right: 44px; }
+  /* Edge (Windows) e alguns Chrome/Safari põem o PRÓPRIO ícone de "revelar
+     senha" nativo dentro do input — some por cima do nosso, os dois juntos
+     ficam tortos/sobrepostos. Escondendo o nativo, só o nosso aparece. */
+  .pw-field input::-ms-reveal,
+  .pw-field input::-ms-clear { display: none; }
+  .pw-field input::-webkit-credentials-auto-fill-button,
+  .pw-field input::-webkit-strong-password-auto-fill-button { display: none !important; visibility: hidden; }
   .pw-toggle {
-    all: unset; position: absolute; right: 4px; top: 50%; transform: translateY(-14px);
-    width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
-    cursor: pointer; color: #9ca3af; border-radius: 8px;
+    all: unset; position: absolute; top: 0; right: 3px; bottom: 0; width: 36px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; color: #9ca3af; border-radius: 8px; line-height: 0;
   }
   .pw-toggle:hover { color: #e5e7eb; background: rgba(255,255,255,0.06); }
-  .pw-toggle svg { width: 18px; height: 18px; }
+  .pw-toggle svg { display: block; width: 19px; height: 19px; }
   .pw-toggle .eye-off { display: none; }
   .pw-toggle.is-visible .eye { display: none; }
   .pw-toggle.is-visible .eye-off { display: block; }
