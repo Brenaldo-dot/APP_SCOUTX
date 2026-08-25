@@ -178,8 +178,30 @@ export function OperationProvider({ children }) {
     }
     setNeedsCountryPick(false)
     setOperationRaw(value)
-    setTouchedHistory((prev) => (prev.includes(value) ? prev : [...prev, value]))
+    // touchedHistory é atualizado num useEffect (ver abaixo), não aqui —
+    // cobre TODOS os jeitos de `operation` mudar (essa função, migração de
+    // conta antiga, valor vindo do servidor), não só clique explícito.
   }
+
+  // BUG corrigido (achado ao vivo, 2026-08-25 — afetava principalmente
+  // conta ADMIN, que nunca passa pela tela de escolher país): o país
+  // ATUAL só entrava no `touchedHistory` quando alguém chamava
+  // setOperation() de propósito. Enquanto isso não acontecia (ex: admin
+  // só navegando, sem nunca clicar no seletor), `operation` continuava
+  // valendo 'colombia' (o placeholder inicial) MAS sem estar no
+  // `touchedHistory` — e como `touchedOperations` (Set usado pra montar a
+  // lista, ver abaixo) sempre incluía o `operation` atual, Colômbia ficava
+  // de fora tanto do "já tocado" quanto do "ainda não tocado":
+  // desaparecia da lista inteira. No primeiro clique em qualquer outro
+  // país, a MESMA coisa acontecia com ele até o próximo clique — dava a
+  // impressão de itens "sambando" (sumindo/reaparecendo) a cada clique.
+  // Esse efeito garante que `operation` SEMPRE está em `touchedHistory`
+  // assim que deixa de ser só o placeholder (needsCountryPick false),
+  // não importa por qual caminho ele mudou.
+  useEffect(() => {
+    if (needsCountryPick) return
+    setTouchedHistory((prev) => (prev.includes(operation) ? prev : [...prev, operation]))
+  }, [operation, needsCountryPick])
   const [customOperations, setCustomOperations] = useState(loadCustomOperations)
   const [labelOverrides, setLabelOverrides] = useState(loadLabelOverrides)
   // null = ainda carregando/sem organização (admin) — não trava nada até
@@ -203,7 +225,17 @@ export function OperationProvider({ children }) {
   // "usado" também, mesmo sem concorrente nenhum ainda — trava a partir do
   // primeiro país visto, não só do primeiro cadastro, e sem esquecer os
   // países vistos antes só porque não é o que está na tela agora.
-  const touchedOperations = new Set([...(planLimit?.usedOperations || []), ...touchedHistory, operation])
+  // `operation` só entra aqui se needsCountryPick já for false (escolha de
+  // verdade feita) — incluir o placeholder inicial ('colombia') antes
+  // disso é o bug corrigido acima: ele sumia da lista sem nunca ter sido
+  // escolhido de verdade. Redundante com touchedHistory na maioria dos
+  // casos (o efeito acima já garante isso), mas evita 1 render de
+  // atraso logo depois de escolher, antes do efeito rodar.
+  const touchedOperations = new Set([
+    ...(planLimit?.usedOperations || []),
+    ...touchedHistory,
+    ...(needsCountryPick ? [] : [operation]),
+  ])
 
   function isOperationLocked(value) {
     if (!planLimit || planLimit.maxOperations === null) return false
