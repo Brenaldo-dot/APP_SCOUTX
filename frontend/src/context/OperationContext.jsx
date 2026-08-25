@@ -265,6 +265,7 @@ export function OperationProvider({ children }) {
         atOperationCap,
         atCompetitorCap,
         touchedOperations,
+        touchedHistory,
       }}
     >
       {children}

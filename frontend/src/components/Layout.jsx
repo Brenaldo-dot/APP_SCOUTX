@@ -126,6 +126,7 @@ export default function Layout() {
     planLimit,
     needsCountryPick,
     touchedOperations,
+    touchedHistory,
   } = useOperation()
   const { me } = useAuth()
   const { theme, toggleTheme } = useTheme()
@@ -218,16 +219,20 @@ export default function Layout() {
   // 2ª volta: só o país ATUAL (o que está na tela agora) ia pra 1ª posição
   // — trocar de país "esquecia" o anterior, que caía pro fim da lista e
   // podia aparecer travado à toa, mesmo já tendo sido escolhido antes.
-  // Corrigido de vez usando `touchedOperations` (todo país que a conta já
-  // selecionou alguma vez, não só o atual, ver OperationContext.jsx): eles
-  // vão todos pro início da lista (o atual primeiro), depois os países
-  // ainda não tocados preenchem o resto das vagas livres na ordem normal,
-  // e só o que sobrar além disso é que trava.
+  // 3ª volta (pedido explícito do usuário): a lista ficava "sambando" —
+  // toda vez que clicava num país já tocado diferente, ele pulava pra 1ª
+  // posição e reordenava tudo de novo, mesmo sem ser a primeira vez que
+  // aquele país aparecia. Corrigido de vez usando `touchedHistory` (ordem
+  // em que cada país foi tocado PELA PRIMEIRA VEZ, ver OperationContext.jsx)
+  // em vez de "o atual sempre primeiro": cada país ganha uma posição FIXA
+  // assim que é tocado pela primeira vez e nunca mais se move — só o
+  // checkmark anda entre eles. Os ainda não tocados preenchem o resto das
+  // vagas livres na ordem normal da lista, e só o que sobrar além disso
+  // é que trava.
   const allOperations = [...OPERATIONS, ...customOperations]
-  const touchedFirst = allOperations.filter((op) => op.value === operation)
-  const touchedRest = allOperations.filter((op) => op.value !== operation && touchedOperations.has(op.value))
+  const touchedOrdered = touchedHistory.map((v) => allOperations.find((op) => op.value === v)).filter(Boolean)
   const untouched = allOperations.filter((op) => !touchedOperations.has(op.value))
-  const orderedOperations = [...touchedFirst, ...touchedRest, ...untouched]
+  const orderedOperations = [...touchedOrdered, ...untouched]
   const maxOps = planLimit?.maxOperations
   const operationOptions = orderedOperations.map((op, index) => {
     const locked = Number.isFinite(maxOps) && index >= maxOps && !touchedOperations.has(op.value)
