@@ -28,6 +28,12 @@ function qs(params = {}) {
 
 export const rawApi = {
   me: () => request('/api/me'),
+  setDefaultOperation: (value) =>
+    request('/api/me/default-operation', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value }),
+    }),
   changeMyPassword: (currentPassword, newPassword) =>
     request('/api/me/password', {
       method: 'PATCH',

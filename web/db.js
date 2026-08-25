@@ -162,6 +162,16 @@ async function migrate() {
   `);
   await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id);`);
 
+  // País/operação que a conta escolheu na primeira vez que abriu o app —
+  // até aqui isso só vivia no localStorage do NAVEGADOR (ver
+  // OperationContext.jsx no React), então trocar de dispositivo/navegador,
+  // ou até só limpar os dados do site, fazia perguntar de novo pra sempre.
+  // NULL = essa organização ainda nunca escolheu (mostra o seletor
+  // inicial); depois de escolhida uma vez, fica valendo pra sempre, mesmo
+  // trocando de plano — não é a mesma coisa que "qual país está sendo
+  // visto agora" (isso continua livre, ver seletor no menu lateral).
+  await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS default_operation TEXT;`);
+
   // Automação Cakto: cakto_purchase_id/cakto_customer_email identificam qual
   // organização veio de qual compra, pra um evento de cancelamento/reembolso
   // futuro (que só traz o ID da compra ou o email do comprador) achar a
@@ -225,6 +235,20 @@ async function migrate() {
   }
 }
 
+// Só grava se ainda não tinha nada (NULL) — a primeira escolha da conta
+// vale pra sempre, tentar chamar de novo depois não sobrescreve (evita uma
+// chamada maliciosa/acidental de outro dispositivo "resetando" o país já
+// decidido). Devolve a organização atualizada, com o valor que realmente
+// ficou valendo (pode não ser o `value` passado, se já tinha outro antes).
+async function setOrgDefaultOperationIfUnset(organizationId, value) {
+  const res = await pool.query(
+    `UPDATE organizations SET default_operation = $1 WHERE id = $2 AND default_operation IS NULL RETURNING *`,
+    [value, organizationId]
+  );
+  if (res.rows[0]) return res.rows[0];
+  return await getOrganizationById(organizationId);
+}
+
 async function countUsers() {
   const res = await pool.query("SELECT COUNT(*)::int AS n FROM app_users");
   return res.rows[0].n;
@@ -267,7 +291,8 @@ async function createUser({ name, email, passwordHash, role, createdById, organi
 // checam o vencimento do plano a cada request — sem isso seria uma query a
 // mais em todo request autenticado só pra saber se o plano venceu.
 const USER_WITH_ORG_SELECT = `
-  SELECT u.*, o.plan AS org_plan, o.expires_at AS org_expires_at, o.name AS org_name
+  SELECT u.*, o.plan AS org_plan, o.expires_at AS org_expires_at, o.name AS org_name,
+         o.default_operation AS org_default_operation
   FROM app_users u
   LEFT JOIN organizations o ON o.id = u.organization_id
 `;
@@ -688,6 +713,7 @@ module.exports = {
   listOrganizationsWithCounts,
   renewOrganization,
   changeOrganizationPlan,
+  setOrgDefaultOperationIfUnset,
   updateOrganizationExpiry,
   updateOrganizationDetails,
 };

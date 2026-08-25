@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client.js'
+import { rawApi } from '../api/rawClient.js'
 import { useAuth } from './AuthContext.jsx'
 
 const STORAGE_KEY = 'mega-minerador-operation'
@@ -91,6 +92,7 @@ function loadTouchedHistory(email) {
 export function OperationProvider({ children }) {
   const { me } = useAuth()
   const email = me?.email || null
+  const defaultOperation = me?.defaultOperation || null
 
   // `operation` continua com um valor válido desde o primeiro render (nunca
   // fica null) — o resto do app (dashboard, concorrentes, etc.) não precisa
@@ -119,10 +121,29 @@ export function OperationProvider({ children }) {
     if (!email || initializedForEmail.current === email) return
     initializedForEmail.current = email
     setTouchedHistory(loadTouchedHistory(email))
+
+    // BUG corrigido (achado ao vivo, 2026-08-25): até aqui essa decisão só
+    // vivia no localStorage do NAVEGADOR — trocar de dispositivo, abrir
+    // numa aba anônima nova, ou só limpar os dados do site fazia perguntar
+    // de novo pra sempre, mesmo a conta já tendo escolhido antes. Agora o
+    // servidor é a fonte de verdade (organizations.default_operation, ver
+    // db.js e GET /api/me): se ele já tem valor, usa e não pergunta nunca
+    // mais, em qualquer navegador. Só cai pro localStorage como plano B pra
+    // quem escolheu ANTES dessa coluna existir (o servidor ainda não sabe
+    // desse valor) — e nesse caso já aproveita pra mandar pro servidor,
+    // pra próxima vez nem precisar do plano B.
+    if (defaultOperation) {
+      setOperationRaw(defaultOperation)
+      setNeedsCountryPick(false)
+      localStorage.setItem(operationKeyFor(email), defaultOperation)
+      return
+    }
+
     const scoped = localStorage.getItem(operationKeyFor(email))
     if (scoped) {
       setOperationRaw(scoped)
       setNeedsCountryPick(false)
+      rawApi.setDefaultOperation(scoped).catch(() => {})
       return
     }
     // Migração pontual: cliente de verdade que já usava o app ANTES dessa
@@ -137,14 +158,24 @@ export function OperationProvider({ children }) {
       setNeedsCountryPick(false)
       localStorage.setItem(operationKeyFor(email), legacy)
       localStorage.removeItem(STORAGE_KEY)
+      rawApi.setDefaultOperation(legacy).catch(() => {})
       return
     }
-    // Nem chave escopada nem chave antiga: essa conta é tratada como se
-    // fosse realmente a primeira vez, ponto final.
+    // Nem servidor, nem chave escopada, nem chave antiga: essa conta é
+    // tratada como se fosse realmente a primeira vez, ponto final.
     setNeedsCountryPick(true)
-  }, [email])
+  }, [email, defaultOperation])
 
   function setOperation(value) {
+    // A primeira escolha de verdade (needsCountryPick ainda true nesse
+    // instante) é a que vale pra sempre pro servidor — próximas trocas só
+    // mudam o que está sendo VISTO agora, não mexem no default salvo (ver
+    // setOrgDefaultOperationIfUnset no backend, que também já ignora
+    // chamadas repetidas por segurança, essa checagem aqui é só pra não
+    // fazer requisição à toa).
+    if (needsCountryPick) {
+      rawApi.setDefaultOperation(value).catch(() => {})
+    }
     setNeedsCountryPick(false)
     setOperationRaw(value)
     setTouchedHistory((prev) => (prev.includes(value) ? prev : [...prev, value]))

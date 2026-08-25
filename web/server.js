@@ -811,7 +811,31 @@ function createApp() {
       organizationName: req.appUser.org_name || null,
       planExpiresAt: req.appUser.org_expires_at || null,
       avatarUrl: req.appUser.avatar_url || null,
+      // País que ESSA ORGANIZAÇÃO escolheu na primeira vez que alguém dela
+      // abriu o app — null = ainda nunca escolheu (front mostra o seletor
+      // inicial). Guardado no banco (não só no navegador) pra funcionar em
+      // qualquer dispositivo, ver OperationContext.jsx e
+      // PATCH /api/me/default-operation logo abaixo.
+      defaultOperation: req.appUser.org_default_operation || null,
     });
+  });
+
+  // Grava o país da organização na PRIMEIRA vez (ver
+  // db.setOrgDefaultOperationIfUnset — chamadas depois de já setado não
+  // mudam nada). Sem requireAdmin de propósito: é o próprio colaborador
+  // escolhendo, na primeira vez que abre o app — mas continua exigindo
+  // sessão válida (requireAuth já roda pra tudo que vem depois dele, ver
+  // app.use(requireAuth) acima).
+  app.patch("/api/me/default-operation", async (req, res) => {
+    if (!req.appUser.organization_id) {
+      return res.status(400).json({ error: "Essa conta não tem organização." });
+    }
+    const { value } = req.body || {};
+    if (!value || typeof value !== "string") {
+      return res.status(400).json({ error: "value é obrigatório." });
+    }
+    const org = await db.setOrgDefaultOperationIfUnset(req.appUser.organization_id, value);
+    res.json({ defaultOperation: org.default_operation });
   });
 
   // Teto generoso de propósito: a foto já chega redimensionada (~256px,
