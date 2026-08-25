@@ -885,9 +885,12 @@ function createApp() {
   });
 
   app.post("/api/admin/users", requireAdmin, async (req, res) => {
-    const { name, email, password, role, organizationId } = req.body || {};
-    if (!name || !email || !password || password.length < 8) {
-      return res.status(400).json({ error: "name, email e password (mín. 8 caracteres) são obrigatórios" });
+    const { name, email, password, role, organizationId, withoutPassword } = req.body || {};
+    if (!name || !email) {
+      return res.status(400).json({ error: "name e email são obrigatórios" });
+    }
+    if (!withoutPassword && (!password || password.length < 8)) {
+      return res.status(400).json({ error: "password (mín. 8 caracteres) é obrigatório, ou marque 'sem senha'" });
     }
     if (role !== undefined && role !== "admin" && role !== "collaborator") {
       return res.status(400).json({ error: "role deve ser 'admin' ou 'collaborator'" });
@@ -914,11 +917,21 @@ function createApp() {
 
     const existing = await db.findUserByEmail(email);
     if (existing) return res.status(409).json({ error: "Já existe um usuário com esse email." });
-    if (await isPasswordPwned(password)) {
-      return res.status(400).json({ error: "Essa senha já apareceu em vazamentos conhecidos, escolha outra." });
-    }
 
-    const passwordHash = await bcrypt.hash(password, 10);
+    let passwordHash;
+    if (withoutPassword) {
+      // Mesmo mecanismo do webhook da Cakto (web/cakto.js): senha aleatória
+      // que ninguém nunca vê, só existe porque password_hash é NOT NULL. A
+      // pessoa define a própria senha de verdade em /registrar, provando que
+      // é dona do email. Serve pra quando o admin precisa criar a conta na
+      // mão (ex: automação da Cakto falhou) sem saber/inventar uma senha.
+      passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString("base64url"), 10);
+    } else {
+      if (await isPasswordPwned(password)) {
+        return res.status(400).json({ error: "Essa senha já apareceu em vazamentos conhecidos, escolha outra." });
+      }
+      passwordHash = await bcrypt.hash(password, 10);
+    }
     const user = await db.createUser({
       name,
       email,
@@ -926,6 +939,7 @@ function createApp() {
       role: role || "collaborator",
       createdById: req.appUser.id,
       organizationId: organization ? organization.id : null,
+      needsPasswordSetup: !!withoutPassword,
     });
     await db.logAdminAction(
       req.appUser.id,
@@ -933,7 +947,11 @@ function createApp() {
       user.id,
       user.name,
       "created",
-      role === "admin" ? "Criado já como admin" : null
+      withoutPassword
+        ? "Criado sem senha — usuário define em /registrar"
+        : role === "admin"
+        ? "Criado já como admin"
+        : null
     );
     res.status(201).json({ id: user.id, name: user.name, email: user.email, role: user.role });
   });

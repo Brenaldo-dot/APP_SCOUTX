@@ -76,7 +76,7 @@ const AUDIT_ACTIONS = {
   org_plan_changed: { icon: RefreshCw, color: 'text-brand-500', text: (a, t) => `${a} mudou o plano de ${t} (validade mantida)` },
 }
 
-const emptyForm = { name: '', email: '', password: '', admin: false, organizationId: '' }
+const emptyForm = { name: '', email: '', password: '', admin: false, organizationId: '', withoutPassword: false }
 
 // Mesmas chaves/labels de Organizacoes.jsx (não veio pra um arquivo
 // compartilhado de propósito, pra não criar acoplamento entre as duas
@@ -230,8 +230,12 @@ export default function Usuarios() {
 
   async function handleCreate() {
     setFormMsg(null)
-    if (!form.name.trim() || !form.email.trim() || form.password.length < 8) {
-      setFormMsg({ type: 'error', text: 'Preencha nome, email e uma senha com pelo menos 8 caracteres.' })
+    if (!form.name.trim() || !form.email.trim()) {
+      setFormMsg({ type: 'error', text: 'Preencha nome e email.' })
+      return
+    }
+    if (!form.withoutPassword && form.password.length < 8) {
+      setFormMsg({ type: 'error', text: 'Preencha uma senha com pelo menos 8 caracteres, ou marque "Criar sem senha".' })
       return
     }
     if (!form.admin && !form.organizationId) {
@@ -243,11 +247,17 @@ export default function Usuarios() {
       await rawApi.createUser({
         name: form.name.trim(),
         email: form.email.trim(),
-        password: form.password,
+        password: form.withoutPassword ? undefined : form.password,
+        withoutPassword: form.withoutPassword,
         role: form.admin ? 'admin' : 'collaborator',
         organizationId: form.admin ? undefined : Number(form.organizationId),
       })
-      setFormMsg({ type: 'success', text: 'Usuário criado! Envie o email e a senha combinada pra essa pessoa.' })
+      setFormMsg({
+        type: 'success',
+        text: form.withoutPassword
+          ? 'Usuário criado! Peça pra essa pessoa acessar app.scoutx.com.br/registrar com esse email pra criar a própria senha.'
+          : 'Usuário criado! Envie o email e a senha combinada pra essa pessoa.',
+      })
       setForm(emptyForm)
       load()
     } catch (err) {
@@ -445,14 +455,29 @@ export default function Usuarios() {
               className={inputClass}
             />
           </div>
-          <input
-            type="password"
-            placeholder="Senha (mín. 8 caracteres)"
-            value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
-            autoComplete="new-password"
-            className={`${inputClass} mt-2.5 w-full`}
-          />
+          {!form.withoutPassword && (
+            <input
+              type="password"
+              placeholder="Senha (mín. 8 caracteres)"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              autoComplete="new-password"
+              className={`${inputClass} mt-2.5 w-full`}
+            />
+          )}
+          <label className="mt-2.5 flex items-center gap-3 text-sm text-[var(--text-secondary)]">
+            <Toggle
+              checked={form.withoutPassword}
+              onChange={(v) => setForm({ ...form, withoutPassword: v, password: '' })}
+            />
+            <span>Criar sem senha (a pessoa define a própria em /registrar)</span>
+          </label>
+          {form.withoutPassword && (
+            <p className="mt-1.5 text-xs text-[var(--text-tertiary)]">
+              Use pra recriar manualmente uma conta que deveria ter vindo de uma compra na Cakto (ex: falha no
+              webhook). A pessoa acessa app.scoutx.com.br/registrar com esse mesmo email pra escolher a senha.
+            </p>
+          )}
           {!form.admin && (
             <Select
               className="mt-2.5"
