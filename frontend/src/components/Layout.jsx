@@ -125,6 +125,7 @@ export default function Layout() {
     renameOperation,
     planLimit,
     needsCountryPick,
+    touchedOperations,
   } = useOperation()
   const { me } = useAuth()
   const { theme, toggleTheme } = useTheme()
@@ -208,24 +209,28 @@ export default function Layout() {
     setOperationModal(null)
   }
 
-  // Revisão (achado ao vivo, 2026-08-25): a trava era "por toque" — só
-  // fechava a Nª opção depois que a conta já tinha CLICADO em N países
-  // diferentes, então logo depois de um upgrade (antes de escolher
-  // qualquer país extra) tudo aparecia liberado, mesmo num plano com teto.
-  // Trocado pra trava por POSIÇÃO na lista: as N primeiras posições (N =
-  // maxOperations do plano) ficam liberadas na hora, o resto trava direto
-  // com "Requer plano X" — sem precisar a conta "gastar" vaga clicando
-  // pra revelar o travamento. O país que a conta já usa sempre ocupa a
-  // 1ª posição (orderedOperations, ver acima), então ele nunca é o que
-  // trava.
+  // Revisão (achado ao vivo, 2026-08-25 — dois problemas em sequência):
+  // 1ª volta: a trava era "por toque" — só fechava a Nª opção depois que a
+  // conta já tinha CLICADO em N países diferentes, então logo depois de um
+  // upgrade (antes de escolher qualquer país extra) tudo aparecia liberado.
+  // Corrigido travando por POSIÇÃO: as N primeiras posições (N =
+  // maxOperations do plano) ficam liberadas na hora.
+  // 2ª volta: só o país ATUAL (o que está na tela agora) ia pra 1ª posição
+  // — trocar de país "esquecia" o anterior, que caía pro fim da lista e
+  // podia aparecer travado à toa, mesmo já tendo sido escolhido antes.
+  // Corrigido de vez usando `touchedOperations` (todo país que a conta já
+  // selecionou alguma vez, não só o atual, ver OperationContext.jsx): eles
+  // vão todos pro início da lista (o atual primeiro), depois os países
+  // ainda não tocados preenchem o resto das vagas livres na ordem normal,
+  // e só o que sobrar além disso é que trava.
   const allOperations = [...OPERATIONS, ...customOperations]
-  const orderedOperations = [
-    ...allOperations.filter((op) => op.value === operation),
-    ...allOperations.filter((op) => op.value !== operation),
-  ]
+  const touchedFirst = allOperations.filter((op) => op.value === operation)
+  const touchedRest = allOperations.filter((op) => op.value !== operation && touchedOperations.has(op.value))
+  const untouched = allOperations.filter((op) => !touchedOperations.has(op.value))
+  const orderedOperations = [...touchedFirst, ...touchedRest, ...untouched]
   const maxOps = planLimit?.maxOperations
   const operationOptions = orderedOperations.map((op, index) => {
-    const locked = Number.isFinite(maxOps) && index >= maxOps
+    const locked = Number.isFinite(maxOps) && index >= maxOps && !touchedOperations.has(op.value)
     return {
       value: op.value,
       label: labelOverrides[op.value] || op.label,
@@ -234,10 +239,11 @@ export default function Layout() {
       lockedReason: locked ? `Requer plano ${requiredPlanForSlot(index + 1)}` : undefined,
     }
   })
-  // Um país novo (customizado) entraria na próxima posição livre — mesma
-  // regra acima: só cabe se ainda sobrar vaga por posição.
-  const atOperationCap = Number.isFinite(maxOps) && orderedOperations.length >= maxOps
-  const nextFreeSlot = orderedOperations.length + 1
+  // Um país novo (customizado) sempre vira "tocado" na hora de criar (ver
+  // addCustomOperation/setOperation) — só cabe se a conta ainda não tiver
+  // esgotado as vagas de verdade (tocadas), não a lista toda.
+  const atOperationCap = Number.isFinite(maxOps) && touchedOperations.size >= maxOps
+  const nextFreeSlot = touchedOperations.size + 1
 
   const hasAccess = me?.isAdmin || me?.canAccessMinerador
 

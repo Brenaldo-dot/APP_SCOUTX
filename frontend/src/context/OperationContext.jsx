@@ -5,6 +5,7 @@ import { useAuth } from './AuthContext.jsx'
 const STORAGE_KEY = 'mega-minerador-operation'
 const CUSTOM_STORAGE_KEY = 'mega-minerador-custom-operations'
 const LABEL_OVERRIDES_KEY = 'mega-minerador-operation-label-overrides'
+const TOUCHED_HISTORY_KEY = 'mega-minerador-operation-touched'
 
 // Escada de planos por VAGA de país — não é só "próximo plano geral": quem
 // tá no Standard (1 vaga) vê o 2º e o 3º país cabendo no Pro, mas o 4º só
@@ -75,6 +76,18 @@ function operationKeyFor(email) {
   return email ? `${STORAGE_KEY}:${email}` : STORAGE_KEY
 }
 
+function touchedHistoryKeyFor(email) {
+  return `${TOUCHED_HISTORY_KEY}:${email}`
+}
+
+function loadTouchedHistory(email) {
+  try {
+    return JSON.parse(localStorage.getItem(touchedHistoryKeyFor(email)) || '[]')
+  } catch {
+    return []
+  }
+}
+
 export function OperationProvider({ children }) {
   const { me } = useAuth()
   const email = me?.email || null
@@ -92,11 +105,20 @@ export function OperationProvider({ children }) {
   // avisar (era o comportamento antigo).
   const [operation, setOperationRaw] = useState(() => localStorage.getItem(STORAGE_KEY) || 'colombia')
   const [needsCountryPick, setNeedsCountryPick] = useState(() => localStorage.getItem(STORAGE_KEY) === null)
+  // BUG corrigido (achado ao vivo, 2026-08-25): só guardávamos o país ATUAL,
+  // então trocar de país pra só dar uma olhada "esquecia" o anterior — ele
+  // caía pro fim da lista (perdia o lugar reservado) e podia até aparecer
+  // travado, mesmo já tendo sido escolhido antes. Esse histórico guarda TODO
+  // país que a conta já selecionou alguma vez (não só o que está na tela
+  // agora), pra nenhum deles perder a vaga só por não ser o que está sendo
+  // visto no momento.
+  const [touchedHistory, setTouchedHistory] = useState(() => loadTouchedHistory(null))
   const initializedForEmail = useRef(null)
 
   useEffect(() => {
     if (!email || initializedForEmail.current === email) return
     initializedForEmail.current = email
+    setTouchedHistory(loadTouchedHistory(email))
     const scoped = localStorage.getItem(operationKeyFor(email))
     if (scoped) {
       setOperationRaw(scoped)
@@ -125,6 +147,7 @@ export function OperationProvider({ children }) {
   function setOperation(value) {
     setNeedsCountryPick(false)
     setOperationRaw(value)
+    setTouchedHistory((prev) => (prev.includes(value) ? prev : [...prev, value]))
   }
   const [customOperations, setCustomOperations] = useState(loadCustomOperations)
   const [labelOverrides, setLabelOverrides] = useState(loadLabelOverrides)
@@ -145,10 +168,11 @@ export function OperationProvider({ children }) {
   // protegido (_assert_operation_allowed no backend), mas o SELETOR ficava
   // livre até a primeira loja — dava pra "passear" pelos 4 países vendo a
   // tela (vazia) de cada um, o que não bate com "Standard = 1 país" prometido
-  // na venda. Corrigido contando o país ATUALMENTE selecionado como já
+  // na venda. Corrigido contando TODO país já visto (touchedHistory) como
   // "usado" também, mesmo sem concorrente nenhum ainda — trava a partir do
-  // primeiro país visto, não só do primeiro cadastro.
-  const touchedOperations = new Set([...(planLimit?.usedOperations || []), operation])
+  // primeiro país visto, não só do primeiro cadastro, e sem esquecer os
+  // países vistos antes só porque não é o que está na tela agora.
+  const touchedOperations = new Set([...(planLimit?.usedOperations || []), ...touchedHistory, operation])
 
   function isOperationLocked(value) {
     if (!planLimit || planLimit.maxOperations === null) return false
@@ -180,6 +204,11 @@ export function OperationProvider({ children }) {
     if (needsCountryPick || !email) return
     localStorage.setItem(operationKeyFor(email), operation)
   }, [operation, needsCountryPick, email])
+
+  useEffect(() => {
+    if (!email) return
+    localStorage.setItem(touchedHistoryKeyFor(email), JSON.stringify(touchedHistory))
+  }, [touchedHistory, email])
 
   useEffect(() => {
     localStorage.setItem(CUSTOM_STORAGE_KEY, JSON.stringify(customOperations))
@@ -235,6 +264,7 @@ export function OperationProvider({ children }) {
         isOperationLocked,
         atOperationCap,
         atCompetitorCap,
+        touchedOperations,
       }}
     >
       {children}
