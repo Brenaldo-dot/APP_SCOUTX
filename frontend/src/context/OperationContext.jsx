@@ -31,6 +31,7 @@ export const OPERATIONS = [
   { value: 'mexico', label: 'México', flag: '🇲🇽' },
   { value: 'equador', label: 'Equador', flag: '🇪🇨' },
   { value: 'guatemala', label: 'Guatemala', flag: '🇬🇹' },
+  { value: 'espanha', label: 'Espanha', flag: '🇪🇸' },
 ]
 
 function slugify(text) {
@@ -62,7 +63,20 @@ function loadLabelOverrides() {
 const OperationContext = createContext(null)
 
 export function OperationProvider({ children }) {
-  const [operation, setOperation] = useState(() => localStorage.getItem(STORAGE_KEY) || 'colombia')
+  // `operation` continua com um valor válido desde o primeiro render (nunca
+  // fica null) — o resto do app (dashboard, concorrentes, etc.) não precisa
+  // saber que ninguém escolheu nada ainda, continua funcionando igual.
+  // `needsCountryPick` é só um aviso pra UI: true quando essa pessoa NUNCA
+  // escolheu um país de verdade nesse navegador (nada gravado ainda) — o
+  // Layout usa isso pra mostrar o seletor inicial de país, em vez de deixar
+  // a conta presa em "Colômbia" sem avisar (era o comportamento antigo).
+  const [operation, setOperationRaw] = useState(() => localStorage.getItem(STORAGE_KEY) || 'colombia')
+  const [needsCountryPick, setNeedsCountryPick] = useState(() => localStorage.getItem(STORAGE_KEY) === null)
+
+  function setOperation(value) {
+    setNeedsCountryPick(false)
+    setOperationRaw(value)
+  }
   const [customOperations, setCustomOperations] = useState(loadCustomOperations)
   const [labelOverrides, setLabelOverrides] = useState(loadLabelOverrides)
   // null = ainda carregando/sem organização (admin) — não trava nada até
@@ -107,8 +121,14 @@ export function OperationProvider({ children }) {
     !!planLimit && planLimit.maxCompetitors !== null && planLimit.usedCompetitors >= planLimit.maxCompetitors
 
   useEffect(() => {
+    // Enquanto needsCountryPick for true, esse valor ainda é só o default
+    // interno ('colombia'), não uma escolha de verdade — gravar ele agora
+    // faria o aviso de "escolher país" sumir sozinho no próximo carregamento,
+    // sem a pessoa ter escolhido nada. Só grava depois que setOperation()
+    // (via clique num país ou "adicionar país") passar por aqui de propósito.
+    if (needsCountryPick) return
     localStorage.setItem(STORAGE_KEY, operation)
-  }, [operation])
+  }, [operation, needsCountryPick])
 
   useEffect(() => {
     localStorage.setItem(CUSTOM_STORAGE_KEY, JSON.stringify(customOperations))
@@ -155,6 +175,7 @@ export function OperationProvider({ children }) {
       value={{
         operation,
         setOperation,
+        needsCountryPick,
         customOperations,
         addCustomOperation,
         labelOverrides,

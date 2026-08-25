@@ -126,6 +126,7 @@ export default function Layout() {
     planLimit,
     isOperationLocked,
     atOperationCap,
+    needsCountryPick,
   } = useOperation()
   const { me } = useAuth()
   const { theme, toggleTheme } = useTheme()
@@ -516,6 +517,42 @@ export default function Layout() {
                 Salvar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Escolha inicial de país — só pra colaborador (cliente pagante) que
+          ainda nunca escolheu nada nesse navegador (needsCountryPick, ver
+          OperationContext.jsx). Admin não tem organização/plano, não faz
+          sentido pra ele. Não bloqueia o app: dá pra clicar fora e continuar
+          usando com o padrão de sempre, só que agora avisado, e o aviso
+          volta a aparecer enquanto a pessoa não escolher de fato. */}
+      {needsCountryPick && !operationModal && hasAccess && !me?.isAdmin && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => {}}>
+          <div className="w-full max-w-md rounded-2xl bg-[var(--bg-surface)] p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-[var(--text-primary)]">Qual país você vai monitorar?</h3>
+            <p className="mt-1.5 text-sm text-[var(--text-muted)]">
+              Escolha o país onde ficam os concorrentes que você quer acompanhar. Dá pra adicionar outros países depois,
+              a qualquer momento, pelo menu lateral.
+            </p>
+            <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+              {OPERATIONS.map((op) => (
+                <button
+                  key={op.value}
+                  onClick={() => setOperation(op.value)}
+                  className="flex flex-col items-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-4 text-center transition-colors hover:border-brand-500 hover:bg-brand-500/10"
+                >
+                  <span className="text-2xl">{op.flag}</span>
+                  <span className="text-xs font-medium text-[var(--text-secondary)]">{op.label}</span>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setOperationModal({ mode: 'add', value: null, label: '' })}
+              className="mt-3 w-full rounded-xl border border-dashed border-[var(--border)] px-3 py-3 text-center text-xs font-medium text-[var(--text-faint)] transition-colors hover:border-brand-500/60 hover:text-brand-500"
+            >
+              🌎 Meu país não está na lista
+            </button>
           </div>
         </div>
       )}

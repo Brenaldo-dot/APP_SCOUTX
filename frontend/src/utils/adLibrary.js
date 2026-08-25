@@ -5,7 +5,7 @@
 // api/products.py). Buscar pelo domínio da loja sempre funciona; buscar
 // pelo NOME (ex: "Guffo", o fornecedor mostrado na tabela) não — confirmado
 // pelo usuário testando ao vivo.
-export const OPERATION_COUNTRY = { colombia: 'CO', mexico: 'MX', equador: 'EC', guatemala: 'GT' }
+export const OPERATION_COUNTRY = { colombia: 'CO', mexico: 'MX', equador: 'EC', guatemala: 'GT', espanha: 'ES' }
 
 export function metaAdsLibrarySearchUrl(domain, operation) {
   if (!domain) return null

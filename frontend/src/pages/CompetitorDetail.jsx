@@ -14,7 +14,7 @@ const PAGE_SIZE = 100
 // no backend — os links "abrir na ferramenta oficial" tinham CO fixo,
 // levando concorrente do México pra biblioteca do país errado igual o bug
 // original do scan automático.
-const OPERATION_COUNTRY = { colombia: 'CO', mexico: 'MX', equador: 'EC', guatemala: 'GT' }
+const OPERATION_COUNTRY = { colombia: 'CO', mexico: 'MX', equador: 'EC', guatemala: 'GT', espanha: 'ES' }
 
 function metaAdsLibraryUrl(domain, country) {
   const params = new URLSearchParams({
