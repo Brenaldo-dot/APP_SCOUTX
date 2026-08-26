@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { Search, X } from 'lucide-react'
 import { api } from '../api/client.js'
 import EmptyState from '../components/EmptyState.jsx'
 import Select from '../components/Select.jsx'
@@ -18,6 +19,22 @@ const SORT_OPTIONS = [
   { value: 'hot', label: 'Lojas com mais produtos quentes' },
   { value: 'oldest', label: 'Lojas mais antigas no mercado' },
 ]
+
+// Sem acento/maiúscula pra comparar — "espanha" acha "Espanhã" e por aí vai,
+// não obriga a pessoa a digitar exatamente igual ao que está cadastrado.
+function normalizeSearch(text) {
+  return String(text || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+function filterCompetitors(list, query) {
+  const q = normalizeSearch(query)
+  if (!q) return list
+  return list.filter((c) => normalizeSearch(c.name).includes(q) || normalizeSearch(c.domain).includes(q))
+}
 
 function sortCompetitors(list, sort) {
   const sorted = [...list]
@@ -74,12 +91,18 @@ export default function Competitors() {
   const asUserId = searchParams.get('as_user_id')
   const sort = searchParams.get('sort') || 'default'
   const [competitors, setCompetitors] = useState(null)
+  const [search, setSearch] = useState('')
   const [error, setError] = useState(null)
   const [form, setForm] = useState({ domain: '', name: '', niche: '' })
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
   const pollRef = useRef(null)
+
+  const visibleCompetitors = useMemo(
+    () => (competitors ? sortCompetitors(filterCompetitors(competitors, search), sort) : []),
+    [competitors, search, sort]
+  )
 
   function load() {
     api
@@ -212,19 +235,44 @@ export default function Competitors() {
       )}
 
       {competitors && competitors.length > 0 && (
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-[var(--text-muted)]">Ordenar por</label>
-          <Select
-            className="w-64"
-            value={sort}
-            onChange={(v) => {
-              const next = new URLSearchParams(searchParams)
-              if (!v || v === 'default') next.delete('sort')
-              else next.set('sort', v)
-              setSearchParams(next)
-            }}
-            options={SORT_OPTIONS}
-          />
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-1 flex-col gap-1">
+            <label className="text-xs font-medium text-[var(--text-muted)]">Buscar loja</label>
+            <div className="relative w-full max-w-xs">
+              <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-faint)]" />
+              <input
+                type="text"
+                placeholder="Nome ou domínio…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] py-2 pl-9 pr-8 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  title="Limpar busca"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-[var(--text-faint)] hover:text-[var(--text-secondary)]"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-[var(--text-muted)]">Ordenar por</label>
+            <Select
+              className="w-64"
+              value={sort}
+              onChange={(v) => {
+                const next = new URLSearchParams(searchParams)
+                if (!v || v === 'default') next.delete('sort')
+                else next.set('sort', v)
+                setSearchParams(next)
+              }}
+              options={SORT_OPTIONS}
+            />
+          </div>
         </div>
       )}
 
@@ -237,9 +285,16 @@ export default function Competitors() {
         />
       )}
 
-      {competitors && competitors.length > 0 && (
+      {competitors && competitors.length > 0 && visibleCompetitors.length === 0 && (
+        <EmptyState
+          title="Nenhuma loja encontrada"
+          subtitle={`Nada bate com "${search}" — confira a grafia ou limpe a busca.`}
+        />
+      )}
+
+      {visibleCompetitors.length > 0 && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {sortCompetitors(competitors, sort).map((c) => (
+          {visibleCompetitors.map((c) => (
             <div
               key={c.id}
               className="group relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border-2 border-[var(--border)] bg-[var(--bg-surface)] p-3.5 transition-colors hover:border-brand-500/50"
