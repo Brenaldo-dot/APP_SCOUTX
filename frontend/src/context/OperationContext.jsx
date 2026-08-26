@@ -7,6 +7,7 @@ const STORAGE_KEY = 'mega-minerador-operation'
 const CUSTOM_STORAGE_KEY = 'mega-minerador-custom-operations'
 const LABEL_OVERRIDES_KEY = 'mega-minerador-operation-label-overrides'
 const TOUCHED_HISTORY_KEY = 'mega-minerador-operation-touched'
+const CUSTOM_ORDER_KEY = 'mega-minerador-operation-order'
 
 // Escada de planos por VAGA de país — não é só "próximo plano geral": quem
 // tá no Standard (1 vaga) vê o 2º e o 3º país cabendo no Pro, mas o 4º só
@@ -89,6 +90,22 @@ function loadTouchedHistory(email) {
   }
 }
 
+// Ordem que a PESSOA escolheu à mão (arrastando, ver reorderOperations
+// abaixo) — quando existe, tem prioridade sobre a ordem automática por
+// "primeiro toque" (touchedHistory). Por conta, igual o resto: cada uma
+// organiza o menu do jeito que quiser sem mexer na de ninguém.
+function operationOrderKeyFor(email) {
+  return `${CUSTOM_ORDER_KEY}:${email}`
+}
+
+function loadCustomOrder(email) {
+  try {
+    return JSON.parse(localStorage.getItem(operationOrderKeyFor(email)) || '[]')
+  } catch {
+    return []
+  }
+}
+
 export function OperationProvider({ children }) {
   const { me } = useAuth()
   const email = me?.email || null
@@ -115,12 +132,16 @@ export function OperationProvider({ children }) {
   // agora), pra nenhum deles perder a vaga só por não ser o que está sendo
   // visto no momento.
   const [touchedHistory, setTouchedHistory] = useState(() => loadTouchedHistory(null))
+  // Ordem manual (ver reorderOperations) — vazio = ainda ninguém arrastou
+  // nada nessa conta, usa a ordem automática por "primeiro toque" de sempre.
+  const [customOrder, setCustomOrder] = useState(() => loadCustomOrder(null))
   const initializedForEmail = useRef(null)
 
   useEffect(() => {
     if (!email || initializedForEmail.current === email) return
     initializedForEmail.current = email
     setTouchedHistory(loadTouchedHistory(email))
+    setCustomOrder(loadCustomOrder(email))
 
     // BUG corrigido (achado ao vivo, 2026-08-25): até aqui essa decisão só
     // vivia no localStorage do NAVEGADOR — trocar de dispositivo, abrir
@@ -269,6 +290,11 @@ export function OperationProvider({ children }) {
   }, [touchedHistory, email])
 
   useEffect(() => {
+    if (!email) return
+    localStorage.setItem(operationOrderKeyFor(email), JSON.stringify(customOrder))
+  }, [customOrder, email])
+
+  useEffect(() => {
     localStorage.setItem(CUSTOM_STORAGE_KEY, JSON.stringify(customOperations))
   }, [customOperations])
 
@@ -308,6 +334,34 @@ export function OperationProvider({ children }) {
     return value
   }
 
+  // Ordem exibida no menu lateral (Layout.jsx): por padrão, cada país ganha
+  // posição fixa na ordem em que foi TOCADO pela primeira vez (ver o efeito
+  // de touchedHistory acima) — o que já resolvia o país "sambando" de lugar.
+  // Mas quem quer organizar do jeito próprio (ex: país que mais usa primeiro,
+  // não o que só experimentou primeiro) arrasta a lista (ver
+  // ReorderOperationsModal) — isso vira `customOrder` e passa a mandar.
+  // Reordenar é só um detalhe de EXIBIÇÃO: não muda quem está travado (isso
+  // continua vindo de touchedOperations, não da posição), então dá pra
+  // arrastar livremente sem risco de travar/destravar nada sem querer.
+  const allOperations = [...OPERATIONS, ...customOperations]
+  const touchedOrdered = touchedHistory.map((v) => allOperations.find((op) => op.value === v)).filter(Boolean)
+  const untouchedOperations = allOperations.filter((op) => !touchedOperations.has(op.value))
+  const autoOrder = [...touchedOrdered, ...untouchedOperations]
+  const orderedOperations = customOrder.length
+    ? [
+        ...customOrder.map((v) => autoOrder.find((op) => op.value === v)).filter(Boolean),
+        // País que não estava na ordem salva (ex: adicionado depois de já ter
+        // arrastado) entra no fim, na ordem automática normal — nunca some.
+        ...autoOrder.filter((op) => !customOrder.includes(op.value)),
+      ]
+    : autoOrder
+
+  // Recebe a lista JÁ na ordem nova (arrastada) e salva só os `value`, na
+  // sequência — persistido por conta (ver operationOrderKeyFor).
+  function reorderOperations(newOrderValues) {
+    setCustomOrder(newOrderValues)
+  }
+
   return (
     <OperationContext.Provider
       value={{
@@ -324,6 +378,8 @@ export function OperationProvider({ children }) {
         atCompetitorCap,
         touchedOperations,
         touchedHistory,
+        orderedOperations,
+        reorderOperations,
       }}
     >
       {children}

@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Eye,
   Flame,
+  GripVertical,
   History,
   LayoutDashboard,
   LogOut,
@@ -31,6 +32,7 @@ import { initials } from '../utils/avatar.js'
 import { readCategoryVisits } from '../utils/alertsVisit.js'
 import { api } from '../api/client.js'
 import Select from './Select.jsx'
+import ReorderOperationsModal from './ReorderOperationsModal.jsx'
 import scoutxLogo from '../assets/scoutx-logo.png'
 
 const ADD_CUSTOM_VALUE = '__add_custom__'
@@ -119,14 +121,14 @@ export default function Layout() {
   const {
     operation,
     setOperation,
-    customOperations,
     addCustomOperation,
     labelOverrides,
     renameOperation,
     planLimit,
     needsCountryPick,
     touchedOperations,
-    touchedHistory,
+    orderedOperations: ctxOrderedOperations,
+    reorderOperations,
   } = useOperation()
   const { me } = useAuth()
   const { theme, toggleTheme } = useTheme()
@@ -134,6 +136,7 @@ export default function Layout() {
   const location = useLocation()
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === 'true')
   const [operationModal, setOperationModal] = useState(null)
+  const [reorderModalOpen, setReorderModalOpen] = useState(false)
   const [alertsUnreadCount, setAlertsUnreadCount] = useState(0)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   // `collapsed` é preferência de DESKTOP (ícone-só) — abaixo de `lg` o menu
@@ -210,31 +213,27 @@ export default function Layout() {
     setOperationModal(null)
   }
 
-  // Revisão (achado ao vivo, 2026-08-25 — dois problemas em sequência):
-  // 1ª volta: a trava era "por toque" — só fechava a Nª opção depois que a
-  // conta já tinha CLICADO em N países diferentes, então logo depois de um
+  // Revisão (achado ao vivo, 2026-08-25 — várias voltas):
+  // 1ª: a trava era "por toque" — só fechava a Nª opção depois que a conta
+  // já tinha CLICADO em N países diferentes, então logo depois de um
   // upgrade (antes de escolher qualquer país extra) tudo aparecia liberado.
   // Corrigido travando por POSIÇÃO: as N primeiras posições (N =
   // maxOperations do plano) ficam liberadas na hora.
-  // 2ª volta: só o país ATUAL (o que está na tela agora) ia pra 1ª posição
-  // — trocar de país "esquecia" o anterior, que caía pro fim da lista e
-  // podia aparecer travado à toa, mesmo já tendo sido escolhido antes.
-  // 3ª volta (pedido explícito do usuário): a lista ficava "sambando" —
-  // toda vez que clicava num país já tocado diferente, ele pulava pra 1ª
-  // posição e reordenava tudo de novo, mesmo sem ser a primeira vez que
-  // aquele país aparecia. Corrigido de vez usando `touchedHistory` (ordem
-  // em que cada país foi tocado PELA PRIMEIRA VEZ, ver OperationContext.jsx)
-  // em vez de "o atual sempre primeiro": cada país ganha uma posição FIXA
-  // assim que é tocado pela primeira vez e nunca mais se move — só o
-  // checkmark anda entre eles. Os ainda não tocados preenchem o resto das
-  // vagas livres na ordem normal da lista, e só o que sobrar além disso
-  // é que trava.
-  const allOperations = [...OPERATIONS, ...customOperations]
-  const touchedOrdered = touchedHistory.map((v) => allOperations.find((op) => op.value === v)).filter(Boolean)
-  const untouched = allOperations.filter((op) => !touchedOperations.has(op.value))
-  const orderedOperations = [...touchedOrdered, ...untouched]
+  // 2ª: só o país ATUAL (o que está na tela agora) ia pra 1ª posição —
+  // trocar de país "esquecia" o anterior, que caía pro fim da lista e podia
+  // aparecer travado à toa, mesmo já tendo sido escolhido antes.
+  // 3ª: a lista ficava "sambando" — toda vez que clicava num país já
+  // tocado diferente, ele pulava pra 1ª posição e reordenava tudo de novo.
+  // Corrigido usando `touchedHistory` (ordem de primeiro toque) como ordem
+  // AUTOMÁTICA padrão: cada país ganha posição fixa assim que é tocado pela
+  // primeira vez e nunca mais se move sozinho.
+  // 4ª (pedido explícito do usuário): além da ordem automática, deixar a
+  // pessoa arrastar pra organizar do jeito que ela quiser — isso agora vive
+  // em `orderedOperations`/`reorderOperations`, dentro do OperationContext
+  // (é só exibição, não mexe em quem está travado — isso continua vindo de
+  // touchedOperations, não da posição na lista).
   const maxOps = planLimit?.maxOperations
-  const operationOptions = orderedOperations.map((op, index) => {
+  const operationOptions = ctxOrderedOperations.map((op, index) => {
     const locked = Number.isFinite(maxOps) && index >= maxOps && !touchedOperations.has(op.value)
     return {
       value: op.value,
@@ -303,7 +302,21 @@ export default function Layout() {
         </div>
 
         <div className={`mb-2 px-2 ${hasAccess && !effectiveCollapsed ? '' : 'hidden'}`}>
-          <label className="mb-1 block text-xs font-medium text-[var(--text-muted)]">{t('nav.operacao')}</label>
+          <div className="mb-1 flex items-center justify-between">
+            <label className="block text-xs font-medium text-[var(--text-muted)]">{t('nav.operacao')}</label>
+            {/* Só vale a pena organizar quando tem mais de 1 país pra
+                arrastar entre si — com 0 ou 1 não tem o que reordenar. */}
+            {operationOptions.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setReorderModalOpen(true)}
+                title="Organizar ordem dos países"
+                className="flex items-center gap-1 rounded px-1 py-0.5 text-[10px] font-medium text-[var(--text-faint)] transition-colors hover:text-brand-500"
+              >
+                <GripVertical size={11} /> Organizar
+              </button>
+            )}
+          </div>
           <Select
             value={operation}
             onChange={handleOperationChange}
@@ -534,6 +547,17 @@ export default function Layout() {
             </div>
           </div>
         </div>
+      )}
+
+      {reorderModalOpen && (
+        <ReorderOperationsModal
+          items={operationOptions.map((op) => ({ value: op.value, label: op.label, icon: op.icon }))}
+          onClose={() => setReorderModalOpen(false)}
+          onSave={(newOrderValues) => {
+            reorderOperations(newOrderValues)
+            setReorderModalOpen(false)
+          }}
+        />
       )}
 
       {/* Escolha inicial de país — só pra colaborador (cliente pagante) que
