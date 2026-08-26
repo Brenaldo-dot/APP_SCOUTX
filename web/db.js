@@ -623,6 +623,16 @@ async function updateOrganizationExpiry(id, expiresAt) {
   return res.rows[0];
 }
 
+// Exclui a organização. Só chega aqui depois do servidor confirmar que
+// nenhum app_user aponta mais pra ela (ver checagem em server.js) — a
+// própria coluna organization_id em app_users é REFERENCES organizations(id)
+// sem ON DELETE, então o Postgres já recusaria sozinho se sobrasse algum
+// usuário, mas o servidor confere ANTES pra devolver uma mensagem clara em
+// vez de deixar estourar um erro de constraint cru pro admin.
+async function deleteOrganization(id) {
+  await pool.query("DELETE FROM organizations WHERE id = $1", [id]);
+}
+
 async function updateOrganizationDetails(id, { name, notes }) {
   const fields = [];
   const values = [];
@@ -693,4 +703,5 @@ module.exports = {
   setOrgDefaultOperationIfUnset,
   updateOrganizationExpiry,
   updateOrganizationDetails,
+  deleteOrganization,
 };

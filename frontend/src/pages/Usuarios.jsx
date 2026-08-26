@@ -74,6 +74,7 @@ const AUDIT_ACTIONS = {
   org_expiry_edited: { icon: Building2, color: 'text-amber-400', text: (a, t) => `${a} editou a validade de ${t}` },
   org_changed: { icon: Building2, color: 'text-brand-500', text: (a, t) => `${a} mudou a organização de ${t}` },
   org_plan_changed: { icon: RefreshCw, color: 'text-brand-500', text: (a, t) => `${a} mudou o plano de ${t} (validade mantida)` },
+  org_deleted: { icon: Trash2, color: 'text-red-400', text: (a, t) => `${a} excluiu a organização ${t}` },
 }
 
 const emptyForm = { name: '', email: '', password: '', admin: false, organizationId: '', withoutPassword: false }

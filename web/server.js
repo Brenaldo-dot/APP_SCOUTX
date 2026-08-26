@@ -1362,6 +1362,28 @@ function createApp() {
     res.json(serializeOrg({ ...updated, user_count: userCount }));
   });
 
+  app.delete("/api/admin/organizations/:id", requireAdmin, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: "id inválido" });
+    const org = await db.getOrganizationById(id);
+    if (!org) return res.status(404).json({ error: "Organização não encontrada." });
+
+    // Trava de segurança: organization_id em app_users referencia essa
+    // linha sem ON DELETE — o Postgres recusaria a exclusão de qualquer
+    // jeito, mas confere aqui ANTES pra devolver uma mensagem clara ("mova
+    // ou remova o usuário primeiro" em vez de um erro de constraint cru).
+    const userCount = await db.countUsersInOrg(id);
+    if (userCount > 0) {
+      return res.status(400).json({
+        error: `Essa organização ainda tem ${userCount} usuário(s) vinculado(s). Remova ou mova ${userCount === 1 ? "ele" : "eles"} pra outra organização (aba Usuários) antes de excluir.`,
+      });
+    }
+
+    await db.deleteOrganization(id);
+    await db.logAdminAction(req.appUser.id, req.appUser.name, null, org.name, "org_deleted", null);
+    res.json({ ok: true });
+  });
+
   // ---------- Histórico de buscas (admin da plataforma, só) ----------
 
   // Revisão de segurança + pedido explícito do usuário: existia uma permissão

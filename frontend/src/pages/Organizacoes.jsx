@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Building2, CalendarClock, RefreshCw } from 'lucide-react'
+import { Building2, CalendarClock, RefreshCw, Trash2 } from 'lucide-react'
 import { rawApi } from '../api/rawClient.js'
 import { api } from '../api/client.js'
 import Select from '../components/Select.jsx'
@@ -58,6 +58,7 @@ export default function Organizacoes() {
   const [creating, setCreating] = useState(false)
   const [renewModal, setRenewModal] = useState(null)
   const [expiryModal, setExpiryModal] = useState(null)
+  const [deletingId, setDeletingId] = useState(null)
 
   function load() {
     rawApi.listOrganizations().then(setOrgs).catch((e) => setError(e.message))
@@ -155,6 +156,25 @@ export default function Organizacoes() {
       load()
     } catch (err) {
       setExpiryModal({ ...expiryModal, saving: false, error: err.message || 'Não foi possível salvar.' })
+    }
+  }
+
+  async function handleDelete(org) {
+    if (
+      !window.confirm(
+        `Excluir a organização "${org.name}"? Isso apaga o plano/assinatura dela, não dá pra desfazer. Só funciona se não houver mais nenhum usuário vinculado a ela.`
+      )
+    ) {
+      return
+    }
+    setDeletingId(org.id)
+    try {
+      await rawApi.deleteOrganization(org.id)
+      load()
+    } catch (err) {
+      setError(err.message || 'Não foi possível excluir a organização.')
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -279,6 +299,14 @@ export default function Organizacoes() {
                           className="rounded-lg p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--hover-surface)] hover:text-amber-400"
                         >
                           <CalendarClock size={15} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(org)}
+                          disabled={deletingId === org.id}
+                          title={org.userCount > 0 ? 'Remova os usuários dela antes de excluir' : 'Excluir organização'}
+                          className="rounded-lg p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--hover-surface)] hover:text-red-400 disabled:opacity-50"
+                        >
+                          <Trash2 size={15} />
                         </button>
                       </div>
                     </td>
