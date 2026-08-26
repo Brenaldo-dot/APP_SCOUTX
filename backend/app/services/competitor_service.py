@@ -3,6 +3,7 @@
 import logging
 from datetime import datetime, timezone
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -90,8 +91,26 @@ async def register_competitor(
             status=CompetitorStatus.CHECKING,
         )
         db.add(competitor)
-        db.commit()
-        db.refresh(competitor)
+        try:
+            db.commit()
+            db.refresh(competitor)
+        except IntegrityError:
+            # Achado em auditoria de segurança (2026-08-26): domain é
+            # unique — duas pessoas clicando "cadastrar" quase ao mesmo
+            # tempo pro MESMO domínio inédito (ninguém rastreava ainda)
+            # corriam pra criar a mesma linha, a segunda esbarrava nessa
+            # constraint sem try/except nenhum e virava um 500 cru pro
+            # cliente. Não é bug de dado (a constraint fez o trabalho
+            # dela) — só falta tratar como "ok, já existe, reaproveita",
+            # que é exatamente o comportamento normal pra domínio repetido.
+            db.rollback()
+            competitor = db.query(Competitor).filter(Competitor.domain == domain).first()
+            if competitor is None:
+                # Nunca deveria acontecer (a IntegrityError só dispara
+                # porque a OUTRA transação já commitou essa linha antes da
+                # nossa falhar) — mantido só como rede de segurança.
+                raise
+            is_new_competitor = False
 
     existing_tracker = (
         db.query(CompetitorTracker)

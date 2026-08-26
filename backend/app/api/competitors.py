@@ -3,8 +3,10 @@
 import logging
 import threading
 
+from contextlib import contextmanager
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import CurrentUser, get_current_user, resolve_target_user
@@ -117,6 +119,30 @@ def _assert_competitor_limit_allowed(
         )
 
 
+@contextmanager
+def _org_limit_lock(db: Session, current_user: CurrentUser):
+    """Achado em auditoria de segurança (2026-08-26): `_assert_competitor_limit_allowed`
+    é ler-depois-escrever sem trava nenhuma — duas requisições concorrentes
+    (2 abas, ou um script disparando rápido) podiam ler a MESMA contagem
+    "1 vaga livre", as duas passarem na checagem, e a organização acabar com
+    mais concorrentes do que o plano permite. `pg_advisory_lock` serializa
+    só quem tenta mexer na MESMA organização (a chave é o menor id de membro
+    da org — estável e único por org já que cada organização tem seu próprio
+    conjunto de usuários) — outras organizações continuam cadastrando em
+    paralelo sem ninguém esperar a vez de ninguém. Sessão (não transação):
+    fica de propósito destravada só no fim do `with`, não no primeiro commit
+    (register_competitor faz mais de um commit dentro do bloco protegido)."""
+    if current_user.org_max_competitors is None or not current_user.org_member_ids:
+        yield
+        return
+    lock_key = min(current_user.org_member_ids)
+    db.execute(text("SELECT pg_advisory_lock(:key)"), {"key": lock_key})
+    try:
+        yield
+    finally:
+        db.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": lock_key})
+
+
 @router.post("", response_model=CompetitorOut, status_code=201)
 async def create_competitor(
     payload: CompetitorCreate, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)
@@ -145,14 +171,15 @@ async def create_competitor(
     # limite tem que ser checado contra esse país de verdade, não contra o
     # que o formulário mandou, senão adicionar uma loja que a própria
     # organização já rastreia consumiria uma vaga de país à toa.
-    existing_competitor = db.query(Competitor).filter(Competitor.domain == domain).first()
-    effective_operation = existing_competitor.operation if existing_competitor else payload.operation
-    _assert_operation_allowed(db, current_user, effective_operation)
-    _assert_competitor_limit_allowed(db, current_user, existing_competitor.id if existing_competitor else None)
+    with _org_limit_lock(db, current_user):
+        existing_competitor = db.query(Competitor).filter(Competitor.domain == domain).first()
+        effective_operation = existing_competitor.operation if existing_competitor else payload.operation
+        _assert_operation_allowed(db, current_user, effective_operation)
+        _assert_competitor_limit_allowed(db, current_user, existing_competitor.id if existing_competitor else None)
 
-    competitor, is_new_competitor, _is_new_tracker = await register_competitor(
-        db, payload.domain, payload.name, payload.niche, payload.tags, current_user.id, payload.operation
-    )
+        competitor, is_new_competitor, _is_new_tracker = await register_competitor(
+            db, payload.domain, payload.name, payload.niche, payload.tags, current_user.id, payload.operation
+        )
     # Só dispara o raio-x se o DOMÍNIO em si é inédito — se outro usuário já
     # rastreia (dado reaproveitado, ver register_competitor), não faz sentido
     # raspar tudo de novo só porque mais alguém passou a rastrear também.
