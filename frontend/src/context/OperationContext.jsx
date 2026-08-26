@@ -148,15 +148,25 @@ export function OperationProvider({ children }) {
     // numa aba anônima nova, ou só limpar os dados do site fazia perguntar
     // de novo pra sempre, mesmo a conta já tendo escolhido antes. Agora o
     // servidor é a fonte de verdade (organizations.default_operation, ver
-    // db.js e GET /api/me): se ele já tem valor, usa e não pergunta nunca
-    // mais, em qualquer navegador. Só cai pro localStorage como plano B pra
-    // quem escolheu ANTES dessa coluna existir (o servidor ainda não sabe
-    // desse valor) — e nesse caso já aproveita pra mandar pro servidor,
-    // pra próxima vez nem precisar do plano B.
+    // db.js e GET /api/me) só pra decidir SE pergunta de novo (nunca, uma
+    // vez setado) — não pra decidir QUAL país mostrar, ver bug corrigido
+    // logo abaixo.
     if (defaultOperation) {
-      setOperationRaw(defaultOperation)
+      // BUG corrigido (achado ao vivo, 2026-08-26): todo refresh voltava
+      // pro país ORIGINAL (defaultOperation, a primeiríssima escolha da
+      // conta, gravada uma vez só e nunca mais mexida) em vez de continuar
+      // no que a pessoa estava DE FATO vendo antes de atualizar a página —
+      // trocar pra "México" no seletor, dar F5, e cair de volta em
+      // "Colômbia" só porque foi o primeiro país escolhido meses atrás.
+      // A chave escopada (operationKeyFor) já é mantida em dia com o país
+      // sendo VISTO agora (ver efeito de persistência abaixo, roda a cada
+      // troca) — ela é a fonte certa pra "onde eu estava", o servidor só
+      // entra como valor inicial pra quando essa chave ainda nem existe
+      // (primeiro acesso desse navegador/dispositivo).
+      const lastViewed = localStorage.getItem(operationKeyFor(email))
+      setOperationRaw(lastViewed || defaultOperation)
       setNeedsCountryPick(false)
-      localStorage.setItem(operationKeyFor(email), defaultOperation)
+      if (!lastViewed) localStorage.setItem(operationKeyFor(email), defaultOperation)
       return
     }
 
