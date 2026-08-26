@@ -124,6 +124,7 @@ export default function Layout() {
     addCustomOperation,
     labelOverrides,
     renameOperation,
+    removeOperation,
     planLimit,
     needsCountryPick,
     touchedOperations,
@@ -203,6 +204,14 @@ export default function Layout() {
 
   function handleEditOperation(option) {
     setOperationModal({ mode: 'rename', value: option.value, label: option.label, originalLabel: option.label })
+  }
+
+  function handleDeleteOperation(option) {
+    if (!window.confirm(`Excluir "${option.label}" da sua lista de países? Libera a vaga do plano — dá pra adicionar outro país depois.`)) {
+      return
+    }
+    const error = removeOperation(option.value)
+    if (error) alert(error)
   }
 
   function submitOperationModal() {
@@ -321,6 +330,7 @@ export default function Layout() {
             value={operation}
             onChange={handleOperationChange}
             onEditOption={handleEditOperation}
+            onDeleteOption={handleDeleteOperation}
             options={operationOptions}
             extraOption={{
               value: ADD_CUSTOM_VALUE,

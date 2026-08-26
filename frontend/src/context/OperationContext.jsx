@@ -340,6 +340,45 @@ export function OperationProvider({ children }) {
     setLabelOverrides((prev) => ({ ...prev, [value]: label }))
   }
 
+  // Tira um país da lista da conta (libera a vaga do plano). Devolve uma
+  // mensagem de erro (string) se não puder, ou null se removeu com
+  // sucesso — quem chama decide como mostrar o erro (ver Layout.jsx).
+  // Bloqueia se ainda tem concorrente de VERDADE cadastrado nesse país
+  // (planLimit.usedOperations vem do backend, contando concorrente real —
+  // ver getMyOperationsLimit) — sem essa trava, "excluir" um país que
+  // ainda tem dado dava a falsa impressão de ter liberado a vaga, mas ela
+  // seria recontada na hora (o backend confere de novo a cada carregamento),
+  // só reaparecendo do nada. Tem que remover os concorrentes daquele país
+  // primeiro (aba Concorrentes), igual a mesma trava usada pra excluir uma
+  // organização inteira.
+  function removeOperation(value) {
+    if (planLimit?.usedOperations?.includes(value)) {
+      return "Essa organização ainda tem concorrente cadastrado nesse país — remova-os primeiro na aba Concorrentes antes de excluir o país.";
+    }
+    setTouchedHistory((prev) => prev.filter((v) => v !== value))
+    setCustomOperations((prev) => prev.filter((op) => op.value !== value))
+    setCustomOrder((prev) => prev.filter((v) => v !== value))
+    setLabelOverrides((prev) => {
+      if (!(value in prev)) return prev
+      const next = { ...prev }
+      delete next[value]
+      return next
+    })
+    if (operation === value) {
+      const remaining = touchedHistory.filter((v) => v !== value)
+      if (remaining.length > 0) {
+        setOperation(remaining[0])
+      } else {
+        // Última operação da conta foi embora — trata igual conta que
+        // nunca escolheu nada (mesmo estado de needsCountryPick), mostra o
+        // seletor inicial de novo em vez de deixar `operation` apontando
+        // pra um valor que não existe mais em lugar nenhum.
+        setNeedsCountryPick(true)
+      }
+    }
+    return null
+  }
+
   // Sem mapeamento de país fixo no backend, um país "outro" cai no default
   // (CO) só pra rotina de busca de anúncio — o resto do app (dashboard,
   // concorrentes, produtos) funciona normal, filtrando por esse valor igual
@@ -397,6 +436,7 @@ export function OperationProvider({ children }) {
         addCustomOperation,
         labelOverrides,
         renameOperation,
+        removeOperation,
         planLimit,
         isOperationLocked,
         atOperationCap,

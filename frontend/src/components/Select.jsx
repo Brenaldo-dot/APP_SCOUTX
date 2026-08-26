@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Pencil } from 'lucide-react'
+import { Pencil, Trash2 } from 'lucide-react'
 
 // Dropdown próprio — o <select> nativo do navegador não dá pra estilizar
 // por dentro (o painel aberto usa o tema do sistema operacional, não o
@@ -8,7 +8,7 @@ import { Pencil } from 'lucide-react'
 // Mesma API de sempre (value/onChange/options), só o visual muda.
 // onEditOption (opcional): mostra um lápis por opção (só as destravadas) —
 // usado no seletor de país pra renomear sem sair do dropdown.
-export default function Select({ value, onChange, options, placeholder = 'Selecione…', className = '', extraOption, onEditOption }) {
+export default function Select({ value, onChange, options, placeholder = 'Selecione…', className = '', extraOption, onEditOption, onDeleteOption }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef(null)
 
@@ -118,6 +118,20 @@ export default function Select({ value, onChange, options, placeholder = 'Seleci
                     className="shrink-0 rounded-md p-1.5 text-[var(--text-faint)] opacity-0 transition-opacity hover:text-brand-500 group-hover:opacity-100"
                   >
                     <Pencil size={12} />
+                  </button>
+                )}
+                {onDeleteOption && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setOpen(false)
+                      onDeleteOption(option)
+                    }}
+                    title="Excluir"
+                    className="shrink-0 rounded-md p-1.5 text-[var(--text-faint)] opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                  >
+                    <Trash2 size={12} />
                   </button>
                 )}
               </div>
