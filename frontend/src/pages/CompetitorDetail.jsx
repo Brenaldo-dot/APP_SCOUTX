@@ -162,6 +162,7 @@ export default function CompetitorDetail() {
                   <th className="px-4 py-3">Preço</th>
                   <th className="px-4 py-3">Variações</th>
                   <th className="px-4 py-3">Sinais</th>
+                  <th className="px-4 py-3">Anúncios</th>
                   <th className="px-4 py-3">Ver na loja</th>
                 </tr>
               </thead>
@@ -186,6 +187,25 @@ export default function CompetitorDetail() {
                           <DuplicateBadge duplicateCount={p.duplicate_count} duplicateOf={p.duplicate_of} />
                           <ScalingBadge scaling={p.scaling} />
                         </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        {p.active_ad_count > 0 ? (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-2 py-0.5 text-xs font-medium text-blue-400">
+                              📣 {p.active_ad_count}
+                            </span>
+                            <a
+                              href={metaAdsLibraryUrl(competitor.domain, country)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 rounded-full border border-violet-500/30 px-2 py-0.5 text-xs font-medium text-violet-400 transition-colors hover:bg-violet-500/10"
+                            >
+                              Ver anúncios ↗
+                            </a>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-[var(--text-muted)]">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2 whitespace-nowrap">
