@@ -146,23 +146,18 @@ export function OperationProvider({ children }) {
       rawApi.setDefaultOperation(scoped).catch(() => {})
       return
     }
-    // Migração pontual: cliente de verdade que já usava o app ANTES dessa
-    // trava por conta existir tinha o país salvo na chave antiga (global do
-    // navegador) — aproveita esse valor uma única vez em vez de obrigar
-    // escolher de novo, e CONSOME a chave antiga na sequência (removeItem)
-    // pra ela não vazar pra uma segunda conta testada no mesmo navegador
-    // depois (era exatamente o bug relatado).
-    const legacy = localStorage.getItem(STORAGE_KEY)
-    if (legacy) {
-      setOperationRaw(legacy)
-      setNeedsCountryPick(false)
-      localStorage.setItem(operationKeyFor(email), legacy)
-      localStorage.removeItem(STORAGE_KEY)
-      rawApi.setDefaultOperation(legacy).catch(() => {})
-      return
-    }
-    // Nem servidor, nem chave escopada, nem chave antiga: essa conta é
-    // tratada como se fosse realmente a primeira vez, ponto final.
+    // REMOVIDO (2026-08-25, mesmo dia que essa trava por conta foi criada):
+    // existia aqui uma migração que aproveitava a chave antiga (global do
+    // navegador, sem dono) achando que era de um cliente de antes dessa
+    // trava existir. Só que essa trava foi feita HOJE — não existe cliente
+    // real "de antes" pra migrar — e essa chave antiga, na prática, é só
+    // resíduo de teste (ex: o admin testando no mesmo navegador). Resultado:
+    // toda conta NOVA criada nesse navegador herdava esse resíduo e nunca
+    // via o seletor de país (bug relatado: "criei conta nova e não
+    // perguntou"). Sem essa migração, servidor e chave escopada por conta
+    // continuam funcionando normal — só o atalho problemático saiu.
+    // Nem servidor, nem chave escopada: essa conta é tratada como se fosse
+    // realmente a primeira vez, ponto final.
     setNeedsCountryPick(true)
   }, [email, defaultOperation])
 
