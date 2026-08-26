@@ -219,6 +219,31 @@ export function OperationProvider({ children }) {
     setTouchedHistory((prev) => (prev.includes(operation) ? prev : [...prev, operation]))
   }, [operation, needsCountryPick])
   const [customOperations, setCustomOperations] = useState(loadCustomOperations)
+
+  // BUG corrigido (achado ao vivo, 2026-08-26): país customizado (via "Meu
+  // país não está na lista") é validado e gravado no SERVIDOR sem
+  // restrição nenhuma (organizations.default_operation aceita qualquer
+  // string, ver PATCH /api/me/default-operation em server.js) — mas o
+  // NOME/ícone de exibição dele só existe no localStorage do navegador que
+  // criou (customOperations, ver addCustomOperation). Resultado: abrir a
+  // conta num navegador/dispositivo diferente (ou só limpar dados do site)
+  // trazia o valor certo do servidor, mas o Select não achava nenhuma
+  // opção com esse `value` na lista local — caía no placeholder
+  // "Selecione…" em vez de mostrar o país de verdade, mesmo a escolha
+  // estando salva e correta por baixo. Corrigido reconstruindo a entrada
+  // que falta a partir do próprio valor (rótulo = o valor mesmo, editável
+  // depois pelo lápis de renomear) assim que ela aparece sem estar em
+  // nenhuma lista conhecida — auto-corrige e já fica salvo pras próximas
+  // vezes nesse navegador.
+  useEffect(() => {
+    if (needsCountryPick || !operation) return
+    const known = OPERATIONS.some((op) => op.value === operation) || customOperations.some((op) => op.value === operation)
+    if (known) return
+    setCustomOperations((prev) =>
+      prev.some((op) => op.value === operation) ? prev : [...prev, { value: operation, label: operation, flag: '🌎' }]
+    )
+  }, [operation, needsCountryPick, customOperations])
+
   const [labelOverrides, setLabelOverrides] = useState(loadLabelOverrides)
   // null = ainda carregando/sem organização (admin) — não trava nada até
   // saber de verdade, pra não piscar país bloqueado por engano.
