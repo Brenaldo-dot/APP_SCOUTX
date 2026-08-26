@@ -870,15 +870,31 @@ function createApp() {
 
   // Grava o país da organização na PRIMEIRA vez (ver
   // db.setOrgDefaultOperationIfUnset — chamadas depois de já setado não
-  // mudam nada). Sem requireAdmin de propósito: é o próprio colaborador
+  // mudam nada, é assim de propósito: essa é a escolha "pra sempre" da
+  // conta). Sem requireAdmin de propósito: é o próprio colaborador
   // escolhendo, na primeira vez que abre o app — mas continua exigindo
   // sessão válida (requireAuth já roda pra tudo que vem depois dele, ver
   // app.use(requireAuth) acima).
+  //
+  // force=true (achado ao vivo, 2026-08-26): exceção deliberada à regra
+  // acima — só usada quando a pessoa EXCLUI (ver DELETE de país no
+  // OperationContext.jsx) justo o país que era esse padrão. Sem essa
+  // saída, o valor excluído "ressuscitava" sozinho no próximo refresh ou
+  // dispositivo novo, porque esse endpoint recusava sobrescrever um valor
+  // já setado. value pode vir null com force=true (limpa de vez, quando a
+  // conta excluiu TODOS os países que tinha).
   app.patch("/api/me/default-operation", async (req, res) => {
     if (!req.appUser.organization_id) {
       return res.status(400).json({ error: "Essa conta não tem organização." });
     }
-    const { value } = req.body || {};
+    const { value, force } = req.body || {};
+    if (force === true) {
+      if (value !== null && typeof value !== "string") {
+        return res.status(400).json({ error: "value precisa ser string ou null." });
+      }
+      const org = await db.setOrgDefaultOperation(req.appUser.organization_id, value);
+      return res.json({ defaultOperation: org.default_operation });
+    }
     if (!value || typeof value !== "string") {
       return res.status(400).json({ error: "value é obrigatório." });
     }

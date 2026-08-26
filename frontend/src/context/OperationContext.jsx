@@ -107,7 +107,7 @@ function loadCustomOrder(email) {
 }
 
 export function OperationProvider({ children }) {
-  const { me } = useAuth()
+  const { me, refreshMe } = useAuth()
   const email = me?.email || null
   const defaultOperation = me?.defaultOperation || null
 
@@ -364,8 +364,9 @@ export function OperationProvider({ children }) {
       delete next[value]
       return next
     })
+    const remaining = touchedHistory.filter((v) => v !== value)
+
     if (operation === value) {
-      const remaining = touchedHistory.filter((v) => v !== value)
       if (remaining.length > 0) {
         setOperation(remaining[0])
       } else {
@@ -374,8 +375,33 @@ export function OperationProvider({ children }) {
         // seletor inicial de novo em vez de deixar `operation` apontando
         // pra um valor que não existe mais em lugar nenhum.
         setNeedsCountryPick(true)
+        // BUG corrigido (achado ao vivo, 2026-08-26): needsCountryPick=true
+        // sozinho não bastava — a chave escopada (operationKeyFor) ainda
+        // tinha o valor excluído gravado de uma sessão anterior (o efeito
+        // que grava ali só roda enquanto needsCountryPick é false, nunca
+        // LIMPA quando vira true). Resultado: um refresh logo em seguida
+        // reencontrava esse valor "fantasma" no localStorage ANTES mesmo
+        // de checar o servidor, e a conta via o país excluído de volta,
+        // com needsCountryPick=false, como se nada tivesse acontecido.
+        if (email) localStorage.removeItem(operationKeyFor(email))
       }
     }
+
+    // BUG corrigido (achado ao vivo, 2026-08-26): excluir justo o país que
+    // era o "padrão pra sempre" gravado no SERVIDOR (organizations.
+    // default_operation) não bastava só limpar o estado local — no
+    // próximo refresh (ou outro dispositivo), GET /api/me continuava
+    // devolvendo o valor antigo e ele "ressuscitava" sozinho na tela.
+    // force=true sobrescreve mesmo já tendo um valor salvo (ver
+    // PATCH /api/me/default-operation) — algo que só faz sentido nesse
+    // fluxo de exclusão, nunca no primeiro-acesso normal.
+    if (value === defaultOperation) {
+      rawApi
+        .setDefaultOperation(remaining[0] || null, { force: true })
+        .then(() => refreshMe())
+        .catch(() => {})
+    }
+
     return null
   }
 

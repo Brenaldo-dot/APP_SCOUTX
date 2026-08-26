@@ -241,6 +241,20 @@ async function setOrgDefaultOperationIfUnset(organizationId, value) {
   return await getOrganizationById(organizationId);
 }
 
+// Sobrescreve incondicionalmente (ao contrário da versão acima, que só
+// grava se ainda for NULL) — usado quando a pessoa EXCLUI o país que era o
+// padrão da conta (ver removeOperation em OperationContext.jsx): sem isso,
+// o valor antigo (já apagado da lista local) voltava sozinho a cada
+// refresh/dispositivo novo, porque o servidor continuava devolvendo ele em
+// GET /api/me. value null limpa de vez (conta sem nenhum país mais).
+async function setOrgDefaultOperation(organizationId, value) {
+  const res = await pool.query(`UPDATE organizations SET default_operation = $1 WHERE id = $2 RETURNING *`, [
+    value,
+    organizationId,
+  ]);
+  return res.rows[0];
+}
+
 async function countUsers() {
   const res = await pool.query("SELECT COUNT(*)::int AS n FROM app_users");
   return res.rows[0].n;
@@ -701,6 +715,7 @@ module.exports = {
   renewOrganization,
   changeOrganizationPlan,
   setOrgDefaultOperationIfUnset,
+  setOrgDefaultOperation,
   updateOrganizationExpiry,
   updateOrganizationDetails,
   deleteOrganization,

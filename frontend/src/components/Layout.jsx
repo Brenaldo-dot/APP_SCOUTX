@@ -137,6 +137,7 @@ export default function Layout() {
   const location = useLocation()
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === 'true')
   const [operationModal, setOperationModal] = useState(null)
+  const [deleteOperationModal, setDeleteOperationModal] = useState(null)
   const [reorderModalOpen, setReorderModalOpen] = useState(false)
   const [alertsUnreadCount, setAlertsUnreadCount] = useState(0)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -207,11 +208,14 @@ export default function Layout() {
   }
 
   function handleDeleteOperation(option) {
-    if (!window.confirm(`Excluir "${option.label}" da sua lista de países? Libera a vaga do plano — dá pra adicionar outro país depois.`)) {
-      return
-    }
-    const error = removeOperation(option.value)
-    if (error) alert(error)
+    setDeleteOperationModal({ option, error: null })
+  }
+
+  function submitDeleteOperation() {
+    if (!deleteOperationModal) return
+    const error = removeOperation(deleteOperationModal.option.value)
+    if (error) setDeleteOperationModal({ ...deleteOperationModal, error })
+    else setDeleteOperationModal(null)
   }
 
   function submitOperationModal() {
@@ -570,13 +574,46 @@ export default function Layout() {
         />
       )}
 
+      {deleteOperationModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDeleteOperationModal(null)}>
+          <div className="w-full max-w-sm rounded-2xl bg-[var(--bg-surface)] p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+              Excluir "{deleteOperationModal.option.label}"?
+            </h3>
+            <p className="mt-1.5 text-xs text-[var(--text-muted)]">
+              Sai da sua lista de países e libera a vaga do plano — dá pra adicionar outro país depois, a qualquer
+              momento. Não apaga nenhum concorrente já cadastrado.
+            </p>
+            {deleteOperationModal.error && (
+              <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                {deleteOperationModal.error}
+              </p>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setDeleteOperationModal(null)}
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--text-tertiary)] hover:bg-[var(--hover-surface)]"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={submitDeleteOperation}
+                className="rounded-full bg-red-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-red-700"
+              >
+                Excluir país
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Escolha inicial de país — só pra colaborador (cliente pagante) que
           ainda nunca escolheu nada nesse navegador (needsCountryPick, ver
           OperationContext.jsx). Admin não tem organização/plano, não faz
           sentido pra ele. Não bloqueia o app: dá pra clicar fora e continuar
           usando com o padrão de sempre, só que agora avisado, e o aviso
           volta a aparecer enquanto a pessoa não escolher de fato. */}
-      {needsCountryPick && !operationModal && hasAccess && !me?.isAdmin && (
+      {needsCountryPick && !operationModal && !deleteOperationModal && hasAccess && !me?.isAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => {}}>
           <div className="w-full max-w-md rounded-2xl bg-[var(--bg-surface)] p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold text-[var(--text-primary)]">Qual país você vai monitorar?</h3>
