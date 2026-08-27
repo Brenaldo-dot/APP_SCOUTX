@@ -68,7 +68,9 @@ export default function Organizacoes() {
     ])
   }
 
-  useEffect(load, [])
+  useEffect(() => {
+    load()
+  }, [])
 
   // Quantos países cada organização já usa — precisa da lista de ids de
   // quem é membro dela (derivada aqui de `users`, já que /api/admin/users já

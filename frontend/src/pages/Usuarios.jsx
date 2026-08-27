@@ -218,7 +218,17 @@ export default function Usuarios() {
     ])
   }
 
-  useEffect(load, [])
+  // BUG CRÍTICO corrigido (achado ao vivo, 2026-08-27 — deixava a aba
+  // inteira em branco): `load` passa a devolver a Promise (ver
+  // RefreshButton, precisa disso pra saber quando parar de girar) —
+  // `useEffect(load, [])` chamava load() DIRETO como efeito, e o React
+  // tenta usar o que o efeito retorna como função de limpeza. Uma Promise
+  // não é função nem undefined — "destroy is not a function", crash sem
+  // error boundary nenhum por cima, tela toda em branco. `() => { load() }`
+  // não devolve nada pro React, então não quebra mais.
+  useEffect(() => {
+    load()
+  }, [])
 
   async function handleCreate() {
     setFormMsg(null)
