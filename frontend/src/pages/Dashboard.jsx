@@ -90,7 +90,7 @@ export default function Dashboard() {
     <div className="space-y-8">
       <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-6">
         <div className="pointer-events-none absolute left-1/2 top-1/2 h-64 w-64 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-500/20 blur-3xl" />
-        <div className="absolute right-4 top-4">
+        <div className="absolute right-4 top-4 z-10">
           <RefreshButton onRefresh={() => setRefreshKey((k) => k + 1)} />
         </div>
         <div className="relative flex flex-col items-center text-center">
