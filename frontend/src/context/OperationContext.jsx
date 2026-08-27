@@ -263,6 +263,20 @@ export function OperationProvider({ children }) {
     api.getMyOperationsLimit().then(setPlanLimit).catch(() => {})
   }, [])
 
+  // Auto-cura (2026-08-27, mesmo bug do comentão em touchedOrdered mais
+  // abaixo): assim que o servidor confirma que um país tem concorrente de
+  // verdade cadastrado, grava ele em touchedHistory (se ainda não
+  // estiver) — persistido no localStorage escopado por conta pelo efeito
+  // de sempre, então da próxima vez esse navegador já sabe sozinho, sem
+  // depender de esperar esse merge de novo a cada carregamento.
+  useEffect(() => {
+    if (!planLimit?.usedOperations?.length) return
+    setTouchedHistory((prev) => {
+      const missing = planLimit.usedOperations.filter((v) => !prev.includes(v))
+      return missing.length ? [...prev, ...missing] : prev
+    })
+  }, [planLimit])
+
   // Revisão: achado ao vivo — conta Standard (1 país) conseguia trocar
   // LIVREMENTE entre os 4 países fixos no seletor, mesmo sem nunca ter
   // cadastrado concorrente em nenhum, porque `usedOperations` (vindo do
@@ -444,7 +458,26 @@ export function OperationProvider({ children }) {
   // continua vindo de touchedOperations, não da posição), então dá pra
   // arrastar livremente sem risco de travar/destravar nada sem querer.
   const allOperations = [...OPERATIONS, ...customOperations]
-  const touchedOrdered = touchedHistory.map((v) => allOperations.find((op) => op.value === v)).filter(Boolean)
+  // BUG CRÍTICO corrigido (achado ao vivo, 2026-08-27 — relatado numa
+  // conta Enterprise real, com concorrente de verdade cadastrado em 2
+  // países que simplesmente SUMIRAM do seletor): país "usado" de verdade
+  // no servidor (planLimit.usedOperations, vem de concorrente REAL
+  // cadastrado — ver touchedOperations acima) mas que ESSE navegador
+  // nunca marcou como tocado (touchedHistory é só local, por navegador —
+  // outro dispositivo, cache limpo, ou qualquer dessincronia) ficava
+  // INVISÍVEL na lista inteira: não entrava em touchedOrdered (só olha
+  // touchedHistory) e também não entrava em untouchedOperations (é
+  // excluído de lá por já estar em touchedOperations). Resultado: o país
+  // não aparecia em lugar NENHUM do seletor, mesmo com concorrente
+  // cadastrado e funcionando por baixo — só um bug de EXIBIÇÃO, o dado
+  // real nunca foi tocado, mas escondido assim ninguém conseguia nem
+  // ver/trocar pra ele. touchedWithoutHistory garante que todo país
+  // realmente usado sempre aparece em algum lugar da lista, nunca some.
+  const touchedHistoryOrdered = touchedHistory.map((v) => allOperations.find((op) => op.value === v)).filter(Boolean)
+  const touchedWithoutHistory = allOperations.filter(
+    (op) => touchedOperations.has(op.value) && !touchedHistory.includes(op.value)
+  )
+  const touchedOrdered = [...touchedHistoryOrdered, ...touchedWithoutHistory]
   const untouchedOperations = allOperations.filter((op) => !touchedOperations.has(op.value))
   const autoOrder = [...touchedOrdered, ...untouchedOperations]
   const orderedOperations = customOrder.length
