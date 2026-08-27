@@ -1,5 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, RotateCw } from 'lucide-react'
+
+// Quanto tempo o botão fica verde "Atualizado!" antes de voltar a virar
+// "Atualizar" de novo — pedido explícito do usuário (2026-08-27): 1.5s
+// sumia rápido demais, difícil de perceber. 3 minutos dá tempo de sobra
+// pra ver e confiar que funcionou, sem morrer verde pra sempre (extremo
+// oposto, não dava mais pra saber SE uma atualização nova é que era o
+// motivo do verde ou se só nunca voltou ao normal).
+const DONE_DURATION_MS = 3 * 60 * 1000
 
 // Botão pequeno "Atualizar" pra recarregar os dados da tela sem precisar
 // dar F5 na página inteira — pedido explícito do usuário (2026-08-27).
@@ -9,15 +17,21 @@ import { Check, RotateCw } from 'lucide-react'
 // Revisão (achado ao vivo, 2026-08-27): só o ícone girando não bastava —
 // numa tela que já estava com o dado certo (nada mudou de verdade), a
 // pessoa não tinha como saber se o clique realmente disparou algo ou não.
-// Duas provas concretas agora: (1) um "✓ Atualizado!" verde por 1.5s logo
-// depois do giro, (2) a hora exata da última atualização bem-sucedida,
-// sempre visível ao lado do botão — a prova definitiva, porque muda a
-// cada clique de verdade, mesmo quando os dados em si não mudam nada.
+// Duas provas concretas agora: (1) um "✓ Atualizado!" verde por alguns
+// minutos logo depois do giro, (2) a hora exata da última atualização
+// bem-sucedida, sempre visível ao lado do botão — a prova definitiva,
+// porque muda a cada clique de verdade, mesmo quando os dados em si não
+// mudam nada. Continua clicável durante o verde, pra quem quiser forçar
+// outra atualização antes dos 3 minutos passarem.
 export default function RefreshButton({ onRefresh, className = '' }) {
   const [status, setStatus] = useState('idle') // idle | spinning | done
   const [lastUpdated, setLastUpdated] = useState(null)
+  const doneTimeoutRef = useRef(null)
+
+  useEffect(() => () => clearTimeout(doneTimeoutRef.current), [])
 
   async function handleClick() {
+    clearTimeout(doneTimeoutRef.current)
     setStatus('spinning')
     try {
       await onRefresh()
@@ -28,7 +42,7 @@ export default function RefreshButton({ onRefresh, className = '' }) {
       setTimeout(() => {
         setLastUpdated(new Date())
         setStatus('done')
-        setTimeout(() => setStatus('idle'), 1500)
+        doneTimeoutRef.current = setTimeout(() => setStatus('idle'), DONE_DURATION_MS)
       }, 500)
     }
   }
