@@ -17,8 +17,41 @@ logging.basicConfig(level=logging.INFO)
 settings = get_settings()
 
 
+logger = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Achado ao vivo (2026-08-27, derrubou o app INTEIRO pra todo mundo):
+    # esse bloco inteiro de ALTER TABLE roda de novo em TODO restart/deploy
+    # — idempotente (IF NOT EXISTS / DROP+ADD), mas cada ALTER ainda
+    # precisa de uma trava exclusiva na tabela por um instante. Se alguma
+    # outra transação (Celery com uma tabela dessas aberta, por exemplo)
+    # estivesse seguran do essa trava no momento exato do restart, o
+    # ALTER ficava esperando a trava liberar SEM NENHUM TETO — e como isso
+    # roda dentro do lifespan de startup, o processo nunca chegava a abrir
+    # a porta 8000 pra escutar: uvicorn preso pra sempre em "Waiting for
+    # application startup", nunca loga "Application startup complete",
+    # e o proxy do Node só via ECONNREFUSED (nada escutando ali) até
+    # alguém perceber e reiniciar manualmente. lock_timeout bounded: se
+    # não conseguir a trava em 5s, falha rápido e loga, em vez de travar
+    # pra sempre — melhor um restart automático do Railway (crashloop
+    # detectável) do que um processo morto-vivo que parece "online" mas
+    # nunca escuta porta nenhuma.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("SET lock_timeout = '5s'"))
+            _run_startup_migrations(conn)
+    except Exception:
+        logger.exception(
+            "Falha ao rodar as migracoes de startup (provavel disputa de trava com outra transacao) — "
+            "seguindo com a API mesmo assim, já que o schema quase certamente já está em dia de deploys anteriores."
+        )
+
+    yield
+
+
+def _run_startup_migrations(conn):
     # Conveniência para dev/scaffold: cria tabelas que ainda não existem.
     # Para evolução de schema em produção, use `alembic upgrade head` (ver README).
     Base.metadata.create_all(bind=engine)
@@ -27,7 +60,7 @@ async def lifespan(app: FastAPI):
     # vez: shopify_product_id era INTEGER (visto ao vivo estourando com IDs
     # reais de 17 dígitos do Shopify — 0 de 233 produtos gravados na primeira
     # tentativa contra uma loja real). Idempotente, não falha se já for BIGINT.
-    with engine.begin() as conn:
+    if True:  # noqa: mantém a indentação original do bloco (era um "with", ver lifespan acima) sem precisar reindentar tudo à mão
         conn.execute(text("ALTER TABLE products ALTER COLUMN shopify_product_id TYPE BIGINT"))
         # Coluna nova (Módulo 1.2 — separação por operação/país) numa tabela
         # que já existia com dado real: create_all não adiciona coluna em
@@ -173,8 +206,6 @@ async def lifespan(app: FastAPI):
                 """
             )
         )
-
-    yield
 
 
 app = FastAPI(title="ScoutX", version="0.1.0", lifespan=lifespan)
