@@ -4,7 +4,7 @@ const SUPPORT_WHATSAPP_NUMBER = '556199253506'
 // Mensagem já preenchida quando a pessoa clica — só precisa apertar
 // enviar. Identifica que veio do app (o atendente já sabe o contexto) sem
 // ser longa demais pra ler no celular.
-const SUPPORT_MESSAGE = 'Olá! Sou cliente do ScoutX e preciso de ajuda 🙂'
+const SUPPORT_MESSAGE = 'Olá! Sou cliente do ScoutX e preciso de ajuda.'
 
 function whatsappUrl(number, message) {
   return `https://wa.me/${number}?text=${encodeURIComponent(message)}`
