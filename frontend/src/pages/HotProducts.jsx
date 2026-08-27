@@ -8,6 +8,7 @@ import { DuplicateBadge, ScoreBadge, SignalChip, SupplierIdTag } from '../compon
 import LinkChip from '../components/LinkChip.jsx'
 import ProductThumb from '../components/ProductThumb.jsx'
 import RefreshButton from '../components/RefreshButton.jsx'
+import FilteringIndicator from '../components/FilteringIndicator.jsx'
 import { metaAdsLibrarySearchUrl } from '../utils/adLibrary.js'
 import { useOperation } from '../context/OperationContext.jsx'
 
@@ -49,6 +50,7 @@ export default function HotProducts() {
   const [total, setTotal] = useState(0)
   const [error, setError] = useState(null)
   const [searchInput, setSearchInput] = useState(q)
+  const [filtering, setFiltering] = useState(false)
 
   function fetchCompetitors() {
     return api.listCompetitors({ operation }).then(setCompetitors).catch(() => {})
@@ -66,6 +68,12 @@ export default function HotProducts() {
   }, [operation])
 
   function fetchHotProducts() {
+    // Revisão (achado ao vivo, 2026-08-27): trocar um filtro/ordenação
+    // mantinha a lista ANTIGA na tela, sem indicação nenhuma de que algo
+    // estava carregando, até a lista nova aparecer do nada — parecia
+    // travado. `filtering` liga um indicador pequeno perto do resultado,
+    // sem sumir com o conteúdo atual (evita a tela "piscar" pra vazio).
+    setFiltering(true)
     return api
       .listHotProducts({
         min_score: 56,
@@ -82,6 +90,7 @@ export default function HotProducts() {
         setTotal(total)
       })
       .catch((e) => setError(e.message))
+      .finally(() => setFiltering(false))
   }
 
   useEffect(() => {
@@ -143,7 +152,10 @@ export default function HotProducts() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold">Produtos Quentes{total > 0 ? ` (${total})` : ''}</h2>
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-xl font-semibold">Produtos Quentes{total > 0 ? ` (${total})` : ''}</h2>
+            <FilteringIndicator show={filtering} />
+          </div>
           <p className="text-sm text-[var(--text-muted)]">
             Score 56+ (Quente ou Escalando). Os dois sinais que mais pesam: há quanto tempo o anúncio do produto tá no
             ar (7d já é bom indício, 30d é quase certeza), e a quantidade de anúncios ativos do produto crescendo dia a

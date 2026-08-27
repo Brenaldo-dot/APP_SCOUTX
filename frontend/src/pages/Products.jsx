@@ -8,6 +8,7 @@ import { DuplicateBadge, ScalingBadge, SupplierIdTag } from '../components/Badge
 import ProductThumb from '../components/ProductThumb.jsx'
 import QuickPreview from '../components/QuickPreview.jsx'
 import RefreshButton from '../components/RefreshButton.jsx'
+import FilteringIndicator from '../components/FilteringIndicator.jsx'
 import { formatDate } from '../utils/date.js'
 import { metaAdsLibrarySearchUrl } from '../utils/adLibrary.js'
 import { useOperation } from '../context/OperationContext.jsx'
@@ -35,12 +36,19 @@ export default function Products() {
   const [previewProduct, setPreviewProduct] = useState(null)
   const [searchInput, setSearchInput] = useState(q)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [filtering, setFiltering] = useState(false)
 
   useEffect(() => {
     api.listCompetitors({ operation }).then(setCompetitors).catch(() => {})
   }, [operation, refreshKey])
 
   useEffect(() => {
+    // Revisão (achado ao vivo, 2026-08-27): trocar filtro/ordenação
+    // mantinha a lista ANTIGA na tela sem indicação nenhuma de que algo
+    // estava carregando, até a lista nova aparecer do nada — parecia
+    // travado. `filtering` liga um indicador pequeno, sem sumir com o
+    // conteúdo atual.
+    setFiltering(true)
     api
       .listProducts({
         competitor_id: competitorId || undefined,
@@ -56,6 +64,7 @@ export default function Products() {
         setTotal(total)
       })
       .catch((e) => setError(e.message))
+      .finally(() => setFiltering(false))
   }, [competitorId, operation, hotOnly, q, sort, page, refreshKey])
 
   // Busca com debounce — sem isso dispararia 1 request por letra digitada.
@@ -106,7 +115,10 @@ export default function Products() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold">Produtos</h2>
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-xl font-semibold">Produtos</h2>
+            <FilteringIndicator show={filtering} />
+          </div>
           <p className="text-sm text-[var(--text-muted)]">
             Todos os produtos ativos descobertos nas lojas monitoradas{total > 0 ? `, ${total} no total` : ''}
           </p>

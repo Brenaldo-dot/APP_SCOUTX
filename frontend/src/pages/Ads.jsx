@@ -8,6 +8,7 @@ import Select from '../components/Select.jsx'
 import LinkChip from '../components/LinkChip.jsx'
 import ProductThumb from '../components/ProductThumb.jsx'
 import RefreshButton from '../components/RefreshButton.jsx'
+import FilteringIndicator from '../components/FilteringIndicator.jsx'
 import { useOperation } from '../context/OperationContext.jsx'
 
 const RESCAN_POLL_MS = 6000
@@ -35,6 +36,7 @@ export default function Ads() {
   const [winningOnly, setWinningOnly] = useState(false)
   const [rescanning, setRescanning] = useState(false)
   const [rescanMessage, setRescanMessage] = useState(null)
+  const [filtering, setFiltering] = useState(false)
   const pollRef = useRef(null)
 
   function fetchCompetitors() {
@@ -47,6 +49,11 @@ export default function Ads() {
   }, [operation])
 
   function fetchAds() {
+    // Revisão (achado ao vivo, 2026-08-27): trocar filtro/ordenação
+    // mantinha a lista ANTIGA na tela sem indicação nenhuma de que algo
+    // estava carregando — parecia travado. `filtering` liga um indicador
+    // pequeno, sem sumir com o conteúdo atual.
+    setFiltering(true)
     return api
       .listAds({
         competitor_id: competitorId || undefined,
@@ -66,6 +73,7 @@ export default function Ads() {
         setError(e.message)
         return null
       })
+      .finally(() => setFiltering(false))
   }
 
   useEffect(() => {
@@ -125,7 +133,10 @@ export default function Ads() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold">Anúncios{total > 0 ? ` (${total})` : ''}</h2>
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-xl font-semibold">Anúncios{total > 0 ? ` (${total})` : ''}</h2>
+            <FilteringIndicator show={filtering} />
+          </div>
           <p className="text-sm text-[var(--text-muted)]">
             Encontrados na Meta Ads Library, no Google Ads Transparency Center e no TikTok Creative Center
           </p>

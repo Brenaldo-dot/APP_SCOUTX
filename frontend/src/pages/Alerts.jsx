@@ -10,6 +10,7 @@ import ProductThumb from '../components/ProductThumb.jsx'
 import PriceChangeRow from '../components/PriceChangeRow.jsx'
 import LedIcon from '../components/LedIcon.jsx'
 import RefreshButton from '../components/RefreshButton.jsx'
+import FilteringIndicator from '../components/FilteringIndicator.jsx'
 import { formatDateTime, formatRelativeTime, isRecent } from '../utils/date.js'
 import { readCategoryVisits, markCategoryVisited } from '../utils/alertsVisit.js'
 import { useOperation } from '../context/OperationContext.jsx'
@@ -61,6 +62,7 @@ export default function Alerts() {
   const [unreadCounts, setUnreadCounts] = useState(null)
   const [error, setError] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [filtering, setFiltering] = useState(false)
 
   useEffect(() => {
     api.getAlertCounts({ operation }).then(setCounts).catch(() => {})
@@ -76,6 +78,11 @@ export default function Alerts() {
   }, [operation, refreshKey])
 
   useEffect(() => {
+    // Revisão (achado ao vivo, 2026-08-27): trocar de categoria mantinha a
+    // lista ANTIGA na tela sem indicação nenhuma de que algo estava
+    // carregando — parecia travado. `filtering` liga um indicador
+    // pequeno, sem sumir com o conteúdo atual.
+    setFiltering(true)
     api
       .listAlerts({ operation, category: category || undefined, page, limit: PAGE_SIZE })
       .then(({ items, total }) => {
@@ -83,6 +90,7 @@ export default function Alerts() {
         setTotal(total)
       })
       .catch((e) => setError(e.message))
+      .finally(() => setFiltering(false))
   }, [operation, category, page, refreshKey])
 
   function selectCategory(key) {
@@ -126,7 +134,10 @@ export default function Alerts() {
       <div>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-xl font-semibold">Alertas</h2>
+            <div className="flex items-center gap-2.5">
+              <h2 className="text-xl font-semibold">Alertas</h2>
+              <FilteringIndicator show={filtering} />
+            </div>
             <p className="text-sm text-[var(--text-muted)]">
               Separado por assunto: fornecedor, anúncios, produto etc., cada um no seu canto, em vez de um fluxo só
               misturando tudo. Histórico completo, sempre: nada some por causa de outro alerta mais novo.
