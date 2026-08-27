@@ -9,6 +9,7 @@ import LinkChip from '../components/LinkChip.jsx'
 import ProductThumb from '../components/ProductThumb.jsx'
 import PriceChangeRow from '../components/PriceChangeRow.jsx'
 import LedIcon from '../components/LedIcon.jsx'
+import RefreshButton from '../components/RefreshButton.jsx'
 import { formatDateTime, formatRelativeTime, isRecent } from '../utils/date.js'
 import { readCategoryVisits, markCategoryVisited } from '../utils/alertsVisit.js'
 import { useOperation } from '../context/OperationContext.jsx'
@@ -59,10 +60,11 @@ export default function Alerts() {
   const [counts, setCounts] = useState(null)
   const [unreadCounts, setUnreadCounts] = useState(null)
   const [error, setError] = useState(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     api.getAlertCounts({ operation }).then(setCounts).catch(() => {})
-  }, [operation])
+  }, [operation, refreshKey])
 
   // Contagem de não lido por categoria — cada uma com seu próprio corte
   // (ver utils/alertsVisit.js). Só abrir a aba Alertas (visão "Todos") não
@@ -71,7 +73,7 @@ export default function Alerts() {
   useEffect(() => {
     const visits = readCategoryVisits(operation)
     api.getAlertCounts({ operation, since_map: JSON.stringify(visits) }).then(setUnreadCounts).catch(() => {})
-  }, [operation])
+  }, [operation, refreshKey])
 
   useEffect(() => {
     api
@@ -81,7 +83,7 @@ export default function Alerts() {
         setTotal(total)
       })
       .catch((e) => setError(e.message))
-  }, [operation, category, page])
+  }, [operation, category, page, refreshKey])
 
   function selectCategory(key) {
     // Standard não navega pra categoria nenhuma (botão fica desabilitado,
@@ -122,11 +124,16 @@ export default function Alerts() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold">Alertas</h2>
-        <p className="text-sm text-[var(--text-muted)]">
-          Separado por assunto: fornecedor, anúncios, produto etc., cada um no seu canto, em vez de um fluxo só
-          misturando tudo. Histórico completo, sempre: nada some por causa de outro alerta mais novo.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-semibold">Alertas</h2>
+            <p className="text-sm text-[var(--text-muted)]">
+              Separado por assunto: fornecedor, anúncios, produto etc., cada um no seu canto, em vez de um fluxo só
+              misturando tudo. Histórico completo, sempre: nada some por causa de outro alerta mais novo.
+            </p>
+          </div>
+          <RefreshButton onRefresh={() => setRefreshKey((k) => k + 1)} />
+        </div>
         {isStandardPlan && (
           <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-400">
             🔒 Plano Standard mostra só as 5 notificações mais recentes, tudo junto. Categorias separadas (Produto,

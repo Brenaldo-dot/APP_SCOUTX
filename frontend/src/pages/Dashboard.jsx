@@ -12,6 +12,7 @@ import ActivityHeatmap from '../components/ActivityHeatmap.jsx'
 import DateRangeFilter from '../components/DateRangeFilter.jsx'
 import Select from '../components/Select.jsx'
 import LinkChip from '../components/LinkChip.jsx'
+import RefreshButton from '../components/RefreshButton.jsx'
 import ProductThumb from '../components/ProductThumb.jsx'
 import PriceChangeRow from '../components/PriceChangeRow.jsx'
 import { formatDateTime, formatRelativeTime, isRecent } from '../utils/date.js'
@@ -50,6 +51,9 @@ export default function Dashboard() {
   const [alertsByCategory, setAlertsByCategory] = useState(null)
   const [discordConfigured, setDiscordConfigured] = useState(null)
   const [unreadCount, setUnreadCount] = useState(0)
+  // Incrementado pelo botão "Atualizar" — só existe pra forçar os efeitos
+  // abaixo a rodar de novo sem precisar dar F5 na página inteira.
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     setSummary(null)
@@ -60,13 +64,13 @@ export default function Dashboard() {
     api.getActivityHeatmap({ operation, weeks: 12 }).then(setHeatmap).catch(() => {})
     api.getAlertsByCompetitor({ operation, days: 30 }).then(setAlertsByCompetitor).catch(() => {})
     api.getAlertsByCategory({ operation, days: 30 }).then(setAlertsByCategory).catch(() => {})
-  }, [operation])
+  }, [operation, refreshKey])
 
   // Nudge do Discord: só checa 1x (não depende de operação) — se não tiver
   // webhook salvo em Minha Conta, o usuário só sabe de alerta abrindo o app.
   useEffect(() => {
     api.getDiscordWebhook().then((r) => setDiscordConfigured(!!r.discord_webhook_url)).catch(() => {})
-  }, [])
+  }, [refreshKey])
 
   // "N alertas novos desde sua última visita" — só LÊ a marca (não
   // sobrescreve): quem marca como visto é a própria aba Alertas, ao ser
@@ -75,7 +79,7 @@ export default function Dashboard() {
   useEffect(() => {
     const visits = readCategoryVisits(operation)
     api.getAlertCounts({ operation, since_map: JSON.stringify(visits) }).then((r) => setUnreadCount(r.total)).catch(() => {})
-  }, [operation])
+  }, [operation, refreshKey])
 
   if (error) return <EmptyState title="Não deu pra carregar o dashboard" subtitle={error} />
   if (!summary) return <p className="text-sm text-[var(--text-muted)]">Carregando…</p>
@@ -86,6 +90,9 @@ export default function Dashboard() {
     <div className="space-y-8">
       <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-6">
         <div className="pointer-events-none absolute left-1/2 top-1/2 h-64 w-64 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-500/20 blur-3xl" />
+        <div className="absolute right-4 top-4">
+          <RefreshButton onRefresh={() => setRefreshKey((k) => k + 1)} />
+        </div>
         <div className="relative flex flex-col items-center text-center">
           {/* Pastilha LED maior, só pra esse momento de destaque — mesma
               classe do menu (nav-icon-active), tamanho grande porque aqui é

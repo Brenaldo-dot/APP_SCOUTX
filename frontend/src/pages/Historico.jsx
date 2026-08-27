@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { rawApi } from '../api/rawClient.js'
 import { formatDateTime } from '../utils/date.js'
+import RefreshButton from '../components/RefreshButton.jsx'
 
 export default function Historico() {
   const [users, setUsers] = useState(null)
@@ -8,11 +9,12 @@ export default function Historico() {
   const [selected, setSelected] = useState(null)
   const [rows, setRows] = useState(null)
 
+  function fetchUsers() {
+    return rawApi.listHistoryUsers().then(setUsers).catch((e) => setError(e.message))
+  }
+
   useEffect(() => {
-    rawApi
-      .listHistoryUsers()
-      .then(setUsers)
-      .catch((e) => setError(e.message))
+    fetchUsers()
   }, [])
 
   function selectUser(u) {
@@ -21,11 +23,18 @@ export default function Historico() {
     rawApi.getHistoryDetail(u.id).then(setRows)
   }
 
+  function refreshAll() {
+    return Promise.all([fetchUsers(), selected ? rawApi.getHistoryDetail(selected.id).then(setRows) : null])
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold">Histórico de buscas</h2>
-        <p className="text-sm text-[var(--text-muted)]">Quem buscou o quê nas ferramentas de Buscar Fornecedor e Espionar Loja.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold">Histórico de buscas</h2>
+          <p className="text-sm text-[var(--text-muted)]">Quem buscou o quê nas ferramentas de Buscar Fornecedor e Espionar Loja.</p>
+        </div>
+        <RefreshButton onRefresh={refreshAll} />
       </div>
 
       {error && <p className="text-sm text-red-400">{error}</p>}

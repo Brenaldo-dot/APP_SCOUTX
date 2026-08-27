@@ -7,6 +7,7 @@ import Pagination from '../components/Pagination.jsx'
 import { ClassificationBadge, DuplicateBadge, ScalingBadge, StatusBadge, SupplierIdTag } from '../components/Badges.jsx'
 import QuickPreview from '../components/QuickPreview.jsx'
 import LinkChip from '../components/LinkChip.jsx'
+import RefreshButton from '../components/RefreshButton.jsx'
 
 const PAGE_SIZE = 100
 
@@ -45,12 +46,13 @@ export default function CompetitorDetail() {
   const [page, setPage] = useState(1)
   const [error, setError] = useState(null)
   const [previewProduct, setPreviewProduct] = useState(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     setCompetitor(null)
     setPage(1)
     api.getCompetitor(id).then(setCompetitor).catch((e) => setError(e.message))
-  }, [id])
+  }, [id, refreshKey])
 
   useEffect(() => {
     api
@@ -60,7 +62,7 @@ export default function CompetitorDetail() {
         setTotal(total)
       })
       .catch((e) => setError(e.message))
-  }, [id, page])
+  }, [id, page, refreshKey])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const country = competitor ? OPERATION_COUNTRY[competitor.operation] || 'CO' : 'CO'
@@ -71,9 +73,12 @@ export default function CompetitorDetail() {
   return (
     <div className="space-y-8">
       <div>
-        <Link to="/concorrentes" className="text-sm text-brand-600 hover:underline">
-          ← Concorrentes
-        </Link>
+        <div className="flex items-start justify-between gap-3">
+          <Link to="/concorrentes" className="text-sm text-brand-600 hover:underline">
+            ← Concorrentes
+          </Link>
+          <RefreshButton onRefresh={() => setRefreshKey((k) => k + 1)} />
+        </div>
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <h2 className="text-xl font-semibold">{competitor.name}</h2>
           <StatusBadge status={competitor.status} />

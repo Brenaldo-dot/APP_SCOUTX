@@ -7,6 +7,7 @@ import Select from '../components/Select.jsx'
 import { DuplicateBadge, ScoreBadge, SignalChip, SupplierIdTag } from '../components/Badges.jsx'
 import LinkChip from '../components/LinkChip.jsx'
 import ProductThumb from '../components/ProductThumb.jsx'
+import RefreshButton from '../components/RefreshButton.jsx'
 import { metaAdsLibrarySearchUrl } from '../utils/adLibrary.js'
 import { useOperation } from '../context/OperationContext.jsx'
 
@@ -49,8 +50,12 @@ export default function HotProducts() {
   const [error, setError] = useState(null)
   const [searchInput, setSearchInput] = useState(q)
 
+  function fetchCompetitors() {
+    return api.listCompetitors({ operation }).then(setCompetitors).catch(() => {})
+  }
+
   useEffect(() => {
-    api.listCompetitors({ operation }).then(setCompetitors).catch(() => {})
+    fetchCompetitors()
     // Troca de operação sempre volta pra página 1 — senão a pessoa pode
     // ficar presa numa página vazia (ex: página 3 na Colômbia não existe
     // pro México, que tem menos produto quente).
@@ -60,8 +65,8 @@ export default function HotProducts() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [operation])
 
-  useEffect(() => {
-    api
+  function fetchHotProducts() {
+    return api
       .listHotProducts({
         min_score: 56,
         operation,
@@ -77,6 +82,11 @@ export default function HotProducts() {
         setTotal(total)
       })
       .catch((e) => setError(e.message))
+  }
+
+  useEffect(() => {
+    fetchHotProducts()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [operation, sort, hasSupplier, growingOnly, q, page])
 
   // Busca com debounce — mesmo padrão de Products.jsx, sem isso dispararia 1
@@ -131,14 +141,17 @@ export default function HotProducts() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold">Produtos Quentes{total > 0 ? ` (${total})` : ''}</h2>
-        <p className="text-sm text-[var(--text-muted)]">
-          Score 56+ (Quente ou Escalando). Os dois sinais que mais pesam: há quanto tempo o anúncio do produto tá no
-          ar (7d já é bom indício, 30d é quase certeza), e a quantidade de anúncios ativos do produto crescendo dia a
-          dia. Produto recém-visto começa em 0: todo sinal baseado em histórico só aparece depois de alguns dias de
-          monitoramento.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold">Produtos Quentes{total > 0 ? ` (${total})` : ''}</h2>
+          <p className="text-sm text-[var(--text-muted)]">
+            Score 56+ (Quente ou Escalando). Os dois sinais que mais pesam: há quanto tempo o anúncio do produto tá no
+            ar (7d já é bom indício, 30d é quase certeza), e a quantidade de anúncios ativos do produto crescendo dia a
+            dia. Produto recém-visto começa em 0: todo sinal baseado em histórico só aparece depois de alguns dias de
+            monitoramento.
+          </p>
+        </div>
+        <RefreshButton onRefresh={() => Promise.all([fetchHotProducts(), fetchCompetitors()])} />
       </div>
 
       <div className="flex flex-wrap items-end gap-4 rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-4">

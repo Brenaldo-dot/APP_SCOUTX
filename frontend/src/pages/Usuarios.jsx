@@ -20,6 +20,7 @@ import { rawApi } from '../api/rawClient.js'
 import { api } from '../api/client.js'
 import Select from '../components/Select.jsx'
 import StatCard from '../components/StatCard.jsx'
+import RefreshButton from '../components/RefreshButton.jsx'
 import { operationLabel } from '../context/OperationContext.jsx'
 import { formatDateTime, formatRelativeTime } from '../utils/date.js'
 
@@ -209,22 +210,12 @@ export default function Usuarios() {
   }
 
   function load() {
-    rawApi
-      .listUsers()
-      .then(setUsers)
-      .catch((e) => setError(e.message))
-    api
-      .getCompetitorSummaryByUser()
-      .then(setCompetitorSummary)
-      .catch(() => setCompetitorSummary([]))
-    rawApi
-      .listAuditLog()
-      .then(setAuditLog)
-      .catch(() => setAuditLog([]))
-    rawApi
-      .listOrganizations()
-      .then(setOrganizations)
-      .catch(() => setOrganizations([]))
+    return Promise.all([
+      rawApi.listUsers().then(setUsers).catch((e) => setError(e.message)),
+      api.getCompetitorSummaryByUser().then(setCompetitorSummary).catch(() => setCompetitorSummary([])),
+      rawApi.listAuditLog().then(setAuditLog).catch(() => setAuditLog([])),
+      rawApi.listOrganizations().then(setOrganizations).catch(() => setOrganizations([])),
+    ])
   }
 
   useEffect(load, [])
@@ -391,9 +382,12 @@ export default function Usuarios() {
 
   return (
     <div className="max-w-6xl space-y-8">
-      <div>
-        <h2 className="text-xl font-semibold">Usuários</h2>
-        <p className="text-sm text-[var(--text-muted)]">Quem tem acesso ao ScoutX e o que cada um pode fazer.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold">Usuários</h2>
+          <p className="text-sm text-[var(--text-muted)]">Quem tem acesso ao ScoutX e o que cada um pode fazer.</p>
+        </div>
+        <RefreshButton onRefresh={load} />
       </div>
 
       {error && <p className="text-sm text-red-400">{error}</p>}

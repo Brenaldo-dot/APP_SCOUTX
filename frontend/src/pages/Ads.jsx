@@ -7,6 +7,7 @@ import Pagination from '../components/Pagination.jsx'
 import Select from '../components/Select.jsx'
 import LinkChip from '../components/LinkChip.jsx'
 import ProductThumb from '../components/ProductThumb.jsx'
+import RefreshButton from '../components/RefreshButton.jsx'
 import { useOperation } from '../context/OperationContext.jsx'
 
 const RESCAN_POLL_MS = 6000
@@ -36,8 +37,13 @@ export default function Ads() {
   const [rescanMessage, setRescanMessage] = useState(null)
   const pollRef = useRef(null)
 
+  function fetchCompetitors() {
+    return api.listCompetitors({ operation }).then(setCompetitors).catch(() => {})
+  }
+
   useEffect(() => {
-    api.listCompetitors({ operation }).then(setCompetitors).catch(() => {})
+    fetchCompetitors()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [operation])
 
   function fetchAds() {
@@ -117,11 +123,14 @@ export default function Ads() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold">Anúncios{total > 0 ? ` (${total})` : ''}</h2>
-        <p className="text-sm text-[var(--text-muted)]">
-          Encontrados na Meta Ads Library, no Google Ads Transparency Center e no TikTok Creative Center
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold">Anúncios{total > 0 ? ` (${total})` : ''}</h2>
+          <p className="text-sm text-[var(--text-muted)]">
+            Encontrados na Meta Ads Library, no Google Ads Transparency Center e no TikTok Creative Center
+          </p>
+        </div>
+        <RefreshButton onRefresh={() => Promise.all([fetchAds(), fetchCompetitors()])} />
       </div>
 
       <div className="flex flex-wrap items-end gap-4">

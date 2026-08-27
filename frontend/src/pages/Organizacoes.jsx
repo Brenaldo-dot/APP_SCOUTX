@@ -5,6 +5,7 @@ import { rawApi } from '../api/rawClient.js'
 import { api } from '../api/client.js'
 import Select from '../components/Select.jsx'
 import StatCard from '../components/StatCard.jsx'
+import RefreshButton from '../components/RefreshButton.jsx'
 import { formatDateTime } from '../utils/date.js'
 
 // value = chave interna, gravada em organizations.plan (não muda com o
@@ -61,8 +62,10 @@ export default function Organizacoes() {
   const [deletingId, setDeletingId] = useState(null)
 
   function load() {
-    rawApi.listOrganizations().then(setOrgs).catch((e) => setError(e.message))
-    rawApi.listUsers().then(setUsers).catch(() => setUsers([]))
+    return Promise.all([
+      rawApi.listOrganizations().then(setOrgs).catch((e) => setError(e.message)),
+      rawApi.listUsers().then(setUsers).catch(() => setUsers([])),
+    ])
   }
 
   useEffect(load, [])
@@ -180,13 +183,16 @@ export default function Organizacoes() {
 
   return (
     <div className="max-w-6xl space-y-8">
-      <div>
-        <h2 className="text-xl font-semibold">Organizações</h2>
-        <p className="text-sm text-[var(--text-muted)]">
-          Cada organização é uma assinatura: plano, ciclo de cobrança e validade compartilhados por todos os
-          usuários dela. Ativação ainda é manual: crie a organização aqui depois de fechar a venda, depois crie os
-          usuários dela na aba Usuários.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold">Organizações</h2>
+          <p className="text-sm text-[var(--text-muted)]">
+            Cada organização é uma assinatura: plano, ciclo de cobrança e validade compartilhados por todos os
+            usuários dela. Ativação ainda é manual: crie a organização aqui depois de fechar a venda, depois crie os
+            usuários dela na aba Usuários.
+          </p>
+        </div>
+        <RefreshButton onRefresh={load} />
       </div>
 
       {error && <p className="text-sm text-red-400">{error}</p>}

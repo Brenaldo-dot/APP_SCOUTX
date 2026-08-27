@@ -4,6 +4,7 @@ import { Search, X } from 'lucide-react'
 import { api } from '../api/client.js'
 import EmptyState from '../components/EmptyState.jsx'
 import Select from '../components/Select.jsx'
+import RefreshButton from '../components/RefreshButton.jsx'
 import { ClassificationBadge, StatusBadge } from '../components/Badges.jsx'
 import { formatDateTime } from '../utils/date.js'
 import { operationLabel, useOperation } from '../context/OperationContext.jsx'
@@ -106,7 +107,7 @@ export default function Competitors() {
   )
 
   function load() {
-    api
+    return api
       .listCompetitors({ operation, as_user_id: asUserId || undefined })
       .then((list) => {
         setCompetitors(list)
@@ -171,11 +172,14 @@ export default function Competitors() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-xl font-semibold">Concorrentes</h2>
-        <p className="text-sm text-[var(--text-muted)]">
-          Lojas Shopify monitoradas diariamente, operação {operationLabel(operation)}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold">Concorrentes</h2>
+          <p className="text-sm text-[var(--text-muted)]">
+            Lojas Shopify monitoradas diariamente, operação {operationLabel(operation)}
+          </p>
+        </div>
+        <RefreshButton onRefresh={load} />
       </div>
 
       {asUserId && (
