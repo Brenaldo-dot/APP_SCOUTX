@@ -19,6 +19,7 @@ import Historico from './pages/Historico.jsx'
 import Usuarios from './pages/Usuarios.jsx'
 import Organizacoes from './pages/Organizacoes.jsx'
 import Conta from './pages/Conta.jsx'
+import Suporte from './pages/Suporte.jsx'
 
 // Quem não tem acesso ao núcleo do ScoutX não deve cair numa tela de "sem
 // permissão" logo depois de logar — manda direto pra ferramenta que ela
@@ -61,6 +62,11 @@ export default function App() {
                 da PESSOA, não da ferramenta, então qualquer usuário logado
                 acessa, sem RouteGuard de permissão. */}
             <Route path="/conta" element={<Conta />} />
+
+            {/* Suporte (WhatsApp): mesma lógica de Minha Conta — não é
+                permissão de ferramenta, qualquer pessoa logada precisa
+                conseguir pedir ajuda. */}
+            <Route path="/suporte" element={<Suporte />} />
 
             <Route element={<RouteGuard allow={(me) => me.isAdmin} />}>
               <Route path="/ferramentas/historico" element={<Historico />} />

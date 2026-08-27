@@ -14,6 +14,7 @@ import {
   LogOut,
   Megaphone,
   Menu,
+  MessageCircle,
   Moon,
   Package,
   Radar,
@@ -437,6 +438,17 @@ export default function Layout() {
                   <>
                     <NavIcon Icon={Building2} active={isActive} />
                     {!effectiveCollapsed && t('nav.organizacoes')}
+                  </>
+                )}
+              </NavLink>
+            )}
+
+            {me && (
+              <NavLink to="/suporte" title={effectiveCollapsed ? t('nav.suporte') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
+                {({ isActive }) => (
+                  <>
+                    <NavIcon Icon={MessageCircle} active={isActive} />
+                    {!effectiveCollapsed && t('nav.suporte')}
                   </>
                 )}
               </NavLink>
