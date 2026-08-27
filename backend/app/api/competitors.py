@@ -2,6 +2,7 @@
 
 import logging
 import threading
+import time
 
 from contextlib import contextmanager
 
@@ -119,6 +120,10 @@ def _assert_competitor_limit_allowed(
         )
 
 
+_LOCK_POLL_INTERVAL_S = 0.2
+_LOCK_MAX_WAIT_S = 8.0
+
+
 @contextmanager
 def _org_limit_lock(db: Session, current_user: CurrentUser):
     """Achado em auditoria de segurança (2026-08-26): `_assert_competitor_limit_allowed`
@@ -131,12 +136,35 @@ def _org_limit_lock(db: Session, current_user: CurrentUser):
     conjunto de usuários) — outras organizações continuam cadastrando em
     paralelo sem ninguém esperar a vez de ninguém. Sessão (não transação):
     fica de propósito destravada só no fim do `with`, não no primeiro commit
-    (register_competitor faz mais de um commit dentro do bloco protegido)."""
+    (register_competitor faz mais de um commit dentro do bloco protegido).
+
+    Achado ao vivo (2026-08-27, derrubou o app inteiro pra TODO MUNDO,
+    não só quem estava criando concorrente): `pg_advisory_lock` puro
+    BLOQUEIA indefinidamente se o dono anterior nunca soltar (crash a meio
+    caminho antes do `finally`, requisição travada em outro lugar
+    segurando a trava, etc.) — e como o FastAPI roda handler síncrono
+    numa threadpool de tamanho fixo, poucas requisições presas esperando
+    essa trava pra sempre já bastam pra esgotar TODAS as threads
+    disponíveis, travando até pedido que nem passa perto dessa trava.
+    Trocado por `pg_try_advisory_lock` num loop com teto de espera — se
+    não conseguir a vaga em alguns segundos, desiste e devolve erro claro
+    em vez de travar a thread (e o serviço inteiro) pro resto da vida."""
     if current_user.org_max_competitors is None or not current_user.org_member_ids:
         yield
         return
     lock_key = min(current_user.org_member_ids)
-    db.execute(text("SELECT pg_advisory_lock(:key)"), {"key": lock_key})
+    waited = 0.0
+    while True:
+        acquired = db.execute(text("SELECT pg_try_advisory_lock(:key)"), {"key": lock_key}).scalar()
+        if acquired:
+            break
+        if waited >= _LOCK_MAX_WAIT_S:
+            raise HTTPException(
+                503,
+                "Muita gente mexendo na sua organização ao mesmo tempo, tenta de novo em alguns segundos.",
+            )
+        time.sleep(_LOCK_POLL_INTERVAL_S)
+        waited += _LOCK_POLL_INTERVAL_S
     try:
         yield
     finally:
