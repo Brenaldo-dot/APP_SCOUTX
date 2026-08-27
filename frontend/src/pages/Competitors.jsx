@@ -97,6 +97,7 @@ export default function Competitors() {
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
+  const [deleteModal, setDeleteModal] = useState(null)
   const pollRef = useRef(null)
 
   const visibleCompetitors = useMemo(
@@ -149,16 +150,20 @@ export default function Competitors() {
     }
   }
 
-  async function handleDelete(c) {
-    if (!window.confirm(`Excluir "${c.name}" (${c.domain})? Isso apaga todo o histórico de produtos, anúncios e alertas dessa loja, não dá pra desfazer.`)) {
-      return
-    }
+  function handleDelete(c) {
+    setDeleteModal({ competitor: c, error: null })
+  }
+
+  async function submitDelete() {
+    if (!deleteModal) return
+    const c = deleteModal.competitor
     setDeletingId(c.id)
     try {
       await api.deleteCompetitor(c.id)
+      setDeleteModal(null)
       load()
     } catch (err) {
-      setError(err.message)
+      setDeleteModal({ ...deleteModal, error: err.message || 'Não foi possível excluir.' })
     } finally {
       setDeletingId(null)
     }
@@ -353,6 +358,45 @@ export default function Competitors() {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {deleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDeleteModal(null)}>
+          <div className="w-full max-w-sm rounded-2xl bg-[var(--bg-surface)] p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2.5">
+              <CompetitorLogo domain={deleteModal.competitor.domain} name={deleteModal.competitor.name} />
+              <div className="min-w-0">
+                <h3 className="truncate text-sm font-semibold text-[var(--text-primary)]">
+                  Excluir "{deleteModal.competitor.name}"?
+                </h3>
+                <p className="truncate text-xs text-[var(--text-muted)]">{deleteModal.competitor.domain}</p>
+              </div>
+            </div>
+            <p className="mt-3 text-xs text-[var(--text-muted)]">
+              Isso apaga todo o histórico de produtos, anúncios e alertas dessa loja. Não dá pra desfazer.
+            </p>
+            {deleteModal.error && (
+              <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                {deleteModal.error}
+              </p>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setDeleteModal(null)}
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--text-tertiary)] hover:bg-[var(--hover-surface)]"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={submitDelete}
+                disabled={deletingId === deleteModal.competitor.id}
+                className="rounded-full bg-red-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+              >
+                {deletingId === deleteModal.competitor.id ? 'Excluindo…' : 'Excluir loja'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

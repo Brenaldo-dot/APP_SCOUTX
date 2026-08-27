@@ -146,8 +146,8 @@ export default function EspionarLoja() {
         </div>
         <p className="mt-3 text-xs text-[var(--text-muted)]">
           Só usa dados públicos da loja (catálogo, coleções, datas). Não existe forma pública de saber vendas/faturamento
-          reais. Pra pegar o ID Fornecedor certo, a ferramenta busca a página de cada produto individualmente, então
-          lojas grandes demoram mais. Quando o produto realmente não tem barcode/SKU cadastrado, o campo fica em "—".
+          reais. Pra achar o fornecedor certo de cada produto, a ferramenta busca a página dele individualmente, então
+          lojas grandes demoram mais. Quando o produto realmente não tem fornecedor cadastrado, o campo fica em "—".
         </p>
         {error && (
           <div className="mt-4 rounded-lg border border-red-900 bg-red-950/40 px-3 py-2.5 text-sm text-red-400">{error}</div>

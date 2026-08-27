@@ -198,7 +198,7 @@ export function SupplierIdTag({ supplierId }) {
   return (
     <span
       className="rounded bg-emerald-500/15 px-1.5 py-0.5 font-mono text-xs text-emerald-400"
-      title="Código do fornecedor (barcode/SKU) confirmado"
+      title="Código de fornecedor confirmado"
     >
       {supplierId}
     </span>

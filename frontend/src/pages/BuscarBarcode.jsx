@@ -66,7 +66,7 @@ export default function BuscarBarcode() {
     <div className="max-w-xl space-y-6">
       <div>
         <h2 className="text-xl font-semibold">Buscar Fornecedor</h2>
-        <p className="text-sm text-[var(--text-muted)]">Cole a URL de um produto concorrente pra achar o fornecedor/ID dele.</p>
+        <p className="text-sm text-[var(--text-muted)]">Cole a URL de um produto concorrente pra achar o fornecedor dele.</p>
       </div>
 
       <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
@@ -92,7 +92,7 @@ export default function BuscarBarcode() {
           <div className="mt-4 rounded-lg border border-emerald-900 bg-emerald-950/30 px-3 py-2.5">
             <p className="text-sm font-medium text-emerald-400">Encontrado: {result.value}</p>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
-              {result.source === 'sku' ? 'Barcode vazio, exibindo SKU' : 'Barcode'}
+              Código do fornecedor
               {result.productTitle ? ` · ${result.productTitle}` : ''}
             </p>
             <button

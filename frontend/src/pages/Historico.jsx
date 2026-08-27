@@ -25,7 +25,7 @@ export default function Historico() {
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold">Histórico de buscas</h2>
-        <p className="text-sm text-[var(--text-muted)]">Quem buscou o quê nas ferramentas de Barcode e Espionar Loja.</p>
+        <p className="text-sm text-[var(--text-muted)]">Quem buscou o quê nas ferramentas de Buscar Fornecedor e Espionar Loja.</p>
       </div>
 
       {error && <p className="text-sm text-red-400">{error}</p>}
