@@ -1,8 +1,5 @@
-// Número do WhatsApp do suporte — PLACEHOLDER, precisa trocar pelo número
-// real (formato: código do país + DDD + número, só dígitos, sem espaço/
-// traço/parênteses, ex: "5511987654321" pro Brasil). Sem isso o botão abre
-// o WhatsApp Web/app mas não acha nenhuma conversa de verdade.
-const SUPPORT_WHATSAPP_NUMBER = '5500000000000'
+// Número do WhatsApp do suporte (+55 61 9925-3506).
+const SUPPORT_WHATSAPP_NUMBER = '556199253506'
 
 // Mensagem já preenchida quando a pessoa clica — só precisa apertar
 // enviar. Identifica que veio do app (o atendente já sabe o contexto) sem
