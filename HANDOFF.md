@@ -106,6 +106,25 @@ do `mega-minerador` depois de um deploy, confira com `file backend/*.sh`
 (tem que dizer só "UTF-8 text executable", sem "with CRLF line
 terminators") antes de gastar tempo procurando o bug no código Python.
 
+**TERCEIRA ARMADILHA (derrubou o app INTEIRO pra todo mundo, 2026-08-27):**
+uma trava de banco (`pg_advisory_lock`, adicionada numa auditoria de
+segurança pra impedir corrida no limite de concorrentes do plano) bloqueia
+INDEFINIDAMENTE se quem pegou a trava nunca soltar. Como o FastAPI roda
+handler síncrono numa threadpool de tamanho fixo, poucas requisições presas
+nessa trava pra sempre já bastam pra esgotar TODAS as threads disponíveis —
+travando até pedido que nem passa perto dessa trava (foi assim que um bug
+de trava-por-organização virou "o app inteiro não carrega nada pra
+ninguém"). Sintoma: Node reportando `erro no proxy do minerador` com
+`HeadersTimeoutError`/`UND_ERR_HEADERS_TIMEOUT` repetido, CPU do
+`mega-minerador` em ~0% (parado esperando, não sobrecarregado — se tivesse
+CPU alta seria outro problema, tipo o job serial de snapshot descrito na
+seção de escala abaixo). Corrigido (ver `web/api/competitors.py`
+`_org_limit_lock`, trocado por `pg_try_advisory_lock` com teto de espera de
+8s) — mas se QUALQUER trava de banco nova for adicionada no futuro, sempre
+com teto de espera, nunca bloqueio puro. Remediação imediata pra esse tipo
+de sintoma: `railway redeploy --service mega-minerador --yes` (reinicia o
+container, Postgres solta trava de sessão sozinho quando a conexão cai).
+
 Importante: **não existe interpretador Python neste ambiente de dev** — toda
 mudança no `backend/` (Python) é verificada só por revisão de código
 cuidadosa + deploy real + log limpo, nunca rodada localmente. O Node
