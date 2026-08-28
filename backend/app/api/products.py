@@ -179,7 +179,12 @@ def list_hot_products(
     página 2 não bate com o que a página 1 já mostrou.
     """
     target_user = resolve_target_user(current_user, as_user_id)
-    latest_by_product: dict[int, ProductScore] = {}
+    # Achado ao vivo (2026-08-28, "próximo" na paginação travando 2-4s):
+    # mesmo padrão já corrigido em dashboard.py — buscava TODO o histórico de
+    # ProductScore (uma linha por produto, por dia, pra sempre) só pra achar
+    # a mais recente de cada produto em Python. DISTINCT ON deixa o Postgres
+    # escolher só a linha mais recente por produto, sem trazer o histórico
+    # inteiro pela rede.
     rows_query = (
         db.query(ProductScore)
         .join(Product, Product.id == ProductScore.product_id)
@@ -189,12 +194,12 @@ def list_hot_products(
     )
     if operation:
         rows_query = rows_query.filter(Competitor.operation == operation)
-    rows = rows_query.order_by(ProductScore.product_id, ProductScore.date.desc()).all()
-    for row in rows:
-        latest_by_product.setdefault(row.product_id, row)
+    rows = (
+        rows_query.distinct(ProductScore.product_id).order_by(ProductScore.product_id, ProductScore.date.desc()).all()
+    )
 
     qualifying_all = sorted(
-        (row for row in latest_by_product.values() if row.score >= min_score),
+        (row for row in rows if row.score >= min_score),
         key=lambda row: row.score,
         reverse=True,
     )
