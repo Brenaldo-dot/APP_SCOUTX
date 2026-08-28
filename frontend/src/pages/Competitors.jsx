@@ -97,6 +97,8 @@ export default function Competitors() {
   const [form, setForm] = useState({ domain: '', name: '', niche: '' })
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState(null)
+  const [formSuccess, setFormSuccess] = useState(null)
+  const successTimeoutRef = useRef(null)
   const [deletingId, setDeletingId] = useState(null)
   const [deleteModal, setDeleteModal] = useState(null)
   const pollRef = useRef(null)
@@ -142,6 +144,7 @@ export default function Competitors() {
     if (!form.domain.trim()) return
     setSubmitting(true)
     setFormError(null)
+    setFormSuccess(null)
     try {
       await api.createCompetitor({
         domain: form.domain.trim(),
@@ -152,12 +155,17 @@ export default function Competitors() {
       })
       setForm({ domain: '', name: '', niche: '' })
       load()
+      setFormSuccess('Concorrente adicionado com sucesso!')
+      clearTimeout(successTimeoutRef.current)
+      successTimeoutRef.current = setTimeout(() => setFormSuccess(null), 5000)
     } catch (err) {
       setFormError(err.message)
     } finally {
       setSubmitting(false)
     }
   }
+
+  useEffect(() => () => clearTimeout(successTimeoutRef.current), [])
 
   function handleDelete(c) {
     setDeleteModal({ competitor: c, error: null })
@@ -248,6 +256,7 @@ export default function Competitors() {
             {submitting ? 'Adicionando…' : '+ Adicionar concorrente'}
           </button>
           {formError && <p className="w-full text-sm text-red-600">{formError}</p>}
+          {formSuccess && <p className="w-full text-sm text-green-600">✓ {formSuccess}</p>}
         </form>
       )}
 
