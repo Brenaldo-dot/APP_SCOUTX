@@ -104,8 +104,14 @@ def get_summary(
     # porque o sinal que fecha os 80 pontos sozinho (anúncios crescendo) é
     # raro; a maioria dos produtos quentes chega no 56-79 (ver
     # models/competitor.py:hot_products, mesmo fix aplicado lá).
+    # Mesmo achado ao vivo de /score-distribution (2026-08-28, app lento
+    # pra todo mundo): trazia TODO o histórico de ProductScore (uma linha
+    # por produto, POR DIA, pra sempre) só pra achar a mais recente de cada
+    # produto em Python — ficava mais lento a cada dia que passava. DISTINCT
+    # ON deixa o Postgres escolher só a linha mais recente por produto,
+    # O(produtos ativos) em vez de O(histórico acumulado).
     score_rows_query = (
-        db.query(ProductScore.product_id, ProductScore.date, ProductScore.score)
+        db.query(ProductScore.product_id, ProductScore.score)
         .join(Product, Product.id == ProductScore.product_id)
         .join(Competitor, Competitor.id == Product.competitor_id)
         .join(CompetitorTracker, CompetitorTracker.competitor_id == Competitor.id)
@@ -113,12 +119,10 @@ def get_summary(
     )
     if operation:
         score_rows_query = score_rows_query.filter(Competitor.operation == operation)
-    latest_score_by_product: dict[int, tuple[date_, int]] = {}
-    for product_id, score_date, score in score_rows_query.all():
-        prev = latest_score_by_product.get(product_id)
-        if prev is None or score_date > prev[0]:
-            latest_score_by_product[product_id] = (score_date, score)
-    hot_products = sum(1 for _, score in latest_score_by_product.values() if score >= 56)
+    latest_scores = (
+        score_rows_query.distinct(ProductScore.product_id).order_by(ProductScore.product_id, ProductScore.date.desc()).all()
+    )
+    hot_products = sum(1 for _, score in latest_scores if score >= 56)
 
     alerts_last_24h = alerts_query.filter(Alert.created_at >= since).count()
     recent_alerts = (
@@ -442,8 +446,20 @@ def score_distribution(
     score mais recente de cada produto (mesma lógica de /api/products/hot).
     """
     target_user = resolve_target_user(current_user, as_user_id)
+    # Achado ao vivo (2026-08-28, app lento pra todo mundo): antes essa
+    # query trazia TODAS as linhas de ProductScore de todo o histórico
+    # (uma por produto, POR DIA, pra sempre — a tabela só cresce, sem
+    # limpeza nenhuma ainda, ver HANDOFF.md) e reduzia pra "só a mais
+    # recente por produto" em Python. Isso ficava mais lento a cada dia
+    # que passava, sem ninguém perceber até o histórico acumular o
+    # suficiente pra doer (medido ao vivo: 1.3s numa conta com alguns
+    # meses de dado, contra <100ms do resto do Dashboard). DISTINCT ON já
+    # é o padrão usado noutro lugar do código pra esse mesmo problema (ver
+    # main.py) — deixa o PRÓPRIO Postgres escolher só a linha mais recente
+    # de cada produto, sem trazer o histórico inteiro pela rede: O(produtos
+    # ativos), não O(linhas de histórico já acumuladas).
     query = (
-        db.query(ProductScore)
+        db.query(ProductScore.product_id, ProductScore.score)
         .join(Product, Product.id == ProductScore.product_id)
         .join(Competitor, Competitor.id == Product.competitor_id)
         .join(CompetitorTracker, CompetitorTracker.competitor_id == Competitor.id)
@@ -454,12 +470,10 @@ def score_distribution(
     elif operation:
         query = query.filter(Competitor.operation == operation)
 
-    latest_by_product: dict[int, int] = {}
-    for row in query.order_by(ProductScore.product_id, ProductScore.date.desc()).all():
-        latest_by_product.setdefault(row.product_id, row.score)
+    rows = query.distinct(ProductScore.product_id).order_by(ProductScore.product_id, ProductScore.date.desc()).all()
 
     buckets = {"Frio": 0, "Morno": 0, "Quente": 0, "Escalando": 0}
-    for score in latest_by_product.values():
+    for _product_id, score in rows:
         buckets[score_label(score)] += 1
 
     return [{"label": label, "count": count} for label, count in buckets.items()]
