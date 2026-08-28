@@ -102,6 +102,7 @@ export default function Competitors() {
   const [deletingId, setDeletingId] = useState(null)
   const [deleteModal, setDeleteModal] = useState(null)
   const pollRef = useRef(null)
+  const requestIdRef = useRef(0)
 
   const visibleCompetitors = useMemo(
     () => (competitors ? sortCompetitors(filterCompetitors(competitors, search), sort) : []),
@@ -117,9 +118,21 @@ export default function Competitors() {
     // só tivesse concorrente em "México", a lista vinha vazia mesmo com
     // dado de verdade cadastrado. Auditoria deve mostrar TODOS os países
     // dessa pessoa, não filtrar pelo que o admin está olhando no momento.
+    //
+    // BUG corrigido (achado ao vivo, 2026-08-28, "voltei do PC parado, tava
+    // no seletor Colômbia mas os números eram do México"): sem trava de
+    // request, se `operation` mudasse rápido (troca manual ou o app se
+    // reajustando sozinho) e a resposta da operação ANTIGA chegasse depois
+    // da nova (rede mais lenta, sem nem precisar de erro), ela sobrescrevia
+    // os dados certos. requestIdRef garante que só a resposta da chamada
+    // MAIS RECENTE (seja do efeito, do botão Atualizar, ou do polling de
+    // "checking" acima) pode atualizar a tela — qualquer uma que chegue
+    // atrasada é ignorada.
+    const requestId = ++requestIdRef.current
     return api
       .listCompetitors({ operation: asUserId ? undefined : operation, as_user_id: asUserId || undefined })
       .then((list) => {
+        if (requestId !== requestIdRef.current) return
         setCompetitors(list)
         // Enquanto tiver concorrente "checking" (verificação + raio-x
         // rodando em background — ver tasks/onboarding.py), continua
@@ -130,7 +143,7 @@ export default function Competitors() {
           pollRef.current = setTimeout(load, 6000)
         }
       })
-      .catch((e) => setError(e.message))
+      .catch((e) => requestId === requestIdRef.current && setError(e.message))
   }
 
   useEffect(() => {

@@ -89,14 +89,45 @@ export default function Dashboard() {
   const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
+    // Achado ao vivo (2026-08-28): sem essa guarda, se a operação mudasse
+    // rápido (troca manual, ou o app se reajustando sozinho depois de um
+    // tempo parado) e a resposta da operação ANTIGA chegasse depois da
+    // nova (rede mais lenta por qualquer motivo, nem precisa de erro), ela
+    // sobrescrevia os dados certos com os de outro país — o seletor lá em
+    // cima já mostrava "Colômbia" certinho, mas os números embaixo (ex:
+    // "Concorrentes ativos") continuavam sendo os do México. `cancelled`
+    // ignora qualquer resposta que chegue depois que a operação já mudou de
+    // novo, então só a busca mais recente pode atualizar a tela.
+    let cancelled = false
     setSummary(null)
     setChartCompetitorId('')
-    api.getDashboardSummary({ operation }).then(setSummary).catch((e) => setError(e.message))
-    api.listCompetitors({ operation }).then(setCompetitors).catch(() => {})
-    api.getDashboardHighlights({ operation }).then(setHighlights).catch(() => {})
-    api.getActivityHeatmap({ operation, weeks: 12 }).then(setHeatmap).catch(() => {})
-    api.getAlertsByCompetitor({ operation, days: 30 }).then(setAlertsByCompetitor).catch(() => {})
-    api.getAlertsByCategory({ operation, days: 30 }).then(setAlertsByCategory).catch(() => {})
+    api
+      .getDashboardSummary({ operation })
+      .then((data) => !cancelled && setSummary(data))
+      .catch((e) => !cancelled && setError(e.message))
+    api
+      .listCompetitors({ operation })
+      .then((data) => !cancelled && setCompetitors(data))
+      .catch(() => {})
+    api
+      .getDashboardHighlights({ operation })
+      .then((data) => !cancelled && setHighlights(data))
+      .catch(() => {})
+    api
+      .getActivityHeatmap({ operation, weeks: 12 })
+      .then((data) => !cancelled && setHeatmap(data))
+      .catch(() => {})
+    api
+      .getAlertsByCompetitor({ operation, days: 30 })
+      .then((data) => !cancelled && setAlertsByCompetitor(data))
+      .catch(() => {})
+    api
+      .getAlertsByCategory({ operation, days: 30 })
+      .then((data) => !cancelled && setAlertsByCategory(data))
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [operation, refreshKey])
 
   // Nudge do Discord: só checa 1x (não depende de operação) — se não tiver

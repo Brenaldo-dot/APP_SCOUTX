@@ -64,8 +64,19 @@ export default function Alerts() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [filtering, setFiltering] = useState(false)
 
+  // `cancelled` nos três efeitos abaixo (achado ao vivo, 2026-08-28, mesmo
+  // bug do Dashboard): sem essa trava, se a operação mudasse rápido e a
+  // resposta da operação ANTIGA chegasse depois da nova, ela sobrescrevia
+  // os números/lista certos com os de outro país.
   useEffect(() => {
-    api.getAlertCounts({ operation }).then(setCounts).catch(() => {})
+    let cancelled = false
+    api
+      .getAlertCounts({ operation })
+      .then((data) => !cancelled && setCounts(data))
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [operation, refreshKey])
 
   // Contagem de não lido por categoria — cada uma com seu próprio corte
@@ -73,8 +84,15 @@ export default function Alerts() {
   // marca nada como lido; isso só acontece ao clicar numa categoria de
   // verdade, em selectCategory abaixo.
   useEffect(() => {
+    let cancelled = false
     const visits = readCategoryVisits(operation)
-    api.getAlertCounts({ operation, since_map: JSON.stringify(visits) }).then(setUnreadCounts).catch(() => {})
+    api
+      .getAlertCounts({ operation, since_map: JSON.stringify(visits) })
+      .then((data) => !cancelled && setUnreadCounts(data))
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [operation, refreshKey])
 
   useEffect(() => {
@@ -82,15 +100,20 @@ export default function Alerts() {
     // lista ANTIGA na tela sem indicação nenhuma de que algo estava
     // carregando — parecia travado. `filtering` liga um indicador
     // pequeno, sem sumir com o conteúdo atual.
+    let cancelled = false
     setFiltering(true)
     api
       .listAlerts({ operation, category: category || undefined, page, limit: PAGE_SIZE })
       .then(({ items, total }) => {
+        if (cancelled) return
         setAlerts(items)
         setTotal(total)
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setFiltering(false))
+      .catch((e) => !cancelled && setError(e.message))
+      .finally(() => !cancelled && setFiltering(false))
+    return () => {
+      cancelled = true
+    }
   }, [operation, category, page, refreshKey])
 
   function selectCategory(key) {

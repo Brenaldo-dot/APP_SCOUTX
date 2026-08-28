@@ -48,6 +48,12 @@ export default function Products() {
     // estava carregando, até a lista nova aparecer do nada — parecia
     // travado. `filtering` liga um indicador pequeno, sem sumir com o
     // conteúdo atual.
+    //
+    // `cancelled` (achado ao vivo, 2026-08-28, mesmo bug do Dashboard):
+    // sem essa trava, se `operation` mudasse rápido e a resposta da
+    // operação ANTIGA chegasse depois da nova, ela sobrescrevia a lista
+    // certa com produtos do país errado.
+    let cancelled = false
     setFiltering(true)
     api
       .listProducts({
@@ -60,11 +66,15 @@ export default function Products() {
         limit: PAGE_SIZE,
       })
       .then(({ items, total }) => {
+        if (cancelled) return
         setProducts(items)
         setTotal(total)
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setFiltering(false))
+      .catch((e) => !cancelled && setError(e.message))
+      .finally(() => !cancelled && setFiltering(false))
+    return () => {
+      cancelled = true
+    }
   }, [competitorId, operation, hotOnly, q, sort, page, refreshKey])
 
   // Busca com debounce — sem isso dispararia 1 request por letra digitada.

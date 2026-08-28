@@ -38,6 +38,7 @@ export default function Ads() {
   const [rescanMessage, setRescanMessage] = useState(null)
   const [filtering, setFiltering] = useState(false)
   const pollRef = useRef(null)
+  const requestIdRef = useRef(0)
 
   function fetchCompetitors() {
     return api.listCompetitors({ operation }).then(setCompetitors).catch(() => {})
@@ -53,6 +54,12 @@ export default function Ads() {
     // mantinha a lista ANTIGA na tela sem indicação nenhuma de que algo
     // estava carregando — parecia travado. `filtering` liga um indicador
     // pequeno, sem sumir com o conteúdo atual.
+    //
+    // requestIdRef (achado ao vivo, 2026-08-28, mesmo bug do Dashboard):
+    // sem essa trava, se a operação mudasse rápido e a resposta da
+    // operação ANTIGA chegasse depois da nova, ela sobrescrevia a lista
+    // certa com anúncios de outro país.
+    const requestId = ++requestIdRef.current
     setFiltering(true)
     return api
       .listAds({
@@ -65,15 +72,17 @@ export default function Ads() {
         limit: PAGE_SIZE,
       })
       .then(({ items, total }) => {
+        if (requestId !== requestIdRef.current) return null
         setAds(items)
         setTotal(total)
         return items
       })
       .catch((e) => {
+        if (requestId !== requestIdRef.current) return null
         setError(e.message)
         return null
       })
-      .finally(() => setFiltering(false))
+      .finally(() => requestId === requestIdRef.current && setFiltering(false))
   }
 
   useEffect(() => {
