@@ -31,15 +31,37 @@ const MADRUGADA_JOKES = [
   (name) => `A cidade dorme, mas o painel não${name} ⚡`,
 ]
 
+const MANHA_JOKES = [
+  (name) => `Bom dia${name}! ☀️`,
+  (name) => `Acordou já de olho no painel${name}? ☀️`,
+  (name) => `Café na mão, concorrente no radar${name} ☕`,
+  (name) => `Bom dia${name}! Bora ver quem mexeu ontem 👀`,
+]
+
+const TARDE_JOKES = [
+  (name) => `Boa tarde${name}, hora de trabalhar! ⚡`,
+  (name) => `Café da tarde analisando o concorrente${name}? ☕`,
+  (name) => `Boa tarde${name}! Bora ver as novidades 👀`,
+  (name) => `Tarde produtiva de olho na concorrência${name} ⚡`,
+]
+
+const NOITE_JOKES = [
+  (name) => `Boa noite${name}! 🌆`,
+  (name) => `Fechando o dia de olho no concorrente${name}? 🌆`,
+  (name) => `Boa noite${name}! Última espiada antes de descansar 👀`,
+  (name) => `Noite chegando, painel ainda ligado${name} 🌆`,
+]
+
+function pickJoke(pool, name) {
+  return pool[Math.floor(Math.random() * pool.length)](name)
+}
+
 function greetingFor(hour, firstName) {
   const name = firstName ? `, ${firstName}` : ''
-  if (hour < 5) {
-    const pick = MADRUGADA_JOKES[Math.floor(Math.random() * MADRUGADA_JOKES.length)]
-    return { text: pick(name), Icon: Moon }
-  }
-  if (hour < 12) return { text: `Bom dia${name}! ☀️`, Icon: Sun }
-  if (hour < 18) return { text: `Boa tarde${name}, hora de trabalhar! ⚡`, Icon: Zap }
-  return { text: `Boa noite${name}! 🌆`, Icon: MoonStar }
+  if (hour < 5) return { text: pickJoke(MADRUGADA_JOKES, name), Icon: Moon }
+  if (hour < 12) return { text: pickJoke(MANHA_JOKES, name), Icon: Sun }
+  if (hour < 18) return { text: pickJoke(TARDE_JOKES, name), Icon: Zap }
+  return { text: pickJoke(NOITE_JOKES, name), Icon: MoonStar }
 }
 
 const TODAY_LABEL = new Date().toLocaleDateString('pt-BR', {
