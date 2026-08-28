@@ -25,7 +25,6 @@ import { useAuth } from '../context/AuthContext.jsx'
 // tem várias brincadeiras que trocam a cada acesso (pedido do usuário: nada
 // fixo repetindo sempre a mesma frase); resto do dia varia o tom sem exagerar.
 const MADRUGADA_JOKES = [
-  (name) => `Acordado até agora${name}? 🌙`,
   (name) => `Essa hora ainda de olho nos concorrentes${name}? 🕵️`,
   (name) => `Madrugada é quando a concorrência menos espera${name} 😄`,
   (name) => `Café ou determinação${name}? 🌙`,
