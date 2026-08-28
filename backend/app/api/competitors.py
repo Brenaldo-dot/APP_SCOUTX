@@ -1,16 +1,19 @@
 """Módulo 1 — gerenciamento de concorrentes."""
 
 import logging
+import secrets
 import threading
 import time
 
 from contextlib import contextmanager
 
+import redis
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, or_, text
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import CurrentUser, get_current_user, resolve_target_user
+from app.config import get_settings
 from app.database import get_db
 from app.models import Alert, Competitor, CompetitorStatus, CompetitorTracker, Product
 from app.schemas.competitor import CompetitorCreate, CompetitorDetailOut, CompetitorOut, CompetitorUpdate
@@ -122,40 +125,64 @@ def _assert_competitor_limit_allowed(
 
 _LOCK_POLL_INTERVAL_S = 0.2
 _LOCK_MAX_WAIT_S = 8.0
+_LOCK_TTL_S = 30
+
+_redis_client = redis.from_url(get_settings().redis_url, decode_responses=True)
+
+_RELEASE_LOCK_SCRIPT = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+else
+    return 0
+end
+"""
 
 
 @contextmanager
-def _org_limit_lock(db: Session, current_user: CurrentUser):
+def _org_limit_lock(current_user: CurrentUser):
     """Achado em auditoria de segurança (2026-08-26): `_assert_competitor_limit_allowed`
     é ler-depois-escrever sem trava nenhuma — duas requisições concorrentes
     (2 abas, ou um script disparando rápido) podiam ler a MESMA contagem
     "1 vaga livre", as duas passarem na checagem, e a organização acabar com
-    mais concorrentes do que o plano permite. `pg_advisory_lock` serializa
-    só quem tenta mexer na MESMA organização (a chave é o menor id de membro
-    da org — estável e único por org já que cada organização tem seu próprio
-    conjunto de usuários) — outras organizações continuam cadastrando em
-    paralelo sem ninguém esperar a vez de ninguém. Sessão (não transação):
-    fica de propósito destravada só no fim do `with`, não no primeiro commit
-    (register_competitor faz mais de um commit dentro do bloco protegido).
+    mais concorrentes do que o plano permite. A trava serializa só quem tenta
+    mexer na MESMA organização (a chave é o menor id de membro da org —
+    estável e único por org já que cada organização tem seu próprio conjunto
+    de usuários) — outras organizações continuam cadastrando em paralelo sem
+    ninguém esperar a vez de ninguém.
 
-    Achado ao vivo (2026-08-27, derrubou o app inteiro pra TODO MUNDO,
-    não só quem estava criando concorrente): `pg_advisory_lock` puro
-    BLOQUEIA indefinidamente se o dono anterior nunca soltar (crash a meio
-    caminho antes do `finally`, requisição travada em outro lugar
-    segurando a trava, etc.) — e como o FastAPI roda handler síncrono
-    numa threadpool de tamanho fixo, poucas requisições presas esperando
-    essa trava pra sempre já bastam pra esgotar TODAS as threads
-    disponíveis, travando até pedido que nem passa perto dessa trava.
-    Trocado por `pg_try_advisory_lock` num loop com teto de espera — se
-    não conseguir a vaga em alguns segundos, desiste e devolve erro claro
-    em vez de travar a thread (e o serviço inteiro) pro resto da vida."""
+    Achado ao vivo (2026-08-27, derrubou o app inteiro pra TODO MUNDO, não só
+    quem estava criando concorrente): a versão original usava
+    `pg_advisory_lock` do Postgres, que BLOQUEIA indefinidamente se o dono
+    anterior nunca soltar — e como o FastAPI roda handler síncrono numa
+    threadpool de tamanho fixo, poucas requisições presas pra sempre já
+    bastavam pra esgotar TODAS as threads, travando até pedido que nem
+    passava perto dessa trava. Trocado então por `pg_try_advisory_lock` num
+    loop com teto de espera.
+
+    Achado ao vivo de novo (2026-08-28, org do Augusto travada pra sempre
+    nesse mesmo erro): `pg_advisory_lock`/`pg_try_advisory_lock` são travas
+    de SESSÃO do Postgres — presas à conexão física de verdade no servidor,
+    não à transação. Esse serviço fala com o Postgres através do PgBouncer
+    em modo "transaction pooling" (ver DATABASE_URL — aponta pro host
+    `pgbouncer`, não direto pro Postgres): o PgBouncer pode trocar a conexão
+    física por baixo dos panos a cada commit. Como `register_competitor` faz
+    mais de um commit dentro do bloco protegido, dava (e vai sempre dar,
+    inevitavelmente) pra pegar a trava numa conexão física e depois soltar
+    numa OUTRA — o soltar vira um no-op silencioso, e a trava original fica
+    presa pra sempre naquela conexão até o PgBouncer decidir reciclá-la,
+    derrubando com um 503 QUALQUER pedido futuro dessa mesma organização.
+    Trocado pra uma trava no Redis (SET NX com expiração de _LOCK_TTL_S
+    segundos): sem afinidade de conexão nenhuma, e mesmo que o processo caia
+    no meio do caminho sem soltar, a trava expira sozinha — nunca mais fica
+    presa pra sempre."""
     if current_user.org_max_competitors is None or not current_user.org_member_ids:
         yield
         return
-    lock_key = min(current_user.org_member_ids)
+    lock_key = f"org-competitor-lock:{min(current_user.org_member_ids)}"
+    token = secrets.token_hex(16)
     waited = 0.0
     while True:
-        acquired = db.execute(text("SELECT pg_try_advisory_lock(:key)"), {"key": lock_key}).scalar()
+        acquired = _redis_client.set(lock_key, token, nx=True, ex=_LOCK_TTL_S)
         if acquired:
             break
         if waited >= _LOCK_MAX_WAIT_S:
@@ -168,7 +195,7 @@ def _org_limit_lock(db: Session, current_user: CurrentUser):
     try:
         yield
     finally:
-        db.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": lock_key})
+        _redis_client.eval(_RELEASE_LOCK_SCRIPT, 1, lock_key, token)
 
 
 @router.post("", response_model=CompetitorOut, status_code=201)
@@ -199,7 +226,7 @@ async def create_competitor(
     # limite tem que ser checado contra esse país de verdade, não contra o
     # que o formulário mandou, senão adicionar uma loja que a própria
     # organização já rastreia consumiria uma vaga de país à toa.
-    with _org_limit_lock(db, current_user):
+    with _org_limit_lock(current_user):
         existing_competitor = db.query(Competitor).filter(Competitor.domain == domain).first()
         effective_operation = existing_competitor.operation if existing_competitor else payload.operation
         _assert_operation_allowed(db, current_user, effective_operation)
