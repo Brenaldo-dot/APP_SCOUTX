@@ -107,8 +107,16 @@ export default function Competitors() {
   )
 
   function load() {
+    // BUG corrigido (achado ao vivo, 2026-08-28): no modo auditoria
+    // (as_user_id, "Ver concorrentes" na aba Usuários), filtrar por
+    // `operation` usava o país que está selecionado no seletor do PRÓPRIO
+    // ADMIN — sem relação nenhuma com os países que o usuário auditado de
+    // fato usa. Se o admin estivesse vendo "Colômbia" e a pessoa auditada
+    // só tivesse concorrente em "México", a lista vinha vazia mesmo com
+    // dado de verdade cadastrado. Auditoria deve mostrar TODOS os países
+    // dessa pessoa, não filtrar pelo que o admin está olhando no momento.
     return api
-      .listCompetitors({ operation, as_user_id: asUserId || undefined })
+      .listCompetitors({ operation: asUserId ? undefined : operation, as_user_id: asUserId || undefined })
       .then((list) => {
         setCompetitors(list)
         // Enquanto tiver concorrente "checking" (verificação + raio-x
