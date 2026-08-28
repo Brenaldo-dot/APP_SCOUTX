@@ -8,6 +8,7 @@ import { ClassificationBadge, DuplicateBadge, ScalingBadge, StatusBadge, Supplie
 import QuickPreview from '../components/QuickPreview.jsx'
 import LinkChip from '../components/LinkChip.jsx'
 import RefreshButton from '../components/RefreshButton.jsx'
+import ProductThumb from '../components/ProductThumb.jsx'
 
 const PAGE_SIZE = 100
 
@@ -176,7 +177,12 @@ export default function CompetitorDetail() {
                   const url = `https://${competitor.domain}/products/${p.handle}`
                   return (
                     <tr key={p.id} className="hover:bg-[var(--bg-surface-2)]">
-                      <td className="px-4 py-3 font-medium text-[var(--text-primary)]">{p.title}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <ProductThumb src={p.main_image_url} title={p.title} />
+                          <span className="font-medium text-[var(--text-primary)]">{p.title}</span>
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-[var(--text-muted)]">{p.vendor || '—'}</td>
                       <td className="px-4 py-3">
                         <SupplierIdTag supplierId={p.supplier_id} />
