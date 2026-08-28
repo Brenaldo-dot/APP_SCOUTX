@@ -22,10 +22,22 @@ import { useAuth } from '../context/AuthContext.jsx'
 
 // Frase + ícone por faixa de horário — deixa o Dashboard menos "painel de
 // dados frio" e mais alguém falando com você (pedido do usuário). Madrugada
-// brinca com quem ainda tá acordado; resto do dia varia o tom sem exagerar.
+// tem várias brincadeiras que trocam a cada acesso (pedido do usuário: nada
+// fixo repetindo sempre a mesma frase); resto do dia varia o tom sem exagerar.
+const MADRUGADA_JOKES = [
+  (name) => `Acordado até agora${name}? 🌙`,
+  (name) => `Essa hora ainda de olho nos concorrentes${name}? 🕵️`,
+  (name) => `Madrugada é quando a concorrência menos espera${name} 😄`,
+  (name) => `Café ou determinação${name}? 🌙`,
+  (name) => `A cidade dorme, mas o painel não${name} ⚡`,
+]
+
 function greetingFor(hour, firstName) {
   const name = firstName ? `, ${firstName}` : ''
-  if (hour < 5) return { text: `Acordado até agora${name}? 🌙`, Icon: Moon }
+  if (hour < 5) {
+    const pick = MADRUGADA_JOKES[Math.floor(Math.random() * MADRUGADA_JOKES.length)]
+    return { text: pick(name), Icon: Moon }
+  }
   if (hour < 12) return { text: `Bom dia${name}! ☀️`, Icon: Sun }
   if (hour < 18) return { text: `Boa tarde${name}, hora de trabalhar! ⚡`, Icon: Zap }
   return { text: `Boa noite${name}! 🌆`, Icon: MoonStar }
