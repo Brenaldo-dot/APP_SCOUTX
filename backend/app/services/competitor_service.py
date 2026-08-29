@@ -11,6 +11,7 @@ from app.models import (
     CompetitorStatus,
     CompetitorTracker,
     Product,
+    ProtectedStore,
     StoreStructureSnapshot,
     TechStack,
 )
@@ -72,6 +73,12 @@ async def register_competitor(
     trabalho de background. `is_new_tracker` é False só no reenvio idempotente
     do MESMO usuário cadastrando de novo um domínio que ele mesmo já tinha."""
     domain = normalize_domain(domain)
+    # Loja protegida (pedido do admin, 2026-08-29, ver models/competitor.py:
+    # ProtectedStore) — nunca chega a ser raspada nem uma vez: pula direto
+    # pro status NOT_SHOPIFY (mesmo selo "Não é Shopify" que já existe pra
+    # loja que de fato não é Shopify) em vez de CHECKING, então
+    # run_onboarding_xray nunca tenta verificar/raspar de verdade.
+    is_protected = db.query(ProtectedStore).filter(ProtectedStore.domain == domain).first() is not None
 
     competitor = db.query(Competitor).filter(Competitor.domain == domain).first()
     is_new_competitor = competitor is None
@@ -88,7 +95,7 @@ async def register_competitor(
             niche=niche,
             tags=tags or [],
             operation=operation,
-            status=CompetitorStatus.CHECKING,
+            status=CompetitorStatus.NOT_SHOPIFY if is_protected else CompetitorStatus.CHECKING,
         )
         db.add(competitor)
         try:

@@ -130,3 +130,28 @@ class StoreStructureSnapshot(Base):
     classification: Mapped[ScaleClassification] = mapped_column(Enum(ScaleClassification, native_enum=False))
 
     competitor: Mapped["Competitor"] = relationship(back_populates="structure_snapshots")
+
+
+class ProtectedStore(Base):
+    """Lojas que o app nunca deve vasculhar (pedido do admin, 2026-08-29) —
+    ex: a própria loja da equipe, um parceiro, ou qualquer domínio que pediu
+    pra ficar de fora. Cadastrado aqui, o domínio NUNCA chega a ser raspado
+    nem uma vez: `register_competitor` intercepta ANTES da verificação real
+    (services/competitor_service.py) e marca direto como NOT_SHOPIFY — o
+    mesmo status/selo que já existe pra loja que não é Shopify de verdade,
+    reaproveitado de propósito (nenhuma tela precisa saber a diferença: pra
+    quem cadastra, o resultado visual é idêntico ao de uma loja que
+    simplesmente não deu pra minerar). Os jobs recorrentes (daily_snapshot,
+    weekly_xray, ads_monitor) já só rodam em `status == ACTIVE`, então nada
+    mais precisa mudar pra loja que já estava sendo rastreada ANTES de virar
+    protegida — proteger também derruba o status dela pra NOT_SHOPIFY (ver
+    api/competitors.py:add_protected_store), parando qualquer captura futura."""
+
+    __tablename__ = "protected_stores"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    domain: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # id de app_users (banco do Node) — mesmo padrão de CompetitorTracker.user_id.
+    added_by_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

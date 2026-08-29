@@ -6,6 +6,7 @@ from app.models.competitor import (
     Competitor,
     CompetitorStatus,
     CompetitorTracker,
+    ProtectedStore,
     ScaleClassification,
     StoreStructureSnapshot,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "Competitor",
     "CompetitorStatus",
     "CompetitorTracker",
+    "ProtectedStore",
     "ScaleClassification",
     "StoreStructureSnapshot",
     "EcosystemEntry",

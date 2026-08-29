@@ -141,6 +141,10 @@ export default function Usuarios() {
   const [trackerResults, setTrackerResults] = useState(null)
   const [auditLog, setAuditLog] = useState(null)
   const [organizations, setOrganizations] = useState(null)
+  const [protectedStores, setProtectedStores] = useState(null)
+  const [protectForm, setProtectForm] = useState({ domain: '', note: '' })
+  const [protecting, setProtecting] = useState(false)
+  const [protectMsg, setProtectMsg] = useState(null)
   const [searchParams, setSearchParams] = useSearchParams()
   const orgFilter = searchParams.get('org') || ''
 
@@ -215,7 +219,34 @@ export default function Usuarios() {
       api.getCompetitorSummaryByUser().then(setCompetitorSummary).catch(() => setCompetitorSummary([])),
       rawApi.listAuditLog().then(setAuditLog).catch(() => setAuditLog([])),
       rawApi.listOrganizations().then(setOrganizations).catch(() => setOrganizations([])),
+      api.listProtectedStores().then(setProtectedStores).catch(() => setProtectedStores([])),
     ])
+  }
+
+  async function handleAddProtectedStore(e) {
+    e.preventDefault()
+    if (!protectForm.domain.trim()) return
+    setProtecting(true)
+    setProtectMsg(null)
+    try {
+      await api.addProtectedStore({ domain: protectForm.domain.trim(), note: protectForm.note.trim() || null })
+      setProtectForm({ domain: '', note: '' })
+      setProtectMsg({ type: 'success', text: 'Loja protegida — nunca vai ser vasculhada pelo app.' })
+      load()
+    } catch (err) {
+      setProtectMsg({ type: 'error', text: err.message || 'Não foi possível proteger essa loja.' })
+    } finally {
+      setProtecting(false)
+    }
+  }
+
+  async function handleRemoveProtectedStore(id) {
+    try {
+      await api.removeProtectedStore(id)
+      load()
+    } catch (err) {
+      setProtectMsg({ type: 'error', text: err.message || 'Não foi possível remover a proteção.' })
+    }
   }
 
   // BUG CRÍTICO corrigido (achado ao vivo, 2026-08-27 — deixava a aba
@@ -429,6 +460,68 @@ export default function Usuarios() {
             <p className={`mt-3 text-sm ${claimMsg.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
               {claimMsg.text}
             </p>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
+          <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Loja protegida</h3>
+          <p className="mb-3.5 text-sm text-[var(--text-tertiary)]">
+            Domínios aqui nunca são vasculhados pelo app — nenhum usuário consegue ver preço, produto, anúncio ou
+            qualquer outro dado dessa loja, não importa quem tente cadastrar.
+          </p>
+          <form onSubmit={handleAddProtectedStore} className="flex flex-wrap items-end gap-3">
+            <div className="flex flex-1 flex-col gap-1">
+              <label className="text-xs font-medium text-[var(--text-muted)]">Domínio</label>
+              <input
+                required
+                placeholder="lojaexemplo.com"
+                value={protectForm.domain}
+                onChange={(e) => setProtectForm({ ...protectForm, domain: e.target.value })}
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
+              />
+            </div>
+            <div className="flex flex-1 flex-col gap-1">
+              <label className="text-xs font-medium text-[var(--text-muted)]">Motivo (opcional)</label>
+              <input
+                placeholder="Ex: loja da nossa equipe"
+                value={protectForm.note}
+                onChange={(e) => setProtectForm({ ...protectForm, note: e.target.value })}
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={protecting}
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+            >
+              {protecting ? 'Protegendo…' : 'Proteger loja'}
+            </button>
+          </form>
+          {protectMsg && (
+            <p className={`mt-3 text-sm ${protectMsg.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
+              {protectMsg.text}
+            </p>
+          )}
+          {protectedStores?.length > 0 && (
+            <ul className="mt-4 space-y-2">
+              {protectedStores.map((p) => (
+                <li
+                  key={p.id}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-[var(--text-primary)]">{p.domain}</p>
+                    {p.note && <p className="truncate text-xs text-[var(--text-muted)]">{p.note}</p>}
+                  </div>
+                  <button
+                    onClick={() => handleRemoveProtectedStore(p.id)}
+                    className="shrink-0 text-xs font-medium text-red-400 hover:underline"
+                  >
+                    Remover
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
 

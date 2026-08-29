@@ -60,3 +60,18 @@ class TechStackOut(BaseModel):
 
 class CompetitorDetailOut(CompetitorOut):
     tech_stack: list[TechStackOut] = []
+
+
+class ProtectedStoreCreate(BaseModel):
+    domain: str
+    note: str | None = None
+
+
+class ProtectedStoreOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    domain: str
+    note: str | None
+    added_by_user_id: int
+    created_at: datetime

@@ -53,6 +53,9 @@ export const api = {
   searchCompetitorTrackers: (q) => request(`/api/competitors/search-trackers?${buildQuery({ q })}`),
   getOperationsUsage: (userIds) => request(`/api/competitors/operations-usage?${buildQuery({ user_ids: userIds.join(',') })}`),
   claimOrphanedCompetitors: () => request('/api/competitors/claim-orphaned', { method: 'POST' }),
+  listProtectedStores: () => request('/api/competitors/protected-stores'),
+  addProtectedStore: (data) => request('/api/competitors/protected-stores', { method: 'POST', body: JSON.stringify(data) }),
+  removeProtectedStore: (id) => request(`/api/competitors/protected-stores/${id}`, { method: 'DELETE' }),
 
   listProducts: (params = {}) => request(`/api/products?${buildQuery(params)}`),
   listHotProducts: (params = {}) => request(`/api/products/hot?${buildQuery(params)}`),

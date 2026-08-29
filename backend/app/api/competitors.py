@@ -15,8 +15,15 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.deps import CurrentUser, get_current_user, resolve_target_user
 from app.config import get_settings
 from app.database import get_db
-from app.models import Alert, Competitor, CompetitorStatus, CompetitorTracker, Product
-from app.schemas.competitor import CompetitorCreate, CompetitorDetailOut, CompetitorOut, CompetitorUpdate
+from app.models import Alert, Competitor, CompetitorStatus, CompetitorTracker, Product, ProtectedStore
+from app.schemas.competitor import (
+    CompetitorCreate,
+    CompetitorDetailOut,
+    CompetitorOut,
+    CompetitorUpdate,
+    ProtectedStoreCreate,
+    ProtectedStoreOut,
+)
 from app.services.competitor_service import normalize_domain, register_competitor
 from app.tasks.ads_monitor import run_ads_monitor_one
 from app.tasks.daily_snapshot import run_daily_snapshot_one
@@ -235,10 +242,12 @@ async def create_competitor(
         competitor, is_new_competitor, _is_new_tracker = await register_competitor(
             db, payload.domain, payload.name, payload.niche, payload.tags, current_user.id, payload.operation
         )
-    # Só dispara o raio-x se o DOMÍNIO em si é inédito — se outro usuário já
-    # rastreia (dado reaproveitado, ver register_competitor), não faz sentido
-    # raspar tudo de novo só porque mais alguém passou a rastrear também.
-    if is_new_competitor:
+    # Só dispara o raio-x se o DOMÍNIO em si é inédito e a loja não é
+    # protegida (register_competitor já cria protegida direto em
+    # NOT_SHOPIFY, sem passar por CHECKING) — se outro usuário já rastreia
+    # (dado reaproveitado, ver register_competitor), não faz sentido raspar
+    # tudo de novo só porque mais alguém passou a rastrear também.
+    if is_new_competitor and competitor.status == CompetitorStatus.CHECKING:
         _enqueue(run_onboarding_xray, competitor.id, label=f"o raio-x inicial de {competitor.domain}")
     return competitor
 
@@ -436,6 +445,53 @@ def claim_orphaned(db: Session = Depends(get_db), current_user: CurrentUser = De
         db.add(CompetitorTracker(competitor_id=competitor_id, user_id=current_user.id))
     db.commit()
     return {"claimed": len(orphaned_ids)}
+
+
+# Precisam ficar ANTES de /{competitor_id} — mesmo motivo do /hot em
+# products.py: uma rota literal como essa nunca bateria com um int de
+# qualquer forma, mas mantém o padrão já usado no resto do arquivo.
+@router.get("/protected-stores", response_model=list[ProtectedStoreOut])
+def list_protected_stores(db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
+    if not current_user.is_admin:
+        raise HTTPException(403, "Só administradores podem ver isso.")
+    return db.query(ProtectedStore).order_by(ProtectedStore.created_at.desc()).all()
+
+
+@router.post("/protected-stores", response_model=ProtectedStoreOut, status_code=201)
+def add_protected_store(
+    payload: ProtectedStoreCreate, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)
+):
+    """Protege um domínio pra sempre (ver models/competitor.py:ProtectedStore).
+    Se a loja já estava cadastrada e sendo rastreada por alguém ANTES de
+    virar protegida, derruba o status dela pra NOT_SHOPIFY agora mesmo — os
+    jobs recorrentes (daily_snapshot, weekly_xray, ads_monitor) só rodam em
+    status ACTIVE, então isso já basta pra parar qualquer captura futura
+    sem apagar o que já tinha sido raspado antes."""
+    if not current_user.is_admin:
+        raise HTTPException(403, "Só administradores podem proteger lojas.")
+    domain = normalize_domain(payload.domain)
+    existing = db.query(ProtectedStore).filter(ProtectedStore.domain == domain).first()
+    if existing:
+        raise HTTPException(409, f"{domain} já está protegida.")
+    protected = ProtectedStore(domain=domain, note=payload.note, added_by_user_id=current_user.id)
+    db.add(protected)
+    db.query(Competitor).filter(Competitor.domain == domain).update({"status": CompetitorStatus.NOT_SHOPIFY})
+    db.commit()
+    db.refresh(protected)
+    return protected
+
+
+@router.delete("/protected-stores/{protected_store_id}", status_code=204)
+def remove_protected_store(
+    protected_store_id: int, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)
+):
+    if not current_user.is_admin:
+        raise HTTPException(403, "Só administradores podem remover proteção de lojas.")
+    protected = db.get(ProtectedStore, protected_store_id)
+    if protected is None:
+        raise HTTPException(404, "Proteção não encontrada.")
+    db.delete(protected)
+    db.commit()
 
 
 @router.get("/{competitor_id}", response_model=CompetitorDetailOut)
