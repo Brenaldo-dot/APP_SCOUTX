@@ -17,6 +17,7 @@ celery_app = Celery(
         "app.tasks.weekly_xray",
         "app.tasks.ads_monitor",
         "app.tasks.ad_miner",
+        "app.tasks.retention",
     ],
 )
 
@@ -72,5 +73,13 @@ celery_app.conf.beat_schedule = {
     "reconcile-stuck-onboarding-3min": {
         "task": "app.tasks.onboarding.reconcile_stuck_onboarding",
         "schedule": crontab(minute="*/3"),
+    },
+    # Achado ao vivo (2026-08-29): disco do Postgres em ~50% de um teto de
+    # 5GB do Hobby com só 10 dias de app no ar — ver docstring de
+    # app/tasks/retention.py. Roda de madrugada (3h), fora do horário dos
+    # outros jobs pesados acima.
+    "purge-old-history-daily-3am": {
+        "task": "app.tasks.retention.purge_old_history",
+        "schedule": crontab(hour=3, minute=0),
     },
 }
