@@ -462,11 +462,17 @@ def add_protected_store(
     payload: ProtectedStoreCreate, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)
 ):
     """Protege um domínio pra sempre (ver models/competitor.py:ProtectedStore).
-    Se a loja já estava cadastrada e sendo rastreada por alguém ANTES de
-    virar protegida, derruba o status dela pra NOT_SHOPIFY agora mesmo — os
-    jobs recorrentes (daily_snapshot, weekly_xray, ads_monitor) só rodam em
-    status ACTIVE, então isso já basta pra parar qualquer captura futura
-    sem apagar o que já tinha sido raspado antes."""
+
+    Achado ao vivo (2026-08-29): proteger uma loja que já tinha sido
+    rastreada antes só travava a captura FUTURA (status vira NOT_SHOPIFY, os
+    jobs recorrentes ignoram) — mas o que já tinha sido raspado (produtos,
+    duplicadas, anúncios, histórico) continuava tudo visível na tela, porque
+    só o status mudava. Pedido do usuário: fingir que a loja nunca foi
+    Shopify de verdade, então agora TAMBÉM apaga tudo que já existia (mesma
+    cascata que `delete_competitor` usa pra apagar um concorrente inteiro:
+    produtos, anúncios, alertas, snapshots — só que aqui a linha do
+    Competitor em si fica, com status NOT_SHOPIFY, pra continuar aparecendo
+    como "essa loja não deu certo" pra quem já rastreava)."""
     if not current_user.is_admin:
         raise HTTPException(403, "Só administradores podem proteger lojas.")
     domain = normalize_domain(payload.domain)
@@ -475,7 +481,25 @@ def add_protected_store(
         raise HTTPException(409, f"{domain} já está protegida.")
     protected = ProtectedStore(domain=domain, note=payload.note, added_by_user_id=current_user.id)
     db.add(protected)
-    db.query(Competitor).filter(Competitor.domain == domain).update({"status": CompetitorStatus.NOT_SHOPIFY})
+
+    competitor = db.query(Competitor).filter(Competitor.domain == domain).first()
+    if competitor is not None:
+        competitor.status = CompetitorStatus.NOT_SHOPIFY
+        competitor.products = []
+        competitor.tech_stack = []
+        competitor.ads = []
+        competitor.daily_volumes = []
+        competitor.alerts = []
+        competitor.structure_snapshots = []
+        competitor.total_products = 0
+        competitor.vendor_count = 0
+        competitor.price_min = None
+        competitor.price_max = None
+        competitor.price_avg = None
+        competitor.classification = None
+        competitor.avg_daily_volume = None
+        competitor.hot_products = 0
+
     db.commit()
     db.refresh(protected)
     return protected
