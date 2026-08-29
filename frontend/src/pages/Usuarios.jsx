@@ -145,6 +145,8 @@ export default function Usuarios() {
   const [protectForm, setProtectForm] = useState({ domain: '', note: '' })
   const [protecting, setProtecting] = useState(false)
   const [protectMsg, setProtectMsg] = useState(null)
+  const [runningRetention, setRunningRetention] = useState(false)
+  const [retentionMsg, setRetentionMsg] = useState(null)
   const [searchParams, setSearchParams] = useSearchParams()
   const orgFilter = searchParams.get('org') || ''
 
@@ -246,6 +248,22 @@ export default function Usuarios() {
       load()
     } catch (err) {
       setProtectMsg({ type: 'error', text: err.message || 'Não foi possível remover a proteção.' })
+    }
+  }
+
+  async function handleRunRetention() {
+    setRunningRetention(true)
+    setRetentionMsg(null)
+    try {
+      const result = await api.runRetentionNow()
+      setRetentionMsg({
+        type: 'success',
+        text: `Limpeza concluída: ${result.scores_deleted} pontuação(ões) e ${result.snapshots_deleted} foto(s) de produto antigas removidas.`,
+      })
+    } catch (err) {
+      setRetentionMsg({ type: 'error', text: err.message || 'Não foi possível rodar a limpeza.' })
+    } finally {
+      setRunningRetention(false)
     }
   }
 
@@ -522,6 +540,26 @@ export default function Usuarios() {
                 </li>
               ))}
             </ul>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
+          <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Manutenção do banco</h3>
+          <p className="mb-3.5 text-sm text-[var(--text-tertiary)]">
+            Apaga pontuações e fotos de produto com mais de 14 dias (sempre mantendo a mais recente de cada
+            produto) — roda sozinho de madrugada, esse botão só força na hora pra conferir se está funcionando.
+          </p>
+          <button
+            onClick={handleRunRetention}
+            disabled={runningRetention}
+            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+          >
+            {runningRetention ? 'Rodando…' : 'Rodar limpeza agora'}
+          </button>
+          {retentionMsg && (
+            <p className={`mt-3 text-sm ${retentionMsg.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
+              {retentionMsg.text}
+            </p>
           )}
         </div>
 

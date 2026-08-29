@@ -49,8 +49,13 @@ _PURGE_PRODUCT_SNAPSHOTS = text(
 )
 
 
-@celery_app.task(name="app.tasks.retention.purge_old_history")
-def purge_old_history() -> dict:
+def run_purge() -> dict:
+    """Lógica pura, sem depender do Celery — usada tanto pela task agendada
+    quanto pelo botão "Rodar limpeza agora" do admin (api/competitors.py),
+    criado depois que a execução automática de madrugada não deixou rastro
+    nenhum de ter rodado de verdade (nem sucesso nem erro nos logs, só o
+    Beat mandando a task pra fila) — ter um jeito de disparar na hora,
+    síncrono, tira a dúvida sem esperar até a próxima madrugada."""
     db = SessionLocal()
     try:
         scores_deleted = db.execute(_PURGE_PRODUCT_SCORES, {"retention_days": RETENTION_DAYS}).rowcount
@@ -69,3 +74,8 @@ def purge_old_history() -> dict:
         raise
     finally:
         db.close()
+
+
+@celery_app.task(name="app.tasks.retention.purge_old_history")
+def purge_old_history() -> dict:
+    return run_purge()

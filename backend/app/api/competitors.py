@@ -28,6 +28,7 @@ from app.services.competitor_service import normalize_domain, register_competito
 from app.tasks.ads_monitor import run_ads_monitor_one
 from app.tasks.daily_snapshot import run_daily_snapshot_one
 from app.tasks.onboarding import run_onboarding_xray
+from app.tasks.retention import run_purge
 
 logger = logging.getLogger(__name__)
 
@@ -445,6 +446,20 @@ def claim_orphaned(db: Session = Depends(get_db), current_user: CurrentUser = De
         db.add(CompetitorTracker(competitor_id=competitor_id, user_id=current_user.id))
     db.commit()
     return {"claimed": len(orphaned_ids)}
+
+
+@router.post("/run-retention-now")
+def run_retention_now(current_user: CurrentUser = Depends(get_current_user)):
+    """Roda a limpeza de histórico (app/tasks/retention.py) na hora, direto
+    na thread da requisição — sem depender do Celery Beat/fila. Criado
+    depois que a execução automática de madrugada (2026-08-29, 3h Bogotá)
+    não deixou nenhum rastro de ter sido processada de verdade pelo worker
+    (só o Beat mandando pra fila, nada de "recebida"/"concluída"/erro nos
+    logs) — dá pra confirmar ao vivo em vez de esperar até a próxima
+    madrugada pra saber se funcionou."""
+    if not current_user.is_admin:
+        raise HTTPException(403, "Só administradores podem rodar isso.")
+    return run_purge()
 
 
 # Precisam ficar ANTES de /{competitor_id} — mesmo motivo do /hot em
