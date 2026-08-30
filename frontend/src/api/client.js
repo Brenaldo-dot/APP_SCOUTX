@@ -57,6 +57,7 @@ export const api = {
   addProtectedStore: (data) => request('/api/competitors/protected-stores', { method: 'POST', body: JSON.stringify(data) }),
   removeProtectedStore: (id) => request(`/api/competitors/protected-stores/${id}`, { method: 'DELETE' }),
   runRetentionNow: () => request('/api/competitors/run-retention-now', { method: 'POST' }),
+  getCeleryDiagnostics: () => request('/api/competitors/celery-diagnostics'),
 
   listProducts: (params = {}) => request(`/api/products?${buildQuery(params)}`),
   listHotProducts: (params = {}) => request(`/api/products/hot?${buildQuery(params)}`),

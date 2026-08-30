@@ -147,6 +147,8 @@ export default function Usuarios() {
   const [protectMsg, setProtectMsg] = useState(null)
   const [runningRetention, setRunningRetention] = useState(false)
   const [retentionMsg, setRetentionMsg] = useState(null)
+  const [celeryDiag, setCeleryDiag] = useState(null)
+  const [loadingDiag, setLoadingDiag] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
   const orgFilter = searchParams.get('org') || ''
 
@@ -264,6 +266,19 @@ export default function Usuarios() {
       setRetentionMsg({ type: 'error', text: err.message || 'Não foi possível rodar a limpeza.' })
     } finally {
       setRunningRetention(false)
+    }
+  }
+
+  async function handleCeleryDiagnostics() {
+    setLoadingDiag(true)
+    setCeleryDiag(null)
+    try {
+      const result = await api.getCeleryDiagnostics()
+      setCeleryDiag(result)
+    } catch (err) {
+      setCeleryDiag({ error: err.message || 'Não foi possível consultar os workers.' })
+    } finally {
+      setLoadingDiag(false)
     }
   }
 
@@ -561,6 +576,23 @@ export default function Usuarios() {
               {retentionMsg.text}
             </p>
           )}
+          <div className="mt-4 border-t border-[var(--border)] pt-4">
+            <p className="mb-2 text-xs text-[var(--text-tertiary)]">
+              A limpeza automática de madrugada não deixou rastro de ter rodado — diagnóstico ao vivo dos workers:
+            </p>
+            <button
+              onClick={handleCeleryDiagnostics}
+              disabled={loadingDiag}
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--hover-surface)] disabled:opacity-60"
+            >
+              {loadingDiag ? 'Consultando…' : 'Diagnóstico Celery'}
+            </button>
+            {celeryDiag && (
+              <pre className="mt-3 max-h-64 overflow-auto rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] p-3 text-xs text-[var(--text-secondary)]">
+                {JSON.stringify(celeryDiag, null, 2)}
+              </pre>
+            )}
+          </div>
         </div>
 
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">

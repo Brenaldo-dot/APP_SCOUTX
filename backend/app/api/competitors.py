@@ -28,6 +28,7 @@ from app.services.competitor_service import normalize_domain, register_competito
 from app.tasks.ads_monitor import run_ads_monitor_one
 from app.tasks.daily_snapshot import run_daily_snapshot_one
 from app.tasks.onboarding import run_onboarding_xray
+from app.tasks.celery_app import celery_app
 from app.tasks.retention import run_purge
 
 logger = logging.getLogger(__name__)
@@ -460,6 +461,27 @@ def run_retention_now(current_user: CurrentUser = Depends(get_current_user)):
     if not current_user.is_admin:
         raise HTTPException(403, "Só administradores podem rodar isso.")
     return run_purge()
+
+
+@router.get("/celery-diagnostics")
+def celery_diagnostics(current_user: CurrentUser = Depends(get_current_user)):
+    """Diagnóstico ao vivo (2026-08-30): `purge-old-history-daily-3am` é
+    "enviada" pelo Beat certinho às 3h (Bogotá) dois dias seguidos, mas
+    nenhum worker nunca loga "recebida"/"concluída"/erro nenhum pra ela —
+    diferente de TODAS as outras tarefas agendadas (inclusive outra diária
+    no mesmo formato, `ads-monitor-daily-8am`, que recebe e roda normal).
+    Isso pergunta DIRETO pros workers conectados (via Redis, RPC do próprio
+    Celery) se `app.tasks.retention.purge_old_history` está registrada e em
+    qual fila cada worker está escutando de verdade — tira a dúvida sem
+    precisar esperar a próxima madrugada de novo."""
+    if not current_user.is_admin:
+        raise HTTPException(403, "Só administradores podem ver isso.")
+    inspect = celery_app.control.inspect(timeout=5)
+    return {
+        "registered": inspect.registered() or {},
+        "active_queues": inspect.active_queues() or {},
+        "ping": inspect.ping() or {},
+    }
 
 
 # Precisam ficar ANTES de /{competitor_id} — mesmo motivo do /hot em
