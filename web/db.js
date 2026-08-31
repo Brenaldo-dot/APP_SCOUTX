@@ -633,6 +633,21 @@ async function markAffiliateCommissionPaid(id, paid) {
   return res.rows[0] || null;
 }
 
+// Chamado em reembolso/chargeback/cancelamento (ver cakto.js:
+// handleCancellationEvent) — pedido do usuário: uma comissão nunca pode
+// aparecer "a pagar" pra uma venda que acabou não se confirmando. Se ainda
+// não foi paga, apaga na hora (nunca chega a aparecer pro admin). Se JÁ
+// tinha sido paga (afiliado recebeu antes do cliente cancelar), não dá pra
+// desfazer sozinho — devolve a linha pra quem chamar decidir o que avisar.
+async function voidAffiliateCommission(caktoOrderId) {
+  const existing = await pool.query("SELECT * FROM affiliate_commissions WHERE cakto_order_id = $1", [caktoOrderId]);
+  const commission = existing.rows[0];
+  if (!commission) return null;
+  if (commission.paid) return commission;
+  await pool.query("DELETE FROM affiliate_commissions WHERE id = $1", [commission.id]);
+  return commission;
+}
+
 function planLimitsFor(plan) {
   return PLAN_LIMITS[plan] || PLAN_LIMITS.solo;
 }
@@ -841,6 +856,7 @@ module.exports = {
   createAffiliateCommission,
   listAffiliateCommissions,
   markAffiliateCommissionPaid,
+  voidAffiliateCommission,
   createOrganization,
   createOrganizationFromCakto,
   findOrganizationByCaktoPurchaseId,

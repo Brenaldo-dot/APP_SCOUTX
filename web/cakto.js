@@ -199,6 +199,23 @@ async function handleCancellationEvent(data, eventName) {
     `Acesso suspenso automaticamente (evento Cakto "${eventName}", compra ${data.id})`
   );
   console.log(`Webhook Cakto: organização "${org.name}" suspensa (evento "${eventName}", compra ${data.id}).`);
+
+  // Pedido do usuário (2026-08-31): comissão de afiliado nunca pode ficar "a
+  // pagar" pra uma venda que se desfez (reembolso/chargeback/cancelamento).
+  // Se ainda não tinha sido paga, some sozinha; se já tinha sido paga, só
+  // avisa no log (não dá pra puxar de volta um PIX já mandado).
+  try {
+    const voided = await db.voidAffiliateCommission(data.id);
+    if (voided?.paid) {
+      console.warn(
+        `Webhook Cakto: pedido ${data.id} foi ${eventName} DEPOIS da comissão já ter sido marcada como paga — revise manualmente com o afiliado.`
+      );
+    } else if (voided) {
+      console.log(`Webhook Cakto: comissão pendente do pedido ${data.id} removida (evento "${eventName}").`);
+    }
+  } catch (err) {
+    console.error(`Webhook Cakto: falha ao conferir comissão de afiliado no cancelamento do pedido ${data.id}:`, err.message);
+  }
 }
 
 // "subscription_renewed": renovação de assinatura recorrente — diferente
