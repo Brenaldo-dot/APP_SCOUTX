@@ -22,7 +22,7 @@ import Select from '../components/Select.jsx'
 import StatCard from '../components/StatCard.jsx'
 import RefreshButton from '../components/RefreshButton.jsx'
 import { operationLabel } from '../context/OperationContext.jsx'
-import { formatDateTime, formatRelativeTime } from '../utils/date.js'
+import { formatDateTime, formatRelativeTime, isRecent } from '../utils/date.js'
 
 const SORT_OPTIONS = [
   { value: 'name', label: 'Ordenar: cadastro (padrão)' },
@@ -829,6 +829,7 @@ export default function Usuarios() {
                 <th className="px-4 py-3">Permissões</th>
                 <th className="px-4 py-3 text-right">Buscas</th>
                 <th className="px-4 py-3">Último login</th>
+                <th className="px-4 py-3">Atividade</th>
                 <th className="px-4 py-3">IPs usados</th>
                 <th className="px-4 py-3"></th>
               </tr>
@@ -933,6 +934,18 @@ export default function Usuarios() {
                     </td>
                     <td className="px-4 py-3.5 text-right tabular-nums text-[var(--text-tertiary)]">{u.searchCount}</td>
                     <td className="px-4 py-3.5 text-xs text-[var(--text-muted)]">{formatDateTime(u.lastLoginAt)}</td>
+                    <td className="px-4 py-3.5">
+                      {isRecent(u.lastSeenAt, 10) ? (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400">
+                          <span className="h-2 w-2 rounded-full bg-emerald-400" /> Online
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+                          <span className="h-2 w-2 rounded-full bg-[var(--text-faint)]" />
+                          {u.lastSeenAt ? `Visto ${formatRelativeTime(u.lastSeenAt)}` : 'Nunca acessou'}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3.5">
                       {u.allIps?.length > 0 ? (
                         <button

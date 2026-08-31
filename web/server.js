@@ -835,6 +835,16 @@ function createApp() {
     }
 
     req.appUser = appUser;
+
+    // "Última vez visto" (pedido do admin, 2026-08-31) — só escreve se
+    // fizer mais de 5 minutos desde o valor já carregado (sem isso seria 1
+    // UPDATE por requisição, e uma página só já dispara dezenas). Fire-and-
+    // forget: nunca atrasa nem derruba a requisição de verdade da pessoa.
+    const lastSeen = appUser.last_seen_at ? new Date(appUser.last_seen_at).getTime() : 0;
+    if (Date.now() - lastSeen > 5 * 60 * 1000) {
+      db.touchLastSeen(appUser.id).catch((err) => console.error("Falha ao atualizar last_seen_at:", err.message));
+    }
+
     next();
   }
 
@@ -986,6 +996,7 @@ function createApp() {
         ipCount: u.ip_count,
         lastIp: u.last_ip,
         lastLoginAt: u.last_login_at,
+        lastSeenAt: u.last_seen_at,
         allIps: u.all_ips || [],
         createdAt: u.created_at,
         failedLoginAttempts: u.failed_login_attempts,

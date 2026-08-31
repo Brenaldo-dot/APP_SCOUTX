@@ -109,6 +109,14 @@ async function migrate() {
   // refId entre o redirect da Cakto e o webhook, que na prática não bateu
   // certo no teste real (ver HANDOFF.md).
   await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS needs_password_setup BOOLEAN NOT NULL DEFAULT false;`);
+  // "Última vez visto" (pedido do admin, 2026-08-31) — diferente de
+  // last_login_at (login_events, só marca QUANDO logou): essa coluna
+  // acompanha uso de verdade, atualizada a cada request autenticada. Pra
+  // não pesar o app com um UPDATE em TODA requisição, requireAuth
+  // (server.js) só escreve se fizer mais de 5 minutos desde o valor já
+  // carregado em memória — na prática um UPDATE bem esparso por usuário
+  // ativo, não por request.
+  await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS search_logs (
       id SERIAL PRIMARY KEY,
@@ -322,6 +330,13 @@ async function findUserByEmail(email) {
   return res.rows[0] || null;
 }
 
+// Fire-and-forget de propósito (ver requireAuth em server.js — chamado sem
+// await, com .catch silencioso) — atualizar "última vez visto" nunca deve
+// atrasar nem quebrar a requisição real da pessoa.
+async function touchLastSeen(userId) {
+  await pool.query("UPDATE app_users SET last_seen_at = now() WHERE id = $1", [userId]);
+}
+
 async function getAppUserById(id) {
   const res = await pool.query(`${USER_WITH_ORG_SELECT} WHERE u.id = $1`, [id]);
   return res.rows[0] || null;
@@ -333,7 +348,7 @@ async function listUsersWithCounts() {
   // 1 request por usuário só pra popular isso na tela principal).
   const res = await pool.query(`
     SELECT u.id, u.name, u.email, u.role, u.can_access_minerador, u.created_at,
-           u.failed_login_attempts, u.locked_until, u.suspended, u.role_changed_at,
+           u.failed_login_attempts, u.locked_until, u.suspended, u.role_changed_at, u.last_seen_at,
            u.organization_id, o.name AS organization_name, o.plan AS organization_plan,
            o.expires_at AS organization_expires_at,
            (SELECT c.name FROM app_users c WHERE c.id = u.role_changed_by_id) AS role_changed_by_name,
@@ -688,6 +703,7 @@ module.exports = {
   createUser,
   findUserByEmail,
   getAppUserById,
+  touchLastSeen,
   listUsersWithCounts,
   updateUserPermissions,
   updateUserPassword,
