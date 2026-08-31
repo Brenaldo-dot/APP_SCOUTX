@@ -24,9 +24,11 @@ from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
-# 14 dias: folga em cima da janela de 7 dias que dashboard.py:get_highlights
-# realmente usa, sem guardar histórico que nunca é lido.
-RETENTION_DAYS = 14
+# 12 dias: folga em cima da janela de 7 dias que dashboard.py:get_highlights
+# realmente usa, sem guardar histórico que nunca é lido. Era 14, baixado pra
+# 12 a pedido do usuário (2026-08-31) pra liberar espaço um pouco mais cedo
+# assim que a limpeza automática voltar a funcionar de verdade.
+RETENTION_DAYS = 12
 
 _PURGE_PRODUCT_SCORES = text(
     """
@@ -55,27 +57,38 @@ def run_purge() -> dict:
     criado depois que a execução automática de madrugada não deixou rastro
     nenhum de ter rodado de verdade (nem sucesso nem erro nos logs, só o
     Beat mandando a task pra fila) — ter um jeito de disparar na hora,
-    síncrono, tira a dúvida sem esperar até a próxima madrugada."""
-    db = SessionLocal()
+    síncrono, tira a dúvida sem esperar até a próxima madrugada.
+
+    Achado numa revisão em 2026-08-31 (ainda sem confirmar se é A causa do
+    sumiço, mas era um bug real de qualquer jeito): `SessionLocal()` estava
+    FORA do try/except — se abrir a conexão falhasse bem nesse instante, a
+    exceção nunca passava pelo `except` logo abaixo, sumia sem log nenhum.
+    Log logo na entrada também: se o worker travar/morrer em qualquer ponto
+    daqui pra frente, pelo menos fica registrado que a task foi RECEBIDA."""
+    logger.info("Limpeza de histórico: iniciando (corte de %d dias).", RETENTION_DAYS)
     try:
-        scores_deleted = db.execute(_PURGE_PRODUCT_SCORES, {"retention_days": RETENTION_DAYS}).rowcount
-        snapshots_deleted = db.execute(_PURGE_PRODUCT_SNAPSHOTS, {"retention_days": RETENTION_DAYS}).rowcount
-        db.commit()
-        logger.info(
-            "Limpeza de histórico: %d product_scores e %d product_snapshots removidos (mais de %d dias).",
-            scores_deleted,
-            snapshots_deleted,
-            RETENTION_DAYS,
-        )
-        return {"scores_deleted": scores_deleted, "snapshots_deleted": snapshots_deleted}
+        db = SessionLocal()
+        try:
+            scores_deleted = db.execute(_PURGE_PRODUCT_SCORES, {"retention_days": RETENTION_DAYS}).rowcount
+            snapshots_deleted = db.execute(_PURGE_PRODUCT_SNAPSHOTS, {"retention_days": RETENTION_DAYS}).rowcount
+            db.commit()
+            logger.info(
+                "Limpeza de histórico: %d product_scores e %d product_snapshots removidos (mais de %d dias).",
+                scores_deleted,
+                snapshots_deleted,
+                RETENTION_DAYS,
+            )
+            return {"scores_deleted": scores_deleted, "snapshots_deleted": snapshots_deleted}
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
     except Exception:
-        db.rollback()
         logger.exception("Falha na limpeza diária de histórico.")
         raise
-    finally:
-        db.close()
 
 
-@celery_app.task(name="app.tasks.retention.purge_old_history")
+@celery_app.task(name="app.tasks.retention.purge_old_history", acks_late=True, max_retries=2, default_retry_delay=60)
 def purge_old_history() -> dict:
     return run_purge()
