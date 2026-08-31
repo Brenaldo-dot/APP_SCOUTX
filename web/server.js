@@ -936,6 +936,21 @@ function createApp() {
     res.json({ avatarUrl: null });
   });
 
+  // Autoatendimento — a pessoa troca o próprio nome de exibição (pedido do
+  // usuário, 2026-08-31). Só o nome mostrado no app; não mexe em email nem
+  // em nada usado pra login.
+  app.patch("/api/me/name", async (req, res) => {
+    const name = String(req.body?.name || "").trim();
+    if (!name) {
+      return res.status(400).json({ error: "O nome não pode ficar em branco." });
+    }
+    if (name.length > 120) {
+      return res.status(400).json({ error: "Esse nome ficou grande demais." });
+    }
+    const updated = await db.updateUserName(req.appUser.id, name);
+    res.json({ name: updated });
+  });
+
   // Autoatendimento — troca a PRÓPRIA senha (exige a senha atual, diferente
   // do reset de admin em /api/admin/users/:id que não pede, já que é o
   // próprio dono da conta confirmando que é ele mesmo).

@@ -496,6 +496,11 @@ async function updateUserAvatar(id, avatarUrl) {
   return res.rows[0]?.avatar_url ?? null;
 }
 
+async function updateUserName(id, name) {
+  const res = await pool.query("UPDATE app_users SET name = $1 WHERE id = $2 RETURNING name", [name, id]);
+  return res.rows[0]?.name ?? null;
+}
+
 async function logSearch(appUserId, tool, domain, url) {
   await pool.query("INSERT INTO search_logs (app_user_id, tool, domain, url) VALUES ($1, $2, $3, $4)", [
     appUserId,
@@ -711,6 +716,7 @@ module.exports = {
   resetFailedLogins,
   deleteUser,
   updateUserAvatar,
+  updateUserName,
   logSearch,
   historySummaryForUser,
   logLogin,

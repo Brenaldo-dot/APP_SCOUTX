@@ -261,6 +261,33 @@ function AvatarCard() {
   const fileInputRef = useRef(null)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState(null)
+  const [editingName, setEditingName] = useState(false)
+  const [nameInput, setNameInput] = useState('')
+  const [savingName, setSavingName] = useState(false)
+  const [nameMsg, setNameMsg] = useState(null)
+
+  function startEditingName() {
+    setNameInput(me?.name || '')
+    setNameMsg(null)
+    setEditingName(true)
+  }
+
+  async function handleSaveName(e) {
+    e.preventDefault()
+    const trimmed = nameInput.trim()
+    if (!trimmed) return
+    setSavingName(true)
+    setNameMsg(null)
+    try {
+      await rawApi.updateMyName(trimmed)
+      await refreshMe()
+      setEditingName(false)
+    } catch (err) {
+      setNameMsg({ type: 'error', text: err.message || 'Erro' })
+    } finally {
+      setSavingName(false)
+    }
+  }
 
   async function handleFileChange(e) {
     const file = e.target.files?.[0]
@@ -310,20 +337,59 @@ function AvatarCard() {
             {initials(me?.name)}
           </span>
         )}
-        <div className="flex flex-col gap-2">
-          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={saving}
-            className="rounded-full border border-[var(--border)] px-3.5 py-2 text-xs font-medium text-[var(--text-tertiary)] hover:bg-[var(--hover-surface)] disabled:opacity-50"
-          >
-            {saving ? t('conta.foto.salvando') : t('conta.foto.escolher')}
-          </button>
-          {me?.avatarUrl && (
-            <button onClick={handleRemove} disabled={saving} className="text-left text-xs font-medium text-[var(--text-muted)] hover:text-red-400">
-              {t('conta.foto.remover')}
-            </button>
+        <div className="flex flex-1 flex-col gap-2">
+          {editingName ? (
+            <form onSubmit={handleSaveName} className="flex items-center gap-2">
+              <input
+                autoFocus
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                maxLength={120}
+                className="w-full max-w-xs rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={savingName || !nameInput.trim()}
+                className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                {savingName ? '...' : 'Salvar'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingName(false)}
+                className="text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+              >
+                Cancelar
+              </button>
+            </form>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-[var(--text-primary)]">{me?.name}</span>
+              <button
+                onClick={startEditingName}
+                className="text-xs font-medium text-brand-500 hover:underline"
+                title="Alterar nome de exibição"
+              >
+                Alterar nome
+              </button>
+            </div>
           )}
+          <Feedback msg={nameMsg} />
+          <div className="flex items-center gap-2">
+            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={saving}
+              className="rounded-full border border-[var(--border)] px-3.5 py-2 text-xs font-medium text-[var(--text-tertiary)] hover:bg-[var(--hover-surface)] disabled:opacity-50"
+            >
+              {saving ? t('conta.foto.salvando') : t('conta.foto.escolher')}
+            </button>
+            {me?.avatarUrl && (
+              <button onClick={handleRemove} disabled={saving} className="text-left text-xs font-medium text-[var(--text-muted)] hover:text-red-400">
+                {t('conta.foto.remover')}
+              </button>
+            )}
+          </div>
         </div>
       </div>
       <Feedback msg={msg} />

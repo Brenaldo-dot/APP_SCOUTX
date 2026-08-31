@@ -47,6 +47,12 @@ export const rawApi = {
       body: JSON.stringify({ avatarDataUrl }),
     }),
   removeMyAvatar: () => request('/api/me/avatar', { method: 'DELETE' }),
+  updateMyName: (name) =>
+    request('/api/me/name', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    }),
 
   buscarBarcode: (url) => request(`/api/buscar?${qs({ url })}`),
   espionarLoja: (url) => request(`/api/spy?${qs({ url })}`),
