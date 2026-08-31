@@ -821,26 +821,26 @@ export default function Usuarios() {
           <table className="w-full text-left text-sm">
             <thead className="bg-[var(--bg-surface-2)] text-xs uppercase text-[var(--text-muted)]">
               <tr>
-                <th className="px-4 py-3">Nome</th>
-                <th className="px-4 py-3">Email</th>
-                <th className="px-4 py-3">Organização</th>
-                <th className="px-4 py-3">Criado em</th>
-                <th className="px-4 py-3">Admin</th>
-                <th className="px-4 py-3">Permissões</th>
-                <th className="px-4 py-3 text-right">Buscas</th>
-                <th className="px-4 py-3">Último login</th>
-                <th className="px-4 py-3">Atividade</th>
-                <th className="px-4 py-3">IPs usados</th>
-                <th className="px-4 py-3"></th>
+                <th className="px-3 py-2">Nome</th>
+                <th className="px-3 py-2">Email</th>
+                <th className="px-3 py-2">Organização</th>
+                <th className="px-3 py-2">Criado em</th>
+                <th className="px-3 py-2">Admin</th>
+                <th className="px-3 py-2">Permissões</th>
+                <th className="px-3 py-2 text-right">Buscas</th>
+                <th className="px-3 py-2">Último login</th>
+                <th className="px-3 py-2">Atividade</th>
+                <th className="px-3 py-2">IPs usados</th>
+                <th className="px-3 py-2"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border)]">
               {filteredUsers?.map((u) => {
-                const extraIps = Math.max(0, (u.allIps?.length || 0) - 3)
+                const extraIps = Math.max(0, (u.allIps?.length || 0) - 2)
                 const risky = u.ipCount > 1
                 return (
                   <tr key={u.id} className="hover:bg-[var(--bg-surface-2)]">
-                    <td className="px-4 py-3.5 font-medium text-[var(--text-primary)]">
+                    <td className="px-3 py-2.5 font-medium text-[var(--text-primary)]">
                       <div>{u.name}</div>
                       {(u.suspended || u.lockedUntil) && (
                         <div className="mt-1 flex flex-col items-start gap-1">
@@ -860,8 +860,8 @@ export default function Usuarios() {
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-3.5 text-[var(--text-tertiary)]">{u.email}</td>
-                    <td className="min-w-[12rem] px-4 py-3.5">
+                    <td className="px-3 py-2.5 text-[var(--text-tertiary)]">{u.email}</td>
+                    <td className="min-w-[9rem] px-3 py-2.5">
                       {u.organizationName ? (
                         <div className="flex flex-col gap-1.5">
                           <button
@@ -913,18 +913,18 @@ export default function Usuarios() {
                         </button>
                       )}
                     </td>
-                    <td className="px-4 py-3.5 text-xs text-[var(--text-muted)]">
+                    <td className="px-3 py-2.5 text-xs text-[var(--text-muted)]">
                       {formatDateTime(u.createdAt)}
                       <div className="text-[var(--text-faint)]">há {tenureLabel(u.createdAt)}</div>
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-3 py-2.5">
                       <Toggle
                         checked={u.role === 'admin'}
                         title={u.roleChangedAt ? `Alterado por ${u.roleChangedByName || '—'} em ${formatDateTime(u.roleChangedAt)}` : undefined}
                         onChange={(v) => togglePermission(u, 'role', v)}
                       />
                     </td>
-                    <td className="min-w-[8.5rem] px-4 py-3.5">
+                    <td className="min-w-[8.5rem] px-3 py-2.5">
                       <div className="flex flex-col gap-2">
                         <label className="flex items-center gap-3 text-xs text-[var(--text-tertiary)]">
                           <Toggle checked={u.canAccessMinerador} onChange={(v) => togglePermission(u, 'canAccessMinerador', v)} />
@@ -932,9 +932,9 @@ export default function Usuarios() {
                         </label>
                       </div>
                     </td>
-                    <td className="px-4 py-3.5 text-right tabular-nums text-[var(--text-tertiary)]">{u.searchCount}</td>
-                    <td className="px-4 py-3.5 text-xs text-[var(--text-muted)]">{formatDateTime(u.lastLoginAt)}</td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-3 py-2.5 text-right tabular-nums text-[var(--text-tertiary)]">{u.searchCount}</td>
+                    <td className="px-3 py-2.5 text-xs text-[var(--text-muted)]">{formatDateTime(u.lastLoginAt)}</td>
+                    <td className="px-3 py-2.5">
                       {isRecent(u.lastSeenAt, 10) ? (
                         <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400">
                           <span className="h-2 w-2 rounded-full bg-emerald-400" /> Online
@@ -946,7 +946,7 @@ export default function Usuarios() {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-3 py-2.5">
                       {u.allIps?.length > 0 ? (
                         <button
                           onClick={() => viewIps(u)}
@@ -956,7 +956,7 @@ export default function Usuarios() {
                           }`}
                         >
                           {risky && <AlertTriangle size={12} className="text-red-400" title="Mais de um IP nessa conta" />}
-                          {u.allIps.slice(0, 3).map((ip) => (
+                          {u.allIps.slice(0, 2).map((ip) => (
                             <span
                               key={ip}
                               className={`rounded px-1.5 py-0.5 font-mono text-[11px] ${
@@ -972,7 +972,7 @@ export default function Usuarios() {
                         <span className="text-xs text-[var(--text-muted)]">Nunca logou</span>
                       )}
                     </td>
-                    <td className="px-4 py-3.5 text-right">
+                    <td className="px-3 py-2.5 text-right">
                       <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => openPasswordEdit(u)}
