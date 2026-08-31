@@ -9,6 +9,7 @@ import {
   Eye,
   Flame,
   GripVertical,
+  Handshake,
   History,
   LayoutDashboard,
   LogOut,
@@ -438,6 +439,17 @@ export default function Layout() {
                   <>
                     <NavIcon Icon={Building2} active={isActive} />
                     {!effectiveCollapsed && t('nav.organizacoes')}
+                  </>
+                )}
+              </NavLink>
+            )}
+
+            {me?.isAdmin && (
+              <NavLink to="/afiliados" title={effectiveCollapsed ? t('nav.afiliados') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
+                {({ isActive }) => (
+                  <>
+                    <NavIcon Icon={Handshake} active={isActive} />
+                    {!effectiveCollapsed && t('nav.afiliados')}
                   </>
                 )}
               </NavLink>

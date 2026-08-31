@@ -54,6 +54,18 @@ export const rawApi = {
       body: JSON.stringify({ name }),
     }),
 
+  listAffiliates: () => request('/api/admin/affiliates'),
+  createAffiliate: (data) =>
+    request('/api/admin/affiliates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  deleteAffiliate: (id) => request(`/api/admin/affiliates/${id}`, { method: 'DELETE' }),
+  listAffiliateCommissions: () => request('/api/admin/affiliate-commissions'),
+  markAffiliateCommissionPaid: (id, paid) =>
+    request(`/api/admin/affiliate-commissions/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paid }),
+    }),
+
   buscarBarcode: (url) => request(`/api/buscar?${qs({ url })}`),
   espionarLoja: (url) => request(`/api/spy?${qs({ url })}`),
   spyPreviewUrl: (url) => `/api/spy-preview?${qs({ url })}`,

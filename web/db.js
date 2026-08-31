@@ -159,6 +159,48 @@ async function migrate() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_admin_audit_log_created ON admin_audit_log(created_at DESC);`);
 
+  // Programa de afiliados feito por dentro do app (2026-08-31) — a Cakto só
+  // suporta UMA comissão fixa por produto, não uma taxa pra primeira venda e
+  // outra pra recorrência (achado ao vivo, conferido no painel dela). O link
+  // de afiliado em si continua sendo o da Cakto (é ela quem rastreia clique/
+  // cookie); a gente só usa a API deles (ver caktoApi.js) pra descobrir QUEM
+  // é o afiliado de cada pedido (campo commissions[].type === "affiliate"),
+  // casando pelo email, e calculamos/guardamos a comissão com as NOSSAS
+  // taxas aqui.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS affiliates (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      cakto_email TEXT NOT NULL UNIQUE,
+      pix_key TEXT,
+      first_sale_percentage NUMERIC(5,2) NOT NULL,
+      recurring_percentage NUMERIC(5,2) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
+  // Uma linha por comissão gerada (1ª venda de um cliente novo, ou cada
+  // renovação depois) — cakto_order_id é o `data.id` do webhook/API da
+  // Cakto, UNIQUE pra nunca gerar comissão em dobro se o mesmo evento vier
+  // de novo (Cakto reenvia webhook em caso de timeout, ver cakto.js).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS affiliate_commissions (
+      id SERIAL PRIMARY KEY,
+      affiliate_id INTEGER NOT NULL REFERENCES affiliates(id) ON DELETE CASCADE,
+      cakto_order_id TEXT NOT NULL UNIQUE,
+      customer_email TEXT NOT NULL,
+      customer_name TEXT,
+      sale_amount NUMERIC(10,2) NOT NULL,
+      commission_type TEXT NOT NULL, -- 'first_sale' | 'recurring'
+      commission_percentage NUMERIC(5,2) NOT NULL,
+      commission_value NUMERIC(10,2) NOT NULL,
+      paid BOOLEAN NOT NULL DEFAULT false,
+      paid_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_affiliate_commissions_affiliate ON affiliate_commissions(affiliate_id);`);
+
   // Planos de venda — cada organização agrupa N logins (app_users) sob um
   // plano/ciclo/validade só. expires_at vencido bloqueia login de TODO
   // mundo da organização (checado em requireAuth/login, ver server.js).
@@ -522,6 +564,75 @@ async function listAdminAuditLog(limit = 100) {
   return res.rows;
 }
 
+// ---------- Afiliados ----------
+
+async function listAffiliates() {
+  const res = await pool.query("SELECT * FROM affiliates ORDER BY created_at DESC");
+  return res.rows;
+}
+
+async function findAffiliateByCaktoEmail(email) {
+  const res = await pool.query("SELECT * FROM affiliates WHERE cakto_email = $1", [email.toLowerCase().trim()]);
+  return res.rows[0] || null;
+}
+
+async function createAffiliate({ name, caktoEmail, pixKey, firstSalePercentage, recurringPercentage }) {
+  const res = await pool.query(
+    `INSERT INTO affiliates (name, cakto_email, pix_key, first_sale_percentage, recurring_percentage)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [name, caktoEmail.toLowerCase().trim(), pixKey || null, firstSalePercentage, recurringPercentage]
+  );
+  return res.rows[0];
+}
+
+async function deleteAffiliate(id) {
+  await pool.query("DELETE FROM affiliates WHERE id = $1", [id]);
+}
+
+// ON CONFLICT DO NOTHING (cakto_order_id é UNIQUE): idempotente de propósito
+// — se o mesmo evento de webhook chegar de novo (reenvio da Cakto por
+// timeout, ver cakto.js), não gera comissão em dobro pro mesmo pedido.
+// Devolve null quando já existia (nada foi inserido), pra quem chama saber
+// que não precisa notificar de novo.
+async function createAffiliateCommission({
+  affiliateId,
+  caktoOrderId,
+  customerEmail,
+  customerName,
+  saleAmount,
+  commissionType,
+  commissionPercentage,
+  commissionValue,
+}) {
+  const res = await pool.query(
+    `INSERT INTO affiliate_commissions
+       (affiliate_id, cakto_order_id, customer_email, customer_name, sale_amount, commission_type, commission_percentage, commission_value)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (cakto_order_id) DO NOTHING
+     RETURNING *`,
+    [affiliateId, caktoOrderId, customerEmail, customerName || null, saleAmount, commissionType, commissionPercentage, commissionValue]
+  );
+  return res.rows[0] || null;
+}
+
+async function listAffiliateCommissions() {
+  const res = await pool.query(`
+    SELECT c.*, a.name AS affiliate_name, a.cakto_email AS affiliate_email, a.pix_key AS affiliate_pix_key
+    FROM affiliate_commissions c
+    JOIN affiliates a ON a.id = c.affiliate_id
+    ORDER BY c.created_at DESC
+  `);
+  return res.rows;
+}
+
+async function markAffiliateCommissionPaid(id, paid) {
+  const res = await pool.query(
+    "UPDATE affiliate_commissions SET paid = $1, paid_at = CASE WHEN $1 THEN now() ELSE NULL END WHERE id = $2 RETURNING *",
+    [paid, id]
+  );
+  return res.rows[0] || null;
+}
+
 function planLimitsFor(plan) {
   return PLAN_LIMITS[plan] || PLAN_LIMITS.solo;
 }
@@ -723,6 +834,13 @@ module.exports = {
   ipSummaryForUser,
   logAdminAction,
   listAdminAuditLog,
+  listAffiliates,
+  findAffiliateByCaktoEmail,
+  createAffiliate,
+  deleteAffiliate,
+  createAffiliateCommission,
+  listAffiliateCommissions,
+  markAffiliateCommissionPaid,
   createOrganization,
   createOrganizationFromCakto,
   findOrganizationByCaktoPurchaseId,

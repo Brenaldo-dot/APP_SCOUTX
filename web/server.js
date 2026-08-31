@@ -7,6 +7,7 @@ const { analyzeStore, UnsupportedStoreError } = require("./shopify-spy");
 const { sign, verify, parseCookies, serializeCookie } = require("./auth");
 const { createPinnedFetch } = require("./safe-fetch");
 const { handleCaktoWebhook } = require("./cakto");
+const caktoApi = require("./caktoApi");
 const db = require("./db");
 
 const APP_BASE_URL = requireEnv("APP_BASE_URL");
@@ -997,6 +998,68 @@ function createApp() {
     if (req.appUser.role !== "admin") return res.status(403).json({ error: "Só administradores podem acessar isso." });
     next();
   }
+
+  // Diagnóstico temporário (2026-08-31) — confirma que a autenticação com a
+  // API da Cakto funciona de verdade e mostra o formato real de um pedido
+  // (commissionedUsers/commissions), já que não deu pra testar isso fora do
+  // servidor (CORS bloqueia do navegador, e a rede local não alcança a API
+  // deles). Só devolve o pedido mais recente — não expõe token nenhum.
+  app.get("/api/admin/cakto-test", requireAdmin, async (req, res) => {
+    try {
+      const orders = await caktoApi.listOrders({ limit: 1, ordering: "-paidAt" });
+      res.json(orders);
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------- Programa de afiliados (admin only) ----------
+
+  app.get("/api/admin/affiliates", requireAdmin, async (req, res) => {
+    res.json(await db.listAffiliates());
+  });
+
+  app.post("/api/admin/affiliates", requireAdmin, async (req, res) => {
+    const { name, caktoEmail, pixKey, firstSalePercentage, recurringPercentage } = req.body || {};
+    if (!name?.trim() || !caktoEmail?.trim()) {
+      return res.status(400).json({ error: "Nome e email da Cakto são obrigatórios." });
+    }
+    const firstPct = Number(firstSalePercentage);
+    const recurPct = Number(recurringPercentage);
+    if (!Number.isFinite(firstPct) || firstPct < 0 || firstPct > 100 || !Number.isFinite(recurPct) || recurPct < 0 || recurPct > 100) {
+      return res.status(400).json({ error: "Percentuais precisam ser números entre 0 e 100." });
+    }
+    try {
+      const affiliate = await db.createAffiliate({
+        name: name.trim(),
+        caktoEmail: caktoEmail.trim(),
+        pixKey: pixKey?.trim() || null,
+        firstSalePercentage: firstPct,
+        recurringPercentage: recurPct,
+      });
+      res.status(201).json(affiliate);
+    } catch (err) {
+      if (err.code === "23505") {
+        return res.status(409).json({ error: "Já existe um afiliado com esse email da Cakto." });
+      }
+      throw err;
+    }
+  });
+
+  app.delete("/api/admin/affiliates/:id", requireAdmin, async (req, res) => {
+    await db.deleteAffiliate(Number(req.params.id));
+    res.status(204).end();
+  });
+
+  app.get("/api/admin/affiliate-commissions", requireAdmin, async (req, res) => {
+    res.json(await db.listAffiliateCommissions());
+  });
+
+  app.patch("/api/admin/affiliate-commissions/:id", requireAdmin, async (req, res) => {
+    const updated = await db.markAffiliateCommissionPaid(Number(req.params.id), !!req.body?.paid);
+    if (!updated) return res.status(404).json({ error: "Comissão não encontrada." });
+    res.json(updated);
+  });
 
   app.get("/api/admin/users", requireAdmin, async (req, res) => {
     const users = await db.listUsersWithCounts();

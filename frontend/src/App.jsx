@@ -18,6 +18,7 @@ import EspionarLoja from './pages/EspionarLoja.jsx'
 import Historico from './pages/Historico.jsx'
 import Usuarios from './pages/Usuarios.jsx'
 import Organizacoes from './pages/Organizacoes.jsx'
+import Afiliados from './pages/Afiliados.jsx'
 import Conta from './pages/Conta.jsx'
 import Suporte from './pages/Suporte.jsx'
 
@@ -72,6 +73,7 @@ export default function App() {
               <Route path="/ferramentas/historico" element={<Historico />} />
               <Route path="/usuarios" element={<Usuarios />} />
               <Route path="/organizacoes" element={<Organizacoes />} />
+              <Route path="/afiliados" element={<Afiliados />} />
             </Route>
           </Route>
         </Routes>
