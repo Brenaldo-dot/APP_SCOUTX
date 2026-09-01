@@ -18,6 +18,22 @@ const CAKTO_OFFER_PLAN_MAP = {
   "3gx6bit": { plan: "agencia", billingCycle: "mensal", label: "Enterprise Mensal" },
   t9c4v6c: { plan: "pro", billingCycle: "mensal", label: "PRO Mensal" },
   "52ytvd7": { plan: "solo", billingCycle: "mensal", label: "Standard Mensal" },
+
+  // Produto duplicado na Cakto (2026-08-31) por causa do reajuste de preço —
+  // editar o preço do produto ANTIGO reajustaria a recorrência de quem já é
+  // assinante, então os 9 links abaixo são um produto NOVO, com webhook
+  // próprio (secret também precisa bater, ver CAKTO_WEBHOOK_SECRET). Os 9
+  // links ANTIGOS acima continuam aqui de propósito — assinantes antigos
+  // continuam renovando por eles no preço de antes, pra sempre.
+  zrhtj34: { plan: "solo", billingCycle: "mensal", label: "Standard Mensal (novo)" },
+  zwbuutf: { plan: "pro", billingCycle: "mensal", label: "PRO Mensal (novo)" },
+  m8ih6hc: { plan: "agencia", billingCycle: "mensal", label: "Enterprise Mensal (novo)" },
+  "3b56i8v": { plan: "agencia", billingCycle: "trimestral", label: "Enterprise Trimestral (novo)" },
+  "8umv5gq": { plan: "solo", billingCycle: "trimestral", label: "Standard Trimestral (novo)" },
+  "3dpynx5": { plan: "pro", billingCycle: "trimestral", label: "PRO Trimestral (novo)" },
+  "36wjk7s": { plan: "solo", billingCycle: "anual", label: "Standard Anual (novo)" },
+  cpspn3i: { plan: "pro", billingCycle: "anual", label: "PRO Anual (novo)" },
+  "9j9t3aq": { plan: "agencia", billingCycle: "anual", label: "Enterprise Anual (novo)" },
 };
 
 // Nomes confirmados na documentação oficial da Cakto
