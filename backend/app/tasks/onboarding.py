@@ -13,6 +13,9 @@ pediu explicitamente pra poder emendar um cadastro no outro.
 import logging
 from datetime import datetime, timedelta, timezone
 
+import redis
+
+from app.config import get_settings
 from app.database import SessionLocal
 from app.models import AlertType, Competitor, CompetitorStatus
 from app.scrapers.shopify import verify_is_shopify
@@ -23,6 +26,8 @@ from app.tasks.celery_app import celery_app
 from app.tasks.utils import run_async
 
 logger = logging.getLogger(__name__)
+
+_redis_client = redis.from_url(get_settings().redis_url, decode_responses=True)
 
 
 @celery_app.task(name="app.tasks.onboarding.run_onboarding_xray", bind=True, max_retries=2)
@@ -99,6 +104,30 @@ def reconcile_stuck_onboarding() -> dict:
         for competitor in stuck:
             logger.warning("Reprocessando cadastro travado: %s (id=%s)", competitor.domain, competitor.id)
             run_onboarding_xray.delay(competitor.id)
+        _maybe_run_daily_retention()
         return {"requeued": len(stuck)}
     finally:
         db.close()
+
+
+def _maybe_run_daily_retention() -> None:
+    """Achado ao vivo (2026-08-29 até hoje, nunca explicado): o job
+    `purge-old-history-daily-3am` do Celery Beat (app/tasks/celery_app.py)
+    está registrado certinho no worker (confirmado via `/celery-diagnostics`
+    em 2026-09-03) e o Beat manda "Sending due task" toda madrugada — mas o
+    worker nunca de fato executa, sem erro nenhum, sem log nenhum, mesmo com
+    reforços (acks_late, log logo na entrada). Em vez de continuar caçando a
+    causa, pendura a limpeza numa task que JÁ SABEMOS que roda de forma
+    confiável (essa aqui, a cada 3 minutos) — usa uma trava no Redis (SET NX
+    com 20h de validade) pra rodar no máximo 1x por dia, contornando o
+    agendamento problemático de vez."""
+    from app.tasks.retention import run_purge
+
+    lock_key = "daily-retention-purge-lock"
+    acquired = _redis_client.set(lock_key, "1", nx=True, ex=20 * 3600)
+    if not acquired:
+        return
+    try:
+        run_purge()
+    except Exception:
+        logger.exception("Falha ao rodar a limpeza diária de histórico via reconcile_stuck_onboarding.")
