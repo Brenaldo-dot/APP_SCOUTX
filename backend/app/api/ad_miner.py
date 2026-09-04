@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_current_user
 from app.database import get_db
-from app.models import AdMinerScan, AdMinerScanStatus
+from app.models import AdMinerScan, AdMinerScanStatus, ProtectedStore
 from app.schemas.ad_miner import AdMinerScanCreate, AdMinerScanOut
 from app.services.competitor_service import normalize_domain
 from app.tasks.ad_miner import run_ad_miner_scan
@@ -49,6 +49,11 @@ def create_scan(
     _check_scan_rate_limit(current_user.id)
     domain = normalize_domain(payload.url)
     if not domain or "." not in domain:
+        raise HTTPException(400, "URL inválida, cola o link da loja (ex: lojaexemplo.com)")
+    # Mesma proteção de api/competitors.py:check_protected_store (achado ao
+    # vivo, 2026-08-31) — esse scan busca a loja direto por domínio, sem
+    # passar por register_competitor, então também precisa dessa checagem.
+    if db.query(ProtectedStore).filter(ProtectedStore.domain == domain).first() is not None:
         raise HTTPException(400, "URL inválida, cola o link da loja (ex: lojaexemplo.com)")
 
     scan = AdMinerScan(

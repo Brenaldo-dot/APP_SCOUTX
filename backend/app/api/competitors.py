@@ -484,6 +484,20 @@ def celery_diagnostics(current_user: CurrentUser = Depends(get_current_user)):
     }
 
 
+@router.get("/protected-stores/check")
+def check_protected_store(domain: str, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
+    """Achado ao vivo (2026-08-31): proteger uma loja só bloqueava o
+    CADASTRO dela em Concorrentes (register_competitor) — mas "Buscar
+    Fornecedor" e "Espionar Loja" (rotas do Node em server.js, `/api/buscar`
+    `/api/spy` `/api/spy-preview`) buscam a URL direto, sem passar por
+    register_competitor nenhum, então continuavam trazendo dado de uma loja
+    "protegida" numa dessas duas telas. Sem endpoint dedicado, o Node não
+    tem como saber quais domínios estão protegidos (a tabela vive só aqui,
+    banco do FastAPI) — qualquer usuário logado pode chamar isso (não só
+    admin), porque o Node chama pra QUALQUER busca, não só as de admin."""
+    return {"protected": db.query(ProtectedStore).filter(ProtectedStore.domain == normalize_domain(domain)).first() is not None}
+
+
 # Precisam ficar ANTES de /{competitor_id} — mesmo motivo do /hot em
 # products.py: uma rota literal como essa nunca bateria com um int de
 # qualquer forma, mas mantém o padrão já usado no resto do arquivo.

@@ -1619,6 +1619,43 @@ function createApp() {
 
   // ---------- Rotas da ferramenta (mesmas do app desktop) ----------
 
+  // Achado ao vivo (2026-08-31): "loja protegida" (admin, aba Usuários) só
+  // travava o CADASTRO em Concorrentes — Buscar Fornecedor e Espionar Loja
+  // buscam a URL direto aqui no Node, sem passar por register_competitor,
+  // então continuavam trazendo dado de loja protegida. A lista em si vive
+  // só no banco do FastAPI (tabela protected_stores), então precisa
+  // perguntar pra lá — mesma dupla camada de confiança do proxy
+  // /api/minerador/* (X-Internal-Secret + X-User-Id), já que essa rota
+  // roda pra QUALQUER busca de QUALQUER usuário, não só admin.
+  //
+  // Fail-CLOSED de propósito (pedido explícito: "deixe elas impossíveis de
+  // serem acessadas") — se não der pra confirmar que a loja NÃO está
+  // protegida (FastAPI fora do ar, timeout, etc.), bloqueia por segurança
+  // em vez de arriscar vazar dado de uma loja protegida durante a
+  // instabilidade. Only exceção: MINERADOR_API_URL não configurado (ambiente
+  // sem o FastAPI ligado, ex: dev local) — aí não tem lista nenhuma pra
+  // proteger mesmo, segue sem bloquear.
+  async function isProtectedStoreDomain(rawUrl, userId) {
+    if (!MINERADOR_API_URL) return false;
+    const domain = extractDomain(rawUrl);
+    if (!domain) return false;
+    try {
+      const resp = await fetch(
+        `${MINERADOR_API_URL.replace(/\/+$/, "")}/api/competitors/protected-stores/check?domain=${encodeURIComponent(domain)}`,
+        { headers: { "X-User-Id": String(userId), "X-Internal-Secret": INTERNAL_API_SECRET } }
+      );
+      if (!resp.ok) {
+        console.error(`Checagem de loja protegida falhou (HTTP ${resp.status}) — bloqueando por segurança.`);
+        return true;
+      }
+      const data = await resp.json();
+      return data.protected === true;
+    } catch (err) {
+      console.error("Falha ao checar loja protegida (bloqueando por segurança):", err);
+      return true;
+    }
+  }
+
   app.get("/api/buscar", async (req, res) => {
     const limit = checkFetchRouteLimit(req.appUser.id);
     if (limit.blocked) {
@@ -1627,6 +1664,10 @@ function createApp() {
     const raw = req.query.url;
     if (!raw) {
       return res.status(400).json({ error: "Parâmetro 'url' é obrigatório" });
+    }
+
+    if (await isProtectedStoreDomain(raw, req.appUser.id)) {
+      return res.status(404).json({ error: "Produto não encontrado" });
     }
 
     const domain = extractDomain(raw);
@@ -1692,6 +1733,10 @@ function createApp() {
       return res.status(400).json({ error: "Parâmetro 'url' é obrigatório" });
     }
 
+    if (await isProtectedStoreDomain(raw, req.appUser.id)) {
+      return res.status(502).json({ error: "Não foi possível analisar esta loja" });
+    }
+
     const domain = extractDomain(raw);
     if (domain) {
       db.logSearch(req.appUser.id, "spy", domain, String(raw)).catch((e) => console.error("log search:", e));
@@ -1741,6 +1786,11 @@ function createApp() {
       if (!/^https?:$/.test(target.protocol)) throw new Error("protocolo inválido");
     } catch {
       return res.status(400).json({ error: "URL inválida" });
+    }
+
+    if (await isProtectedStoreDomain(raw, req.appUser.id)) {
+      applyPreviewCsp(res);
+      return res.status(200).send(previewErrorPage(target.toString()));
     }
 
     let safeFetch;
