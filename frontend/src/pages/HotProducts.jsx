@@ -53,8 +53,21 @@ export default function HotProducts() {
   const [filtering, setFiltering] = useState(false)
   const requestIdRef = useRef(0)
 
+  // requestIdRef (achado ao vivo, 2026-09-05: botões "Ver produto"/"Ver
+  // anúncio" somem de TODOS os produtos de vez em quando): sem essa trava,
+  // se a resposta de uma busca antiga chegasse depois da mais recente, a
+  // lista de lojas ficava vazia por um instante — como esses dois links
+  // dependem do domínio da loja (competitorDomains), todo produto perdia
+  // os dois links juntos. Mesma causa/correção já aplicada em
+  // fetchHotProducts abaixo.
+  const competitorsRequestIdRef = useRef(0)
+
   function fetchCompetitors() {
-    return api.listCompetitors({ operation }).then(setCompetitors).catch(() => {})
+    const requestId = ++competitorsRequestIdRef.current
+    return api
+      .listCompetitors({ operation })
+      .then((data) => requestId === competitorsRequestIdRef.current && setCompetitors(data))
+      .catch(() => {})
   }
 
   useEffect(() => {

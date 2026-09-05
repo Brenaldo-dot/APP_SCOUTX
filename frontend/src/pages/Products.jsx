@@ -38,8 +38,19 @@ export default function Products() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [filtering, setFiltering] = useState(false)
 
+  // `cancelled` (mesmo achado ao vivo de HotProducts.jsx, 2026-09-05): sem
+  // essa trava, uma resposta antiga chegando depois da mais recente podia
+  // zerar a lista de lojas por um instante, derrubando os links que
+  // dependem do domínio de TODOS os produtos de uma vez.
   useEffect(() => {
-    api.listCompetitors({ operation }).then(setCompetitors).catch(() => {})
+    let cancelled = false
+    api
+      .listCompetitors({ operation })
+      .then((data) => !cancelled && setCompetitors(data))
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [operation, refreshKey])
 
   useEffect(() => {

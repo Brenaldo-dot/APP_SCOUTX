@@ -40,8 +40,18 @@ export default function Ads() {
   const pollRef = useRef(null)
   const requestIdRef = useRef(0)
 
+  // requestIdRef (mesmo achado ao vivo de HotProducts.jsx, 2026-09-05): sem
+  // essa trava, uma resposta antiga chegando depois da mais recente podia
+  // zerar a lista de lojas por um instante, derrubando os links que
+  // dependem do domínio de TODOS os anúncios de uma vez.
+  const competitorsRequestIdRef = useRef(0)
+
   function fetchCompetitors() {
-    return api.listCompetitors({ operation }).then(setCompetitors).catch(() => {})
+    const requestId = ++competitorsRequestIdRef.current
+    return api
+      .listCompetitors({ operation })
+      .then((data) => requestId === competitorsRequestIdRef.current && setCompetitors(data))
+      .catch(() => {})
   }
 
   useEffect(() => {
