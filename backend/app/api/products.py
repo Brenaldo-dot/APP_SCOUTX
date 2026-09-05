@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.api.deps import CurrentUser, get_current_user, resolve_target_user
 from app.database import get_db
@@ -185,6 +185,14 @@ def list_hot_products(
     # a mais recente de cada produto em Python. DISTINCT ON deixa o Postgres
     # escolher só a linha mais recente por produto, sem trazer o histórico
     # inteiro pela rede.
+    #
+    # Achado ao vivo de novo (2026-09-05, essa tela voltou a ficar lenta —
+    # 0,6 a 1,5s): o DISTINCT ON acima trazia a pontuação mais recente de
+    # TODO produto ativo rastreado (quente ou não), pra só DEPOIS filtrar
+    # `score >= min_score` em Python — conforme o catálogo cresce, isso
+    # transfere cada vez mais linha frio pela rede à toa. Envolve o DISTINCT
+    # ON numa subquery e filtra o score já no banco, então só o que realmente
+    # qualifica como "quente" volta pra cá.
     rows_query = (
         db.query(ProductScore)
         .join(Product, Product.id == ProductScore.product_id)
@@ -194,12 +202,12 @@ def list_hot_products(
     )
     if operation:
         rows_query = rows_query.filter(Competitor.operation == operation)
-    rows = (
-        rows_query.distinct(ProductScore.product_id).order_by(ProductScore.product_id, ProductScore.date.desc()).all()
-    )
-
+    latest_per_product = (
+        rows_query.distinct(ProductScore.product_id).order_by(ProductScore.product_id, ProductScore.date.desc())
+    ).subquery()
+    LatestScore = aliased(ProductScore, latest_per_product)
     qualifying_all = sorted(
-        (row for row in rows if row.score >= min_score),
+        db.query(LatestScore).filter(LatestScore.score >= min_score).all(),
         key=lambda row: row.score,
         reverse=True,
     )
