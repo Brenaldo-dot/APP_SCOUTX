@@ -75,6 +75,38 @@ def run_onboarding_xray(self, competitor_id: int) -> dict:
     except Exception as exc:
         logger.exception("Falha no raio-x inicial do concorrente %s", competitor_id)
         db.rollback()
+        # Achado ao vivo (2026-09-06, app lento pra todo mundo): quando as
+        # tentativas se esgotam (max_retries=2), o status ficava "checking"
+        # pra sempre — nada aqui marcava um estado final. reconcile_stuck_
+        # onboarding (roda a cada 3min) pegava esse MESMO concorrente de
+        # novo e disparava outra tentativa do zero, sem parar nunca — 12
+        # lojas ficaram presas nesse loop por mais de 1h seguida, cada
+        # tentativa fazendo scraping de verdade (rede/SSL), competindo por
+        # CPU/conexão com pedido de gente de verdade. Na última tentativa,
+        # marca como NOT_SHOPIFY (mesmo selo de "não deu pra confirmar") em
+        # vez de retentar de novo — tira do loop, admin pode reativar
+        # manualmente se quiser tentar de novo depois.
+        if self.request.retries >= self.max_retries:
+            db2 = SessionLocal()
+            try:
+                competitor = db2.get(Competitor, competitor_id)
+                if competitor and competitor.status == CompetitorStatus.CHECKING:
+                    competitor.status = CompetitorStatus.NOT_SHOPIFY
+                    db2.commit()
+                    run_async(
+                        alert_service.create_alert(
+                            db2,
+                            competitor,
+                            AlertType.NOT_SHOPIFY,
+                            f"Não deu pra verificar {competitor.domain} depois de {self.max_retries + 1} "
+                            f"tentativas (erro: {exc}). Nenhum monitoramento foi agendado — se a loja "
+                            "realmente for Shopify, tente cadastrar de novo mais tarde.",
+                        )
+                    )
+                    db2.commit()
+            finally:
+                db2.close()
+            return {"status": "failed_permanently", "competitor_id": competitor_id, "error": str(exc)}
         raise self.retry(exc=exc, countdown=60)
     finally:
         db.close()
