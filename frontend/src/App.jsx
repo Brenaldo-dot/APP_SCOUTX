@@ -19,8 +19,12 @@ import Historico from './pages/Historico.jsx'
 import Usuarios from './pages/Usuarios.jsx'
 import Organizacoes from './pages/Organizacoes.jsx'
 import Afiliados from './pages/Afiliados.jsx'
+import AdminIndicacoes from './pages/AdminIndicacoes.jsx'
 import Conta from './pages/Conta.jsx'
 import Suporte from './pages/Suporte.jsx'
+import Indicacao from './pages/Indicacao.jsx'
+import Comunidade from './pages/Comunidade.jsx'
+import AdminComunidades from './pages/AdminComunidades.jsx'
 
 // Quem não tem acesso ao núcleo do ScoutX não deve cair numa tela de "sem
 // permissão" logo depois de logar — manda direto pra ferramenta que ela
@@ -69,11 +73,21 @@ export default function App() {
                 conseguir pedir ajuda. */}
             <Route path="/suporte" element={<Suporte />} />
 
+            {/* Indicação: mesma lógica de Minha Conta/Suporte — qualquer
+                cliente logado pode pedir seu cupom, não é feature de plano. */}
+            <Route path="/indicacao" element={<Indicacao />} />
+
+            {/* Comunidade: mesma lógica — qualquer cliente logado pode
+                participar ou (se for afiliado) virar embaixador dono de uma. */}
+            <Route path="/comunidade" element={<Comunidade />} />
+
             <Route element={<RouteGuard allow={(me) => me.isAdmin} />}>
               <Route path="/ferramentas/historico" element={<Historico />} />
               <Route path="/usuarios" element={<Usuarios />} />
               <Route path="/organizacoes" element={<Organizacoes />} />
               <Route path="/afiliados" element={<Afiliados />} />
+              <Route path="/admin/indicacoes" element={<AdminIndicacoes />} />
+              <Route path="/admin/comunidades" element={<AdminComunidades />} />
             </Route>
           </Route>
         </Routes>

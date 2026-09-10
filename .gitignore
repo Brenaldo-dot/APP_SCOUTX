@@ -11,3 +11,4 @@ venv/
 web/public-minerador/
 .DS_Store
 *.log
+audit-output.json

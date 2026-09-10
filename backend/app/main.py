@@ -207,6 +207,23 @@ def _run_startup_migrations(conn):
             )
         )
 
+        # Achado ao vivo (2026-09-08): a limpeza noturna de histórico
+        # (tasks/retention.py) calculava "a linha mais recente de cada
+        # produto" varrendo product_snapshots inteira sem um índice que
+        # cobrisse (product_id, captured_at) junto — só existiam índices
+        # separados em cada coluna. Isso obrigava um sort pesado em memória
+        # toda madrugada; o pico de memória do Postgres vinha subindo noite
+        # após noite (3,6GB → 7,0GB → quase 7,8GB de um teto de 8GB) até
+        # bater perto do limite. CONCURRENTLY não dá pra usar dentro de uma
+        # transação (create_all já abriu uma) — tabela pequena o suficiente
+        # pra um create normal não travar nada perceptível na subida.
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_product_snapshots_product_captured "
+                "ON product_snapshots (product_id, captured_at)"
+            )
+        )
+
 
 app = FastAPI(title="ScoutX", version="0.1.0", lifespan=lifespan)
 

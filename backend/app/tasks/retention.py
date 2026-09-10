@@ -30,23 +30,44 @@ logger = logging.getLogger(__name__)
 # assim que a limpeza automática voltar a funcionar de verdade.
 RETENTION_DAYS = 12
 
+# Achado ao vivo (2026-09-08): a versão anterior comparava `id NOT IN
+# (SELECT DISTINCT ON (product_id) id FROM product_scores ORDER BY
+# product_id, date DESC)` — esse DISTINCT ON reordena a tabela INTEIRA (não
+# só as linhas velhas) toda madrugada, e o resultado inteiro precisa ficar
+# em memória pra o NOT IN comparar linha a linha. O pico de memória do
+# Postgres vinha subindo noite após noite (3,6GB → 7,0GB → quase 7,8GB de um
+# teto de 8GB) até quase estourar — bate exatamente com o horário dessa
+# limpeza. Reescrita pra um JOIN contra `MAX(date) GROUP BY product_id`:
+# mesmo resultado (mantém a linha mais recente de cada produto), mas usa o
+# índice único (product_id, date) — já existe via UniqueConstraint em
+# models/score.py — pra um agregado leve em vez de reordenar tudo.
 _PURGE_PRODUCT_SCORES = text(
     """
-    DELETE FROM product_scores
-    WHERE date < (CURRENT_DATE - make_interval(days => :retention_days))
-    AND id NOT IN (
-        SELECT DISTINCT ON (product_id) id FROM product_scores ORDER BY product_id, date DESC
-    )
+    DELETE FROM product_scores ps
+    USING (
+        SELECT product_id, MAX(date) AS latest_date
+        FROM product_scores
+        GROUP BY product_id
+    ) latest
+    WHERE ps.product_id = latest.product_id
+    AND ps.date < (CURRENT_DATE - make_interval(days => :retention_days))
+    AND ps.date <> latest.latest_date
     """
 )
 
+# Mesma reescrita, com o índice composto novo (product_id, captured_at) —
+# ver main.py:_run_startup_migrations e models/product.py:ProductSnapshot.
 _PURGE_PRODUCT_SNAPSHOTS = text(
     """
-    DELETE FROM product_snapshots
-    WHERE captured_at < (now() - make_interval(days => :retention_days))
-    AND id NOT IN (
-        SELECT DISTINCT ON (product_id) id FROM product_snapshots ORDER BY product_id, captured_at DESC
-    )
+    DELETE FROM product_snapshots ps
+    USING (
+        SELECT product_id, MAX(captured_at) AS latest_captured_at
+        FROM product_snapshots
+        GROUP BY product_id
+    ) latest
+    WHERE ps.product_id = latest.product_id
+    AND ps.captured_at < (now() - make_interval(days => :retention_days))
+    AND ps.captured_at <> latest.latest_captured_at
     """
 )
 

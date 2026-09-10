@@ -9,6 +9,7 @@ const { createPinnedFetch } = require("./safe-fetch");
 const { handleCaktoWebhook } = require("./cakto");
 const caktoApi = require("./caktoApi");
 const db = require("./db");
+const { TIERS, tierForActiveMembers } = require("./communityTiers");
 
 const APP_BASE_URL = requireEnv("APP_BASE_URL");
 const SESSION_SECRET = requireEnv("SESSION_SECRET");
@@ -1057,6 +1058,338 @@ function createApp() {
 
   app.patch("/api/admin/affiliate-commissions/:id", requireAdmin, async (req, res) => {
     const updated = await db.markAffiliateCommissionPaid(Number(req.params.id), !!req.body?.paid);
+    if (!updated) return res.status(404).json({ error: "Comissão não encontrada." });
+    res.json(updated);
+  });
+
+  // ---------- Indicação (cliente indica cliente) ----------
+  // Diferente do programa de afiliados acima (cadastro manual pelo admin):
+  // aqui é o próprio cliente logado que pede o cupom pela aba "Indicação" —
+  // ver frontend/src/pages/Indicacao.jsx. Qualquer usuário logado pode
+  // acessar (não é feature de plano), igual Suporte/Minha Conta.
+
+  app.get("/api/referral/me", async (req, res) => {
+    const coupon = await db.getReferralCouponByUserId(req.appUser.id);
+    const commissions = coupon ? await db.listReferralCommissionsByUserId(req.appUser.id) : [];
+    res.json({ coupon, commissions });
+  });
+
+  app.post("/api/referral/request", async (req, res) => {
+    const pixKey = typeof req.body?.pixKey === "string" ? req.body.pixKey.trim() : "";
+    const whatsapp = typeof req.body?.whatsapp === "string" ? req.body.whatsapp.trim() : "";
+    if (!whatsapp) {
+      return res.status(400).json({ error: "WhatsApp é obrigatório pra gente conseguir avisar quando o cupom ficar pronto." });
+    }
+    if (!pixKey) {
+      return res.status(400).json({ error: "Chave PIX é obrigatória pra gente conseguir pagar sua comissão." });
+    }
+    const coupon = await db.createReferralCouponRequest(req.appUser.id, pixKey, whatsapp);
+    res.status(201).json(coupon);
+  });
+
+  app.patch("/api/referral/pix", async (req, res) => {
+    const pixKey = typeof req.body?.pixKey === "string" ? req.body.pixKey.trim() : "";
+    if (!pixKey) return res.status(400).json({ error: "Chave PIX é obrigatória." });
+    const updated = await db.updateReferralCouponPix(req.appUser.id, pixKey);
+    if (!updated) return res.status(404).json({ error: "Você ainda não solicitou um cupom de indicação." });
+    res.json(updated);
+  });
+
+  app.patch("/api/referral/whatsapp", async (req, res) => {
+    const whatsapp = typeof req.body?.whatsapp === "string" ? req.body.whatsapp.trim() : "";
+    if (!whatsapp) return res.status(400).json({ error: "WhatsApp é obrigatório." });
+    const updated = await db.updateReferralCouponWhatsapp(req.appUser.id, whatsapp);
+    if (!updated) return res.status(404).json({ error: "Você ainda não solicitou um cupom de indicação." });
+    res.json(updated);
+  });
+
+  // ---------- Indicação (admin only) ----------
+
+  app.get("/api/admin/referrals", requireAdmin, async (req, res) => {
+    res.json(await db.listReferralCoupons());
+  });
+
+  app.post("/api/admin/referrals/:id/activate", requireAdmin, async (req, res) => {
+    const couponCode = String(req.body?.couponCode || "").trim();
+    if (!couponCode) return res.status(400).json({ error: "Código do cupom é obrigatório." });
+    try {
+      const updated = await db.activateReferralCoupon(Number(req.params.id), couponCode);
+      if (!updated) return res.status(404).json({ error: "Pedido de cupom não encontrado." });
+      res.json(updated);
+    } catch (err) {
+      if (err.code === "23505") {
+        return res.status(409).json({ error: "Esse código de cupom já está em uso por outra indicação." });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/admin/referral-commissions", requireAdmin, async (req, res) => {
+    res.json(await db.listReferralCommissions());
+  });
+
+  app.patch("/api/admin/referral-commissions/:id", requireAdmin, async (req, res) => {
+    const updated = await db.markReferralCommissionPaid(Number(req.params.id), !!req.body?.paid);
+    if (!updated) return res.status(404).json({ error: "Comissão não encontrada." });
+    res.json(updated);
+  });
+
+  // ---------- Comunidade de embaixadores ----------
+  // Extensão do programa de afiliados: quem já é afiliado (identificado
+  // comparando o email da sessão com affiliates.cakto_email, mesmo truque
+  // que o webhook da Cakto já usa em cakto.js) pode virar dono de uma
+  // comunidade fechada. Qualquer usuário logado pode acessar essas rotas —
+  // o que cada um enxerga/pode fazer é decidido dentro do handler, não por
+  // um gate de permissão de plano.
+
+  const MAX_COMMUNITY_IMAGE_LENGTH = 4_000_000; // ~4MB de data URI, folga maior que avatar (post de conteúdo, não miniatura)
+
+  async function getMyAmbassadorContext(req) {
+    const affiliate = await db.findAffiliateByCaktoEmail(req.appUser.email);
+    if (!affiliate) return { affiliate: null, community: null };
+    const community = await db.getCommunityByAffiliateId(affiliate.id);
+    return { affiliate, community };
+  }
+
+  // Devolve o "estado" da pessoa em relação à Comunidade: embaixadora (com
+  // ou sem comunidade criada ainda), membro de uma comunidade, ou nenhum
+  // dos dois (pode navegar o diretório pra participar de alguma).
+  app.get("/api/community/status", async (req, res) => {
+    const { affiliate, community } = await getMyAmbassadorContext(req);
+    let ambassadorStats = null;
+    if (community) {
+      const activeMemberCount = await db.countActiveCommunityMembers(community.id);
+      const tier = tierForActiveMembers(activeMemberCount);
+      ambassadorStats = { activeMemberCount, tier: tier.name, tierLabel: tier.label, tierPercentage: tier.percentage };
+    }
+    const membership = req.appUser.organization_id
+      ? await db.getCommunityMembershipByOrgId(req.appUser.organization_id)
+      : null;
+    res.json({
+      isAmbassador: !!affiliate,
+      ambassadorCommunity: community,
+      ambassadorStats,
+      memberCommunityId: membership?.community_id || null,
+      tiers: TIERS.map((t) => ({ name: t.name, label: t.label, max: Number.isFinite(t.max) ? t.max : null, percentage: t.percentage })),
+    });
+  });
+
+  // Embaixador cria a comunidade dele (nome + foto opcional) — só uma vez,
+  // ON CONFLICT DO NOTHING no banco garante isso mesmo em corrida.
+  app.post("/api/community/setup", async (req, res) => {
+    const { affiliate, community } = await getMyAmbassadorContext(req);
+    if (!affiliate) return res.status(403).json({ error: "Sua conta não está cadastrada como afiliado." });
+    if (community) return res.status(409).json({ error: "Você já tem uma comunidade." });
+    const name = String(req.body?.name || "").trim();
+    if (!name) return res.status(400).json({ error: "Nome da comunidade é obrigatório." });
+    const photoUrl = typeof req.body?.photoUrl === "string" && req.body.photoUrl.startsWith("data:image/") ? req.body.photoUrl : null;
+    if (photoUrl && photoUrl.length > MAX_COMMUNITY_IMAGE_LENGTH) {
+      return res.status(400).json({ error: "Imagem muito grande." });
+    }
+    const created = await db.createCommunity(affiliate.id, name, photoUrl);
+    res.status(201).json(created);
+  });
+
+  // Lista de comunidades pra quem ainda não está em nenhuma escolher onde
+  // participar.
+  app.get("/api/community/directory", async (req, res) => {
+    res.json(await db.listCommunitiesDirectory());
+  });
+
+  app.post("/api/community/join", async (req, res) => {
+    if (!req.appUser.organization_id) {
+      return res.status(400).json({ error: "Sua conta não está vinculada a uma organização." });
+    }
+    const existing = await db.getCommunityMembershipByOrgId(req.appUser.organization_id);
+    if (existing) return res.status(409).json({ error: "Você já está em uma comunidade, não é possível trocar." });
+    const communityId = Number(req.body?.communityId);
+    const community = await db.getCommunityById(communityId);
+    if (!community) return res.status(404).json({ error: "Comunidade não encontrada." });
+    const membership = await db.joinCommunity(communityId, req.appUser.organization_id);
+    res.status(201).json(membership);
+  });
+
+  // Confere se a pessoa logada pode VER a comunidade `id`: é a
+  // embaixadora dona dela, ou a organização dela é membro. Devolve a
+  // comunidade (pra checagem de dono nas rotas de post) ou null.
+  async function communityIfAllowed(req, communityId) {
+    const community = await db.getCommunityById(communityId);
+    if (!community) return null;
+    const { affiliate } = await getMyAmbassadorContext(req);
+    if (affiliate && community.affiliate_id === affiliate.id) return { community, isOwner: true };
+    const membership = req.appUser.organization_id
+      ? await db.getCommunityMembershipByOrgId(req.appUser.organization_id)
+      : null;
+    if (membership && membership.community_id === community.id) return { community, isOwner: false };
+    return null;
+  }
+
+  // Edição da comunidade (nome/descrição/foto) — só o dono. Qualquer campo
+  // omitido mantém o valor atual (ver db.updateCommunityDetails: nome e
+  // foto usam COALESCE, descrição aceita null explícito pra dar pra
+  // apagar a descrição também).
+  app.patch("/api/community/:id", async (req, res) => {
+    const allowed = await communityIfAllowed(req, Number(req.params.id));
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode editar." });
+    const name = typeof req.body?.name === "string" && req.body.name.trim() ? req.body.name.trim() : null;
+    const description = typeof req.body?.description === "string" ? req.body.description.trim() || null : undefined;
+    const photoUrl = typeof req.body?.photoUrl === "string" && req.body.photoUrl.startsWith("data:image/") ? req.body.photoUrl : null;
+    if (photoUrl && photoUrl.length > MAX_COMMUNITY_IMAGE_LENGTH) {
+      return res.status(400).json({ error: "Imagem muito grande." });
+    }
+    const updated = await db.updateCommunityDetails(allowed.community.id, {
+      name,
+      description: description === undefined ? allowed.community.description : description,
+      photoUrl,
+    });
+    res.json(updated);
+  });
+
+  app.post("/api/community/:id/channels", async (req, res) => {
+    const allowed = await communityIfAllowed(req, Number(req.params.id));
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode criar canais." });
+    const name = String(req.body?.name || "").trim();
+    if (!name) return res.status(400).json({ error: "Nome do canal é obrigatório." });
+    const groupName = typeof req.body?.groupName === "string" ? req.body.groupName.trim() || null : null;
+    const channel = await db.createCommunityChannel(allowed.community.id, name, groupName);
+    res.status(201).json(channel);
+  });
+
+  app.delete("/api/community/channels/:channelId", async (req, res) => {
+    const channel = await db.getCommunityChannelById(Number(req.params.channelId));
+    if (!channel) return res.status(404).json({ error: "Canal não encontrado." });
+    const allowed = await communityIfAllowed(req, channel.community_id);
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode apagar canais." });
+    try {
+      await db.deleteCommunityChannel(channel.id);
+      res.status(204).end();
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // `?channelId=` escolhe qual canal mostrar (padrão: o primeiro criado,
+  // igual sempre existe pelo menos o canal "Geral" automático). Devolve os
+  // canais junto pra montar a barra lateral sem precisar de outra chamada.
+  app.get("/api/community/:id", async (req, res) => {
+    const allowed = await communityIfAllowed(req, Number(req.params.id));
+    if (!allowed) return res.status(403).json({ error: "Você não tem acesso a essa comunidade." });
+    const channels = await db.listCommunityChannels(allowed.community.id);
+    if (channels.length === 0) return res.status(500).json({ error: "Essa comunidade não tem nenhum canal." });
+    const requestedChannelId = Number(req.query.channelId);
+    const activeChannel = channels.find((c) => c.id === requestedChannelId) || channels[0];
+    const sort = req.query.sort === "likes" ? "likes" : "recent";
+    const posts = await db.listCommunityPostsByChannel(activeChannel.id, req.appUser.id, sort);
+    const comments = await db.listCommunityCommentsForCommunity(allowed.community.id);
+    const activeMemberCount = await db.countActiveCommunityMembers(allowed.community.id);
+    const commentsByPost = new Map();
+    for (const c of comments) {
+      if (!commentsByPost.has(c.post_id)) commentsByPost.set(c.post_id, []);
+      commentsByPost.get(c.post_id).push(c);
+    }
+    res.json({
+      community: allowed.community,
+      isOwner: allowed.isOwner,
+      channels,
+      activeChannelId: activeChannel.id,
+      activeMemberCount,
+      posts: posts.map((p) => ({ ...p, comments: commentsByPost.get(p.id) || [] })),
+    });
+  });
+
+  app.post("/api/community/:id/posts", async (req, res) => {
+    const allowed = await communityIfAllowed(req, Number(req.params.id));
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode postar." });
+    const bodyText = String(req.body?.body || "").trim();
+    if (!bodyText) return res.status(400).json({ error: "Escreva algo pra postar." });
+    const imageUrl = typeof req.body?.imageUrl === "string" && req.body.imageUrl.startsWith("data:image/") ? req.body.imageUrl : null;
+    if (imageUrl && imageUrl.length > MAX_COMMUNITY_IMAGE_LENGTH) {
+      return res.status(400).json({ error: "Imagem muito grande." });
+    }
+    const channel = await db.getCommunityChannelById(Number(req.body?.channelId));
+    if (!channel || channel.community_id !== allowed.community.id) {
+      return res.status(400).json({ error: "Canal inválido." });
+    }
+    const post = await db.createCommunityPost({ communityId: allowed.community.id, channelId: channel.id, body: bodyText, imageUrl });
+    res.status(201).json({ ...post, like_count: 0, liked_by_me: false, comments: [] });
+  });
+
+  app.patch("/api/community/posts/:postId", async (req, res) => {
+    const postId = Number(req.params.postId);
+    const postRow = await db.getCommunityPostById(postId);
+    if (!postRow) return res.status(404).json({ error: "Post não encontrado." });
+    const allowed = await communityIfAllowed(req, postRow.community_id);
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode editar o post." });
+    const bodyText = String(req.body?.body || "").trim();
+    if (!bodyText) return res.status(400).json({ error: "Escreva algo pra postar." });
+    const imageUrl = typeof req.body?.imageUrl === "string" && req.body.imageUrl.startsWith("data:image/") ? req.body.imageUrl : postRow.image_url;
+    if (imageUrl && imageUrl.length > MAX_COMMUNITY_IMAGE_LENGTH) {
+      return res.status(400).json({ error: "Imagem muito grande." });
+    }
+    const updated = await db.updateCommunityPost(postId, { body: bodyText, imageUrl });
+    res.json(updated);
+  });
+
+  app.delete("/api/community/posts/:postId", async (req, res) => {
+    const postId = Number(req.params.postId);
+    const postRow = await db.getCommunityPostById(postId);
+    if (!postRow) return res.status(404).json({ error: "Post não encontrado." });
+    const allowed = await communityIfAllowed(req, postRow.community_id);
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode apagar o post." });
+    await db.deleteCommunityPost(postId);
+    res.status(204).end();
+  });
+
+  app.post("/api/community/posts/:postId/pin", async (req, res) => {
+    const postId = Number(req.params.postId);
+    const postRow = await db.getCommunityPostById(postId);
+    if (!postRow) return res.status(404).json({ error: "Post não encontrado." });
+    const allowed = await communityIfAllowed(req, postRow.community_id);
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode fixar posts." });
+    const updated = await db.toggleCommunityPostPin(postId);
+    res.json(updated);
+  });
+
+  app.post("/api/community/posts/:postId/comments", async (req, res) => {
+    const postId = Number(req.params.postId);
+    const bodyText = String(req.body?.body || "").trim();
+    if (!bodyText) return res.status(400).json({ error: "Escreva um comentário." });
+    const postRow = await db.getCommunityPostById(postId);
+    if (!postRow) return res.status(404).json({ error: "Post não encontrado." });
+    const allowed = await communityIfAllowed(req, postRow.community_id);
+    if (!allowed) return res.status(403).json({ error: "Você não tem acesso a essa comunidade." });
+    const comment = await db.createCommunityComment({
+      postId,
+      authorUserId: req.appUser.id,
+      authorName: req.appUser.name,
+      isAmbassador: allowed.isOwner,
+      body: bodyText,
+    });
+    res.status(201).json(comment);
+  });
+
+  app.post("/api/community/posts/:postId/like", async (req, res) => {
+    const postId = Number(req.params.postId);
+    const postRow = await db.getCommunityPostById(postId);
+    if (!postRow) return res.status(404).json({ error: "Post não encontrado." });
+    const allowed = await communityIfAllowed(req, postRow.community_id);
+    if (!allowed) return res.status(403).json({ error: "Você não tem acesso a essa comunidade." });
+    const result = await db.toggleCommunityPostLike(postId, req.appUser.id);
+    res.json(result);
+  });
+
+  // ---------- Comunidade (admin only) ----------
+
+  app.get("/api/admin/communities", requireAdmin, async (req, res) => {
+    res.json(await db.listCommunitiesAdminOverview());
+  });
+
+  app.get("/api/admin/community-commissions", requireAdmin, async (req, res) => {
+    res.json(await db.listCommunityCommissions());
+  });
+
+  app.patch("/api/admin/community-commissions/:id", requireAdmin, async (req, res) => {
+    const updated = await db.markCommunityCommissionPaid(Number(req.params.id), !!req.body?.paid);
     if (!updated) return res.status(404).json({ error: "Comissão não encontrada." });
     res.json(updated);
   });

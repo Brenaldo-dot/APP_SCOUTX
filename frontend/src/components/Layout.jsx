@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Eye,
   Flame,
+  Gift,
   GripVertical,
   Handshake,
   History,
@@ -450,6 +451,50 @@ export default function Layout() {
                   <>
                     <NavIcon Icon={Handshake} active={isActive} />
                     {!effectiveCollapsed && t('nav.afiliados')}
+                  </>
+                )}
+              </NavLink>
+            )}
+
+            {me?.isAdmin && (
+              <NavLink to="/admin/indicacoes" title={effectiveCollapsed ? t('nav.adminIndicacoes') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
+                {({ isActive }) => (
+                  <>
+                    <NavIcon Icon={Gift} active={isActive} />
+                    {!effectiveCollapsed && t('nav.adminIndicacoes')}
+                  </>
+                )}
+              </NavLink>
+            )}
+
+            {me && (
+              <NavLink to="/indicacao" title={effectiveCollapsed ? t('nav.indicacao') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
+                {({ isActive }) => (
+                  <>
+                    <NavIcon Icon={Gift} active={isActive} />
+                    {!effectiveCollapsed && t('nav.indicacao')}
+                  </>
+                )}
+              </NavLink>
+            )}
+
+            {me?.isAdmin && (
+              <NavLink to="/admin/comunidades" title={effectiveCollapsed ? t('nav.adminComunidades') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
+                {({ isActive }) => (
+                  <>
+                    <NavIcon Icon={Users} active={isActive} />
+                    {!effectiveCollapsed && t('nav.adminComunidades')}
+                  </>
+                )}
+              </NavLink>
+            )}
+
+            {me && (
+              <NavLink to="/comunidade" title={effectiveCollapsed ? t('nav.comunidade') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
+                {({ isActive }) => (
+                  <>
+                    <NavIcon Icon={Users} active={isActive} />
+                    {!effectiveCollapsed && t('nav.comunidade')}
                   </>
                 )}
               </NavLink>

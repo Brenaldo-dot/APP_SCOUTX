@@ -66,6 +66,64 @@ export const rawApi = {
       body: JSON.stringify({ paid }),
     }),
 
+  getMyReferral: () => request('/api/referral/me'),
+  requestReferralCoupon: (pixKey, whatsapp) =>
+    request('/api/referral/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pixKey, whatsapp }),
+    }),
+  updateReferralPix: (pixKey) =>
+    request('/api/referral/pix', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pixKey }) }),
+  updateReferralWhatsapp: (whatsapp) =>
+    request('/api/referral/whatsapp', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ whatsapp }) }),
+
+  listReferrals: () => request('/api/admin/referrals'),
+  activateReferral: (id, couponCode) =>
+    request(`/api/admin/referrals/${id}/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ couponCode }),
+    }),
+  listReferralCommissions: () => request('/api/admin/referral-commissions'),
+  markReferralCommissionPaid: (id, paid) =>
+    request(`/api/admin/referral-commissions/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paid }),
+    }),
+
+  getCommunityStatus: () => request('/api/community/status'),
+  setupCommunity: (name, photoUrl) =>
+    request('/api/community/setup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, photoUrl }) }),
+  listCommunityDirectory: () => request('/api/community/directory'),
+  joinCommunity: (communityId) =>
+    request('/api/community/join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ communityId }) }),
+  getCommunity: (id, { channelId, sort } = {}) => request(`/api/community/${id}?${qs({ channelId, sort })}`),
+  updateCommunity: (id, { name, description, photoUrl }) =>
+    request(`/api/community/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, description, photoUrl }) }),
+  createCommunityChannel: (id, name, groupName) =>
+    request(`/api/community/${id}/channels`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, groupName }) }),
+  deleteCommunityChannel: (channelId) => request(`/api/community/channels/${channelId}`, { method: 'DELETE' }),
+  createCommunityPost: (id, channelId, body, imageUrl) =>
+    request(`/api/community/${id}/posts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channelId, body, imageUrl }) }),
+  updateCommunityPost: (postId, body, imageUrl) =>
+    request(`/api/community/posts/${postId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body, imageUrl }) }),
+  deleteCommunityPost: (postId) => request(`/api/community/posts/${postId}`, { method: 'DELETE' }),
+  toggleCommunityPostPin: (postId) => request(`/api/community/posts/${postId}/pin`, { method: 'POST' }),
+  createCommunityComment: (postId, body) =>
+    request(`/api/community/posts/${postId}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) }),
+  toggleCommunityPostLike: (postId) => request(`/api/community/posts/${postId}/like`, { method: 'POST' }),
+
+  listAdminCommunities: () => request('/api/admin/communities'),
+  listCommunityCommissions: () => request('/api/admin/community-commissions'),
+  markCommunityCommissionPaid: (id, paid) =>
+    request(`/api/admin/community-commissions/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paid }),
+    }),
+
   buscarBarcode: (url) => request(`/api/buscar?${qs({ url })}`),
   espionarLoja: (url) => request(`/api/spy?${qs({ url })}`),
   spyPreviewUrl: (url) => `/api/spy-preview?${qs({ url })}`,

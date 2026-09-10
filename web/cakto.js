@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const db = require("./db");
 const caktoApi = require("./caktoApi");
+const { tierForActiveMembers } = require("./communityTiers");
 
 // offer.id (link de pagamento) → plano interno + ciclo de cobrança. Vem dos
 // 9 links que o Samuel mandou (3 planos × 3 ciclos). O slug do "Standard
@@ -73,28 +74,44 @@ function isValidSecret(received) {
   return crypto.timingSafeEqual(a, b);
 }
 
+// Descobre qual afiliado (se algum) está ligado a um pedido, buscando na
+// API de Pedidos da Cakto (o webhook em si não manda essa informação, ver
+// caktoApi.js:getOrder). `emailSeenButUnregistered` distingue "a Cakto não
+// rastreou afiliado nenhum nesse pedido" (não avisa nada, é o caso normal)
+// de "a Cakto rastreou um afiliado, mas esse email não está cadastrado no
+// nosso painel" (esse sim precisa virar aviso pro admin cadastrar).
+// Extraído numa função à parte pra ser reaproveitado tanto por
+// recordAffiliateCommissionIfAny (comissão de afiliado) quanto por
+// autoJoinCommunityIfAny (entrada automática na comunidade dele) sem bater
+// na API da Cakto duas vezes pro mesmo pedido.
+async function resolveAffiliateForOrder(data) {
+  const order = await caktoApi.getOrder(data.id);
+  const affiliateCommission = (order.commissions || []).find((c) => c.type === "affiliate");
+  if (!affiliateCommission) return { affiliate: null, order, emailSeenButUnregistered: null };
+  const commissionedUser = (order.commissionedUsers || []).find(
+    (u) => String(u.id) === String(affiliateCommission.userId)
+  );
+  if (!commissionedUser?.email) return { affiliate: null, order, emailSeenButUnregistered: null };
+  const affiliate = await db.findAffiliateByCaktoEmail(commissionedUser.email);
+  return { affiliate, order, emailSeenButUnregistered: affiliate ? null : commissionedUser.email };
+}
+
 // Programa de afiliados feito por dentro do app (ver db.js — a Cakto só
 // suporta uma comissão fixa por produto, não uma taxa pra primeira venda e
-// outra pra recorrência). O webhook em si não manda quem é o afiliado do
-// pedido, então busca na API deles (ver caktoApi.js:getOrder) o campo
-// `commissions[].type === "affiliate"`, casa o email com nossa tabela
-// `affiliates`, e calcula a comissão com a NOSSA taxa (não a da Cakto).
-// Nunca deixa uma falha aqui derrubar o processamento do webhook em si — a
-// organização já foi criada/renovada com sucesso antes de chamar isso.
-async function recordAffiliateCommissionIfAny(data, commissionType) {
+// outra pra recorrência). Calcula a comissão com a NOSSA taxa (não a da
+// Cakto). Nunca deixa uma falha aqui derrubar o processamento do webhook em
+// si — a organização já foi criada/renovada com sucesso antes de chamar
+// isso. Aceita um `resolved` já calculado (ver handlePurchaseApproved, ramo
+// de organização nova) pra não bater na API da Cakto de novo à toa.
+async function recordAffiliateCommissionIfAny(data, commissionType, resolved) {
   try {
-    const order = await caktoApi.getOrder(data.id);
-    const affiliateCommission = (order.commissions || []).find((c) => c.type === "affiliate");
-    if (!affiliateCommission) return;
-    const commissionedUser = (order.commissionedUsers || []).find(
-      (u) => String(u.id) === String(affiliateCommission.userId)
-    );
-    if (!commissionedUser?.email) return;
-    const affiliate = await db.findAffiliateByCaktoEmail(commissionedUser.email);
+    const { affiliate, order, emailSeenButUnregistered } = resolved || (await resolveAffiliateForOrder(data));
     if (!affiliate) {
-      console.warn(
-        `Webhook Cakto: pedido ${data.id} tem afiliado (${commissionedUser.email}) que não está cadastrado no nosso painel — comissão NÃO registrada, cadastre esse afiliado.`
-      );
+      if (emailSeenButUnregistered) {
+        console.warn(
+          `Webhook Cakto: pedido ${data.id} tem afiliado (${emailSeenButUnregistered}) que não está cadastrado no nosso painel — comissão NÃO registrada, cadastre esse afiliado.`
+        );
+      }
       return;
     }
     const percentage =
@@ -118,6 +135,95 @@ async function recordAffiliateCommissionIfAny(data, commissionType) {
     }
   } catch (err) {
     console.error(`Webhook Cakto: falha ao conferir comissão de afiliado pro pedido ${data.id}:`, err.message);
+  }
+}
+
+// Indicação (cliente indica cliente, 2026-09-10) — diferente do programa de
+// afiliados acima: aqui quem indica é identificado pelo `couponCode` que
+// veio no próprio payload do webhook (confirmado na doc oficial da Cakto,
+// não precisa da API extra de pedidos). Decisão do usuário: comissão de
+// 50% só na PRIMEIRA compra do indicado (não em renovação) — por isso só é
+// chamada a partir do ramo de organização NOVA em handlePurchaseApproved,
+// nunca do ramo de renovação nem de handleSubscriptionRenewed.
+const REFERRAL_COMMISSION_PERCENTAGE = 50;
+
+async function recordReferralCommissionIfAny(data) {
+  const couponCode = String(data.couponCode || "").trim();
+  if (!couponCode) return;
+  try {
+    const coupon = await db.findReferralCouponByCode(couponCode);
+    if (!coupon) return; // cupom usado não é de indicação (ou não está mais ativo)
+    const saleAmount = Number(data.offer?.price ?? data.amount ?? 0);
+    const commissionValue = Math.round(saleAmount * (REFERRAL_COMMISSION_PERCENTAGE / 100) * 100) / 100;
+    const inserted = await db.createReferralCommission({
+      referralCouponId: coupon.id,
+      caktoOrderId: data.id,
+      customerEmail: String(data.customer?.email || "").trim().toLowerCase(),
+      customerName: data.customer?.name || null,
+      saleAmount,
+      commissionPercentage: REFERRAL_COMMISSION_PERCENTAGE,
+      commissionValue,
+    });
+    if (inserted) {
+      console.log(`Webhook Cakto: comissão de indicação de ${commissionValue} registrada pro cupom ${couponCode} (pedido ${data.id}).`);
+    }
+  } catch (err) {
+    console.error(`Webhook Cakto: falha ao conferir comissão de indicação pro pedido ${data.id}:`, err.message);
+  }
+}
+
+// Comunidade de embaixadores (2026-09-10) — quando alguém assina pelo link
+// de afiliado de um embaixador que já tem comunidade, a organização entra
+// automaticamente nela. Só roda no ramo de organização NOVA (a pessoa só
+// entra numa comunidade na primeira compra, nunca de novo depois).
+async function autoJoinCommunityIfAny(affiliate, org) {
+  if (!affiliate) return;
+  try {
+    const community = await db.getCommunityByAffiliateId(affiliate.id);
+    if (!community) return; // esse afiliado ainda não virou embaixador (sem comunidade criada)
+    await db.joinCommunity(community.id, org.id);
+    console.log(`Webhook Cakto: organização "${org.name}" entrou automaticamente na comunidade "${community.name}" (afiliado ${affiliate.name}).`);
+  } catch (err) {
+    console.error(`Webhook Cakto: falha ao entrar automaticamente na comunidade pra organização "${org.name}":`, err.message);
+  }
+}
+
+// Comissão de comunidade — diferente das duas acima: dispara em TODA
+// renovação de QUALQUER membro ativo (não só na primeira compra), porque é
+// isso que "recorrência" quer dizer aqui (decisão do usuário). Sem job
+// agendado: o nível/percentual é calculado NA HORA, contando quantos
+// membros ativos a comunidade tem NESSE INSTANTE — se a comunidade
+// cresceu/encolheu desde a última renovação, a % já reflete isso
+// automaticamente, sem precisar recalcular nada em lote depois.
+async function recordCommunityCommissionIfAny(data, org) {
+  try {
+    const membership = await db.getCommunityMembershipByOrgId(org.id);
+    if (!membership) return; // organização não está em nenhuma comunidade
+    const community = await db.getCommunityById(membership.community_id);
+    if (!community) return;
+    const activeCount = await db.countActiveCommunityMembers(community.id);
+    const tier = tierForActiveMembers(activeCount);
+    const saleAmount = Number(data.offer?.price ?? data.amount ?? 0);
+    const commissionValue = Math.round(saleAmount * (tier.percentage / 100) * 100) / 100;
+    const inserted = await db.createCommunityCommission({
+      communityId: community.id,
+      organizationId: org.id,
+      caktoOrderId: data.id,
+      customerEmail: String(data.customer?.email || "").trim().toLowerCase(),
+      customerName: data.customer?.name || null,
+      saleAmount,
+      memberCountAtTime: activeCount,
+      tier: tier.name,
+      commissionPercentage: tier.percentage,
+      commissionValue,
+    });
+    if (inserted) {
+      console.log(
+        `Webhook Cakto: comissão de comunidade de ${commissionValue} (nível ${tier.label}, ${activeCount} membros ativos) registrada pra comunidade "${community.name}" (pedido ${data.id}).`
+      );
+    }
+  } catch (err) {
+    console.error(`Webhook Cakto: falha ao conferir comissão de comunidade pro pedido ${data.id}:`, err.message);
   }
 }
 
@@ -160,6 +266,7 @@ async function handlePurchaseApproved(data) {
       );
       console.log(`Webhook Cakto: organização "${org.name}" renovada (${planLabel}/${mapping.billingCycle}) a partir da compra ${data.id}.`);
       await recordAffiliateCommissionIfAny(data, "recurring");
+      await recordCommunityCommissionIfAny(data, org);
       return;
     }
     throw new Error(
@@ -193,7 +300,19 @@ async function handlePurchaseApproved(data) {
     `Plano ${planLabel} · ${mapping.billingCycle} · compra Cakto ${data.id}`
   );
   console.log(`Webhook Cakto: organização "${org.name}" e usuário ${email} criados (${planLabel}/${mapping.billingCycle}) a partir da compra ${data.id}.`);
-  await recordAffiliateCommissionIfAny(data, "first_sale");
+
+  // Resolve o afiliado da compra UMA vez (bate na API da Cakto) e reusa o
+  // resultado tanto pra comissão de afiliado quanto pra entrada automática
+  // na comunidade dele, em vez de resolver duas vezes.
+  let resolvedAffiliate = null;
+  try {
+    resolvedAffiliate = await resolveAffiliateForOrder(data);
+  } catch (err) {
+    console.error(`Webhook Cakto: falha ao resolver afiliado do pedido ${data.id}:`, err.message);
+  }
+  await recordAffiliateCommissionIfAny(data, "first_sale", resolvedAffiliate);
+  await recordReferralCommissionIfAny(data);
+  await autoJoinCommunityIfAny(resolvedAffiliate?.affiliate, org);
 }
 
 async function handleCancellationEvent(data, eventName) {
@@ -232,6 +351,32 @@ async function handleCancellationEvent(data, eventName) {
   } catch (err) {
     console.error(`Webhook Cakto: falha ao conferir comissão de afiliado no cancelamento do pedido ${data.id}:`, err.message);
   }
+
+  try {
+    const voidedReferral = await db.voidReferralCommission(data.id);
+    if (voidedReferral?.paid) {
+      console.warn(
+        `Webhook Cakto: pedido ${data.id} foi ${eventName} DEPOIS da comissão de indicação já ter sido marcada como paga — revise manualmente com quem indicou.`
+      );
+    } else if (voidedReferral) {
+      console.log(`Webhook Cakto: comissão de indicação pendente do pedido ${data.id} removida (evento "${eventName}").`);
+    }
+  } catch (err) {
+    console.error(`Webhook Cakto: falha ao conferir comissão de indicação no cancelamento do pedido ${data.id}:`, err.message);
+  }
+
+  try {
+    const voidedCommunity = await db.voidCommunityCommission(data.id);
+    if (voidedCommunity?.paid) {
+      console.warn(
+        `Webhook Cakto: pedido ${data.id} foi ${eventName} DEPOIS da comissão de comunidade já ter sido marcada como paga — revise manualmente com o embaixador.`
+      );
+    } else if (voidedCommunity) {
+      console.log(`Webhook Cakto: comissão de comunidade pendente do pedido ${data.id} removida (evento "${eventName}").`);
+    }
+  } catch (err) {
+    console.error(`Webhook Cakto: falha ao conferir comissão de comunidade no cancelamento do pedido ${data.id}:`, err.message);
+  }
 }
 
 // "subscription_renewed": renovação de assinatura recorrente — diferente
@@ -263,6 +408,7 @@ async function handleSubscriptionRenewed(data) {
   );
   console.log(`Webhook Cakto: organização "${org.name}" renovada (evento subscription_renewed, compra ${data.id}).`);
   await recordAffiliateCommissionIfAny(data, "recurring");
+  await recordCommunityCommissionIfAny(data, org);
 }
 
 // Handler principal, chamado pela rota POST /api/webhooks/cakto em

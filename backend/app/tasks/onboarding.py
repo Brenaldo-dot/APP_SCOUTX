@@ -17,7 +17,7 @@ import redis
 
 from app.config import get_settings
 from app.database import SessionLocal
-from app.models import AlertType, Competitor, CompetitorStatus
+from app.models import AlertType, Competitor, CompetitorStatus, ProtectedStore
 from app.scrapers.shopify import verify_is_shopify
 from app.services import alert_service
 from app.services.competitor_service import run_full_xray
@@ -28,6 +28,16 @@ from app.tasks.utils import run_async
 logger = logging.getLogger(__name__)
 
 _redis_client = redis.from_url(get_settings().redis_url, decode_responses=True)
+
+# Achado ao vivo (2026-09-07): verify_is_shopify só rodava 1x, no cadastro —
+# loja Shopify nova nasce com a tela de senha ativa por padrão, então
+# cadastrar bem nesse momento marcava NOT_SHOPIFY pra sempre, mesmo depois do
+# dono tirar a senha minutos/horas depois (2 casos reais: trend-mx-4 e
+# mx.pideenunclick.com). A única saída era excluir e recadastrar do zero,
+# perdendo o histórico já coletado. Intervalos crescentes (10min, 1h, 6h) dão
+# tempo real pra loja ficar pública sem martelar o domínio nem exigir ação do
+# usuário — tudo silencioso, sem alerta nem botão na tela.
+AUTO_RECHECK_DELAYS_SECONDS = [600, 3600, 6 * 3600]
 
 
 @celery_app.task(name="app.tasks.onboarding.run_onboarding_xray", bind=True, max_retries=2)
@@ -56,6 +66,7 @@ def run_onboarding_xray(self, competitor_id: int) -> dict:
                 )
             )
             db.commit()
+            auto_recheck_shopify.apply_async(args=[competitor_id, 0], countdown=AUTO_RECHECK_DELAYS_SECONDS[0])
             return {"status": "not_shopify", "competitor_id": competitor_id}
 
         competitor.status = CompetitorStatus.ACTIVE
@@ -108,6 +119,49 @@ def run_onboarding_xray(self, competitor_id: int) -> dict:
                 db2.close()
             return {"status": "failed_permanently", "competitor_id": competitor_id, "error": str(exc)}
         raise self.retry(exc=exc, countdown=60)
+    finally:
+        db.close()
+
+
+@celery_app.task(name="app.tasks.onboarding.auto_recheck_shopify")
+def auto_recheck_shopify(competitor_id: int, attempt: int = 0) -> dict:
+    """Reverificação automática e silenciosa pra loja marcada NOT_SHOPIFY —
+    ver comentário em AUTO_RECHECK_DELAYS_SECONDS. Fica FORA do fluxo de
+    CHECKING/reconcile_stuck_onboarding de propósito: se usasse status
+    CHECKING igual ao cadastro normal, a rede de segurança que reprocessa
+    tudo travado há >3min ia reenfileirar essa MESMA loja a cada 3 minutos
+    durante as horas de espera entre tentativas — voltando pro loop infinito
+    que já corrigimos uma vez (ver run_onboarding_xray). Por isso o status
+    continua NOT_SHOPIFY o tempo todo; só troca pra ACTIVE se a reverificação
+    realmente confirmar Shopify dessa vez."""
+    db = SessionLocal()
+    try:
+        competitor = db.get(Competitor, competitor_id)
+        if competitor is None or competitor.status != CompetitorStatus.NOT_SHOPIFY:
+            return {"status": "skipped"}
+        if db.query(ProtectedStore).filter(ProtectedStore.domain == competitor.domain).first():
+            return {"status": "skipped", "reason": "protected"}
+
+        is_shopify = run_async(verify_is_shopify(competitor.domain))
+        if is_shopify:
+            competitor.status = CompetitorStatus.ACTIVE
+            db.commit()
+            run_async(run_full_xray(db, competitor))
+            try:
+                run_ads_monitor_one.delay(competitor.id)
+            except Exception:
+                logger.warning(
+                    "Não consegui enfileirar o scan inicial de anúncios de %s (fila/Redis indisponível?)",
+                    competitor.domain,
+                )
+            return {"status": "recovered", "competitor_id": competitor_id}
+
+        if attempt < len(AUTO_RECHECK_DELAYS_SECONDS) - 1:
+            next_attempt = attempt + 1
+            auto_recheck_shopify.apply_async(
+                args=[competitor_id, next_attempt], countdown=AUTO_RECHECK_DELAYS_SECONDS[next_attempt]
+            )
+        return {"status": "still_not_shopify", "competitor_id": competitor_id}
     finally:
         db.close()
 

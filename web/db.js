@@ -201,6 +201,51 @@ async function migrate() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_affiliate_commissions_affiliate ON affiliate_commissions(affiliate_id);`);
 
+  // Indicação (2026-09-10) — programa separado do de afiliados acima:
+  // aqui é o PRÓPRIO CLIENTE que pede o cupom (self-service, dentro do
+  // app), não um afiliado externo cadastrado manualmente pelo admin. Cada
+  // app_user só pode ter UM cupom na vida (UNIQUE em user_id) — pedir de
+  // novo com um já existente só devolve o que já tem, ver
+  // createReferralCouponRequest. `coupon_code` fica null enquanto
+  // "requested": o cupom em si é criado à mão no painel da Cakto (não tem
+  // API pública pra isso, conferido na doc oficial) e o admin cola o
+  // código aqui pra ativar.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS referral_coupons (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL UNIQUE REFERENCES app_users(id) ON DELETE CASCADE,
+      coupon_code TEXT UNIQUE,
+      pix_key TEXT,
+      whatsapp TEXT,
+      status TEXT NOT NULL DEFAULT 'requested', -- 'requested' | 'active' | 'disabled'
+      requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      activated_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
+  // Uma linha por venda em que o couponCode da compra bateu com um cupom de
+  // indicação ativo — sempre comissão de "primeira venda" (decisão do
+  // usuário: só a compra inicial do indicado gera comissão, não
+  // renovações). Mesma idempotência/estorno que affiliate_commissions
+  // acima (cakto_order_id UNIQUE, apagada em reembolso/chargeback).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS referral_commissions (
+      id SERIAL PRIMARY KEY,
+      referral_coupon_id INTEGER NOT NULL REFERENCES referral_coupons(id) ON DELETE CASCADE,
+      cakto_order_id TEXT NOT NULL UNIQUE,
+      customer_email TEXT NOT NULL,
+      customer_name TEXT,
+      sale_amount NUMERIC(10,2) NOT NULL,
+      commission_percentage NUMERIC(5,2) NOT NULL,
+      commission_value NUMERIC(10,2) NOT NULL,
+      paid BOOLEAN NOT NULL DEFAULT false,
+      paid_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_referral_commissions_coupon ON referral_commissions(referral_coupon_id);`);
+
   // Planos de venda — cada organização agrupa N logins (app_users) sob um
   // plano/ciclo/validade só. expires_at vencido bloqueia login de TODO
   // mundo da organização (checado em requireAuth/login, ver server.js).
@@ -275,6 +320,139 @@ async function migrate() {
     );
     await pool.query("UPDATE app_users SET organization_id = $1 WHERE id = $2", [org.rows[0].id, user.id]);
   }
+
+  // Comunidade de embaixadores (2026-09-10) — extensão do programa de
+  // afiliados acima: cada afiliado pode virar "dono" de uma comunidade
+  // fechada. Fica ligada em `affiliates`, não em `app_users`, porque quem
+  // já existe como afiliado hoje não tem login nenhum no ScoutX — quando a
+  // pessoa loga, a gente reconhece que ela é embaixadora comparando o email
+  // dela com `affiliates.cakto_email` (mesmo truque que
+  // recordAffiliateCommissionIfAny em cakto.js já usa), sem precisar de
+  // coluna nova de vínculo.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS communities (
+      id SERIAL PRIMARY KEY,
+      affiliate_id INTEGER NOT NULL UNIQUE REFERENCES affiliates(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT,
+      photo_url TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
+  // organization_id UNIQUE: uma organização só entra em UMA comunidade pra
+  // sempre (decisão do usuário — não é possível trocar de comunidade,
+  // mesmo cancelando e reativando a assinatura depois, já que a
+  // organização não é recriada numa renovação).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS community_members (
+      id SERIAL PRIMARY KEY,
+      community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+      organization_id INTEGER NOT NULL UNIQUE REFERENCES organizations(id) ON DELETE CASCADE,
+      joined_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_community_members_community ON community_members(community_id);`);
+
+  // Canais (2026-09-10, pedido do usuário pra parecer mais um fórum de
+  // verdade tipo Circle/Skool): uma comunidade tem N canais, só o
+  // embaixador dono cria/remove. `position` decide a ordem exibida na
+  // barra lateral — sempre inserido no fim (MAX(position)+1), sem
+  // reordenação por enquanto.
+  // group_name (2026-09-11): agrupa canais em seções com cabeçalho na
+  // barra lateral (tipo "TOP Fornecedores" reunindo vários canais na
+  // referência que o usuário mandou) — null cai num grupo "Canais" genérico
+  // no front. Não é uma tabela própria de propósito: só um rótulo de texto
+  // livre, mais simples que modelar categoria como entidade separada.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS community_channels (
+      id SERIAL PRIMARY KEY,
+      community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      group_name TEXT,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_community_channels_community ON community_channels(community_id);`);
+
+  // community_id fica denormalizado aqui (além de channel_id) de propósito
+  // — mesmo padrão de snapshot já usado em outras tabelas deste arquivo:
+  // deixa consultas que só precisam "todos os posts da comunidade" (sem
+  // se importar com canal) simples, sem JOIN extra. `pinned` fixa o post
+  // no topo do canal (embaixador decide, tipo o post "Como funciona" fixado
+  // na referência que o usuário mandou).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS community_posts (
+      id SERIAL PRIMARY KEY,
+      community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+      channel_id INTEGER NOT NULL REFERENCES community_channels(id) ON DELETE CASCADE,
+      body TEXT NOT NULL,
+      image_url TEXT,
+      pinned BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_community_posts_community ON community_posts(community_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_community_posts_channel ON community_posts(channel_id);`);
+
+  // Curtida: par (post, quem curtiu) único — clicar de novo tira a
+  // curtida (toggle), não acumula.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS community_post_likes (
+      id SERIAL PRIMARY KEY,
+      post_id INTEGER NOT NULL REFERENCES community_posts(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (post_id, user_id)
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_community_post_likes_post ON community_post_likes(post_id);`);
+
+  // author_user_id cobre TANTO membro comum QUANTO o próprio embaixador
+  // (ele também loga como app_user normal, ver comentário em `communities`
+  // acima) — is_ambassador só marca visualmente quem respondeu como dono
+  // da comunidade. author_name é um SNAPSHOT (mesmo padrão de
+  // admin_audit_log): comentário antigo continua legível mesmo se a conta
+  // for excluída depois.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS community_comments (
+      id SERIAL PRIMARY KEY,
+      post_id INTEGER NOT NULL REFERENCES community_posts(id) ON DELETE CASCADE,
+      author_user_id INTEGER REFERENCES app_users(id) ON DELETE SET NULL,
+      author_name TEXT NOT NULL,
+      is_ambassador BOOLEAN NOT NULL DEFAULT false,
+      body TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_community_comments_post ON community_comments(post_id);`);
+
+  // Uma linha por renovação de QUALQUER membro ativo da comunidade —
+  // calculada no momento do webhook (ver cakto.js:
+  // recordCommunityCommissionIfAny), nunca por um job agendado. Guarda
+  // member_count_at_time/tier pra auditoria (se o admin questionar por que
+  // uma comissão saiu com % X, dá pra ver exatamente quantos membros
+  // ativos a comunidade tinha naquele instante).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS community_commissions (
+      id SERIAL PRIMARY KEY,
+      community_id INTEGER NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      cakto_order_id TEXT NOT NULL UNIQUE,
+      customer_email TEXT NOT NULL,
+      customer_name TEXT,
+      sale_amount NUMERIC(10,2) NOT NULL,
+      member_count_at_time INTEGER NOT NULL,
+      tier TEXT NOT NULL,
+      commission_percentage NUMERIC(5,2) NOT NULL,
+      commission_value NUMERIC(10,2) NOT NULL,
+      paid BOOLEAN NOT NULL DEFAULT false,
+      paid_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_community_commissions_community ON community_commissions(community_id);`);
 }
 
 // Só grava se ainda não tinha nada (NULL) — a primeira escolha da conta
@@ -648,6 +826,438 @@ async function voidAffiliateCommission(caktoOrderId) {
   return commission;
 }
 
+// ---------- Indicação (cupom de cliente) ----------
+
+async function getReferralCouponByUserId(userId) {
+  const res = await pool.query("SELECT * FROM referral_coupons WHERE user_id = $1", [userId]);
+  return res.rows[0] || null;
+}
+
+async function findReferralCouponByCode(code) {
+  const res = await pool.query("SELECT * FROM referral_coupons WHERE coupon_code = $1 AND status = 'active'", [
+    String(code).trim(),
+  ]);
+  return res.rows[0] || null;
+}
+
+// Idempotente de propósito (ON CONFLICT DO NOTHING + SELECT de volta): se a
+// pessoa clicar "Solicitar cupom" de novo (recarregou a página, clicou 2x),
+// não cria uma segunda linha nem apaga o pix_key que já tinha preenchido —
+// só devolve o pedido que já existe.
+async function createReferralCouponRequest(userId, pixKey, whatsapp) {
+  await pool.query(
+    `INSERT INTO referral_coupons (user_id, pix_key, whatsapp) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO NOTHING`,
+    [userId, pixKey || null, whatsapp || null]
+  );
+  return getReferralCouponByUserId(userId);
+}
+
+async function updateReferralCouponPix(userId, pixKey) {
+  const res = await pool.query("UPDATE referral_coupons SET pix_key = $1 WHERE user_id = $2 RETURNING *", [
+    pixKey || null,
+    userId,
+  ]);
+  return res.rows[0] || null;
+}
+
+async function updateReferralCouponWhatsapp(userId, whatsapp) {
+  const res = await pool.query("UPDATE referral_coupons SET whatsapp = $1 WHERE user_id = $2 RETURNING *", [
+    whatsapp || null,
+    userId,
+  ]);
+  return res.rows[0] || null;
+}
+
+async function listReferralCoupons() {
+  const res = await pool.query(`
+    SELECT rc.*, u.name AS user_name, u.email AS user_email
+    FROM referral_coupons rc
+    JOIN app_users u ON u.id = rc.user_id
+    ORDER BY rc.requested_at DESC
+  `);
+  return res.rows;
+}
+
+// Admin cola o código criado manualmente no painel da Cakto — é isso que
+// libera o cupom pra pessoa ver/compartilhar (ver POST
+// /api/admin/referrals/:id/activate em server.js).
+async function activateReferralCoupon(id, couponCode) {
+  const res = await pool.query(
+    `UPDATE referral_coupons SET coupon_code = $1, status = 'active', activated_at = now() WHERE id = $2 RETURNING *`,
+    [String(couponCode).trim(), id]
+  );
+  return res.rows[0] || null;
+}
+
+async function createReferralCommission({
+  referralCouponId,
+  caktoOrderId,
+  customerEmail,
+  customerName,
+  saleAmount,
+  commissionPercentage,
+  commissionValue,
+}) {
+  const res = await pool.query(
+    `INSERT INTO referral_commissions
+       (referral_coupon_id, cakto_order_id, customer_email, customer_name, sale_amount, commission_percentage, commission_value)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (cakto_order_id) DO NOTHING
+     RETURNING *`,
+    [referralCouponId, caktoOrderId, customerEmail, customerName || null, saleAmount, commissionPercentage, commissionValue]
+  );
+  return res.rows[0] || null;
+}
+
+async function listReferralCommissionsByUserId(userId) {
+  const res = await pool.query(
+    `SELECT rc.* FROM referral_commissions rc
+     JOIN referral_coupons c ON c.id = rc.referral_coupon_id
+     WHERE c.user_id = $1
+     ORDER BY rc.created_at DESC`,
+    [userId]
+  );
+  return res.rows;
+}
+
+async function listReferralCommissions() {
+  const res = await pool.query(`
+    SELECT rc.*, c.coupon_code, c.pix_key, u.name AS referrer_name, u.email AS referrer_email
+    FROM referral_commissions rc
+    JOIN referral_coupons c ON c.id = rc.referral_coupon_id
+    JOIN app_users u ON u.id = c.user_id
+    ORDER BY rc.created_at DESC
+  `);
+  return res.rows;
+}
+
+async function markReferralCommissionPaid(id, paid) {
+  const res = await pool.query(
+    "UPDATE referral_commissions SET paid = $1, paid_at = CASE WHEN $1 THEN now() ELSE NULL END WHERE id = $2 RETURNING *",
+    [paid, id]
+  );
+  return res.rows[0] || null;
+}
+
+// Mesma lógica de voidAffiliateCommission (ver acima): reembolso/chargeback/
+// cancelamento nunca pode deixar comissão de indicação "a pagar" por uma
+// venda que se desfez.
+async function voidReferralCommission(caktoOrderId) {
+  const existing = await pool.query("SELECT * FROM referral_commissions WHERE cakto_order_id = $1", [caktoOrderId]);
+  const commission = existing.rows[0];
+  if (!commission) return null;
+  if (commission.paid) return commission;
+  await pool.query("DELETE FROM referral_commissions WHERE id = $1", [commission.id]);
+  return commission;
+}
+
+// ---------- Comunidade de embaixadores ----------
+
+async function getCommunityByAffiliateId(affiliateId) {
+  const res = await pool.query("SELECT * FROM communities WHERE affiliate_id = $1", [affiliateId]);
+  return res.rows[0] || null;
+}
+
+async function getCommunityById(id) {
+  const res = await pool.query("SELECT * FROM communities WHERE id = $1", [id]);
+  return res.rows[0] || null;
+}
+
+// Cria a comunidade JÁ com um canal "Geral" (uma comunidade sem canal
+// nenhum não tem onde postar) — o embaixador cria canais extras depois
+// pela própria tela.
+async function createCommunity(affiliateId, name, photoUrl) {
+  const res = await pool.query(
+    `INSERT INTO communities (affiliate_id, name, photo_url) VALUES ($1, $2, $3)
+     ON CONFLICT (affiliate_id) DO NOTHING RETURNING *`,
+    [affiliateId, name, photoUrl || null]
+  );
+  const community = res.rows[0] || (await getCommunityByAffiliateId(affiliateId));
+  if (res.rows[0]) {
+    await pool.query("INSERT INTO community_channels (community_id, name, position) VALUES ($1, 'Geral', 0)", [community.id]);
+  }
+  return community;
+}
+
+async function updateCommunityDetails(id, { name, description, photoUrl }) {
+  const res = await pool.query(
+    `UPDATE communities SET
+       name = COALESCE($1, name),
+       description = $2,
+       photo_url = COALESCE($3, photo_url)
+     WHERE id = $4 RETURNING *`,
+    [name || null, description ?? null, photoUrl || null, id]
+  );
+  return res.rows[0] || null;
+}
+
+// ---------- Canais ----------
+
+async function listCommunityChannels(communityId) {
+  const res = await pool.query("SELECT * FROM community_channels WHERE community_id = $1 ORDER BY position ASC, id ASC", [
+    communityId,
+  ]);
+  return res.rows;
+}
+
+async function getCommunityChannelById(id) {
+  const res = await pool.query("SELECT * FROM community_channels WHERE id = $1", [id]);
+  return res.rows[0] || null;
+}
+
+async function createCommunityChannel(communityId, name, groupName) {
+  const maxPos = await pool.query("SELECT COALESCE(MAX(position), -1) AS max_pos FROM community_channels WHERE community_id = $1", [
+    communityId,
+  ]);
+  const res = await pool.query(
+    "INSERT INTO community_channels (community_id, name, group_name, position) VALUES ($1, $2, $3, $4) RETURNING *",
+    [communityId, name, groupName || null, maxPos.rows[0].max_pos + 1]
+  );
+  return res.rows[0];
+}
+
+// Não deixa apagar o último canal restante — sem isso a comunidade fica
+// sem lugar nenhum pra postar.
+async function deleteCommunityChannel(id) {
+  const channel = await getCommunityChannelById(id);
+  if (!channel) return null;
+  const remaining = await pool.query("SELECT COUNT(*)::int AS count FROM community_channels WHERE community_id = $1", [
+    channel.community_id,
+  ]);
+  if (remaining.rows[0].count <= 1) {
+    throw new Error("Não é possível apagar o último canal da comunidade.");
+  }
+  await pool.query("DELETE FROM community_channels WHERE id = $1", [id]);
+  return channel;
+}
+
+// Uma organização só pode estar numa comunidade na vida (organization_id é
+// UNIQUE) — null quer dizer "ainda não entrou em nenhuma".
+async function getCommunityMembershipByOrgId(organizationId) {
+  const res = await pool.query("SELECT * FROM community_members WHERE organization_id = $1", [organizationId]);
+  return res.rows[0] || null;
+}
+
+// Idempotente (ON CONFLICT DO NOTHING): tanto pro reenvio de webhook (join
+// automático via link de afiliado) quanto pra evitar corrida se a pessoa
+// clicar "Participar" duas vezes.
+async function joinCommunity(communityId, organizationId) {
+  await pool.query(
+    `INSERT INTO community_members (community_id, organization_id) VALUES ($1, $2)
+     ON CONFLICT (organization_id) DO NOTHING`,
+    [communityId, organizationId]
+  );
+  return getCommunityMembershipByOrgId(organizationId);
+}
+
+// "Ativo" = organização não vencida — mesma definição que já bloqueia login
+// em requireAuth (server.js), não um conceito novo. É essa contagem que
+// decide o nível/percentual do embaixador a cada renovação (ver
+// communityTiers.js e cakto.js).
+async function countActiveCommunityMembers(communityId) {
+  const res = await pool.query(
+    `SELECT COUNT(*)::int AS count
+     FROM community_members cm
+     JOIN organizations o ON o.id = cm.organization_id
+     WHERE cm.community_id = $1 AND o.expires_at > now()`,
+    [communityId]
+  );
+  return res.rows[0].count;
+}
+
+// Lista pra tela de "participar de uma comunidade" — só comunidades
+// existentes, com quantos membros ativos cada uma já tem (prova social) e
+// quem é o embaixador dono.
+async function listCommunitiesDirectory() {
+  // Contagem agregada num subquery À PARTE (não um GROUP BY que misture
+  // communities.name e affiliates.name na mesma consulta) — sem isso
+  // esbarra num bug do pg-mem que confunde os dois "name" de tabelas
+  // diferentes no agrupamento (nunca aconteceria no Postgres real, mas sem
+  // reescrever assim não dava pra testar essa tela localmente).
+  const res = await pool.query(`
+    SELECT c.id, c.name AS community_name, c.description, c.photo_url, a.name AS ambassador_name,
+      COALESCE(m.active_member_count, 0)::int AS active_member_count
+    FROM communities c
+    JOIN affiliates a ON a.id = c.affiliate_id
+    LEFT JOIN (
+      SELECT cm.community_id, SUM(CASE WHEN o.expires_at > now() THEN 1 ELSE 0 END) AS active_member_count
+      FROM community_members cm
+      JOIN organizations o ON o.id = cm.organization_id
+      GROUP BY cm.community_id
+    ) m ON m.community_id = c.id
+    ORDER BY active_member_count DESC, c.created_at ASC
+  `);
+  return res.rows;
+}
+
+async function createCommunityPost({ communityId, channelId, body, imageUrl }) {
+  const res = await pool.query(
+    `INSERT INTO community_posts (community_id, channel_id, body, image_url) VALUES ($1, $2, $3, $4) RETURNING *`,
+    [communityId, channelId, body, imageUrl || null]
+  );
+  return res.rows[0];
+}
+
+// Curtida agregada em subquery à parte (mesmo motivo do directory acima:
+// evita qualquer GROUP BY que possa esbarrar em limitação do pg-mem) +
+// LEFT JOIN da curtida do PRÓPRIO usuário pra saber se ele já curtiu, sem
+// usar `EXISTS`/subquery correlacionada no SELECT (não testado contra
+// pg-mem, mas esse padrão de JOIN já é comprovado seguro aqui). Fixado
+// sempre primeiro, depois ordena por data ou por curtidas conforme pedido.
+async function listCommunityPostsByChannel(channelId, viewerUserId, sort = "recent") {
+  const orderBy = sort === "likes" ? "p.pinned DESC, like_count DESC, p.created_at DESC" : "p.pinned DESC, p.created_at DESC";
+  const res = await pool.query(
+    `SELECT p.*, COALESCE(l.like_count, 0)::int AS like_count, (ul.id IS NOT NULL) AS liked_by_me
+     FROM community_posts p
+     LEFT JOIN (SELECT post_id, COUNT(*) AS like_count FROM community_post_likes GROUP BY post_id) l ON l.post_id = p.id
+     LEFT JOIN community_post_likes ul ON ul.post_id = p.id AND ul.user_id = $2
+     WHERE p.channel_id = $1
+     ORDER BY ${orderBy}`,
+    [channelId, viewerUserId]
+  );
+  return res.rows;
+}
+
+// Toggle: se já curtiu, remove; se não, adiciona. Devolve o novo estado
+// ({liked: bool}) pra UI atualizar sem precisar recarregar o post inteiro.
+async function toggleCommunityPostLike(postId, userId) {
+  const existing = await pool.query("SELECT id FROM community_post_likes WHERE post_id = $1 AND user_id = $2", [
+    postId,
+    userId,
+  ]);
+  if (existing.rows[0]) {
+    await pool.query("DELETE FROM community_post_likes WHERE id = $1", [existing.rows[0].id]);
+    return { liked: false };
+  }
+  await pool.query("INSERT INTO community_post_likes (post_id, user_id) VALUES ($1, $2)", [postId, userId]);
+  return { liked: true };
+}
+
+async function getCommunityPostById(id) {
+  const res = await pool.query("SELECT * FROM community_posts WHERE id = $1", [id]);
+  return res.rows[0] || null;
+}
+
+async function updateCommunityPost(id, { body, imageUrl }) {
+  const res = await pool.query(
+    "UPDATE community_posts SET body = $1, image_url = $2 WHERE id = $3 RETURNING *",
+    [body, imageUrl ?? null, id]
+  );
+  return res.rows[0] || null;
+}
+
+async function deleteCommunityPost(id) {
+  await pool.query("DELETE FROM community_posts WHERE id = $1", [id]);
+}
+
+async function toggleCommunityPostPin(id) {
+  const res = await pool.query("UPDATE community_posts SET pinned = NOT pinned WHERE id = $1 RETURNING *", [id]);
+  return res.rows[0] || null;
+}
+
+async function createCommunityComment({ postId, authorUserId, authorName, isAmbassador, body }) {
+  const res = await pool.query(
+    `INSERT INTO community_comments (post_id, author_user_id, author_name, is_ambassador, body)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [postId, authorUserId, authorName, isAmbassador, body]
+  );
+  return res.rows[0];
+}
+
+// Busca via JOIN em community_posts filtrando por community_id, em vez de
+// receber uma lista de IDs de post e usar `= ANY($1::int[])` — achado
+// testando localmente: esse operador com array de parâmetro devolve vazio
+// no pg-mem (bug do simulador, não reproduzido isolado; provável limitação
+// dele com esse padrão específico de bind). JOIN direto é tão simples
+// quanto e não depende de nenhum comportamento exótico do driver.
+async function listCommunityCommentsForCommunity(communityId) {
+  const res = await pool.query(
+    `SELECT cc.* FROM community_comments cc
+     JOIN community_posts cp ON cp.id = cc.post_id
+     WHERE cp.community_id = $1
+     ORDER BY cc.created_at ASC`,
+    [communityId]
+  );
+  return res.rows;
+}
+
+// ON CONFLICT DO NOTHING (cakto_order_id UNIQUE): mesmo motivo dos outros
+// dois sistemas de comissão — reenvio de webhook não pode gerar comissão
+// em dobro pro mesmo pedido.
+async function createCommunityCommission({
+  communityId,
+  organizationId,
+  caktoOrderId,
+  customerEmail,
+  customerName,
+  saleAmount,
+  memberCountAtTime,
+  tier,
+  commissionPercentage,
+  commissionValue,
+}) {
+  const res = await pool.query(
+    `INSERT INTO community_commissions
+       (community_id, organization_id, cakto_order_id, customer_email, customer_name, sale_amount, member_count_at_time, tier, commission_percentage, commission_value)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     ON CONFLICT (cakto_order_id) DO NOTHING
+     RETURNING *`,
+    [communityId, organizationId, caktoOrderId, customerEmail, customerName || null, saleAmount, memberCountAtTime, tier, commissionPercentage, commissionValue]
+  );
+  return res.rows[0] || null;
+}
+
+async function listCommunityCommissions() {
+  const res = await pool.query(`
+    SELECT cc.*, c.name AS community_name, a.name AS ambassador_name, a.pix_key AS ambassador_pix_key
+    FROM community_commissions cc
+    JOIN communities c ON c.id = cc.community_id
+    JOIN affiliates a ON a.id = c.affiliate_id
+    ORDER BY cc.created_at DESC
+  `);
+  return res.rows;
+}
+
+async function markCommunityCommissionPaid(id, paid) {
+  const res = await pool.query(
+    "UPDATE community_commissions SET paid = $1, paid_at = CASE WHEN $1 THEN now() ELSE NULL END WHERE id = $2 RETURNING *",
+    [paid, id]
+  );
+  return res.rows[0] || null;
+}
+
+async function voidCommunityCommission(caktoOrderId) {
+  const existing = await pool.query("SELECT * FROM community_commissions WHERE cakto_order_id = $1", [caktoOrderId]);
+  const commission = existing.rows[0];
+  if (!commission) return null;
+  if (commission.paid) return commission;
+  await pool.query("DELETE FROM community_commissions WHERE id = $1", [commission.id]);
+  return commission;
+}
+
+// Visão geral pro admin (aba Comunidades): uma linha por comunidade
+// existente, já com contagem de membros ativos e total pendente/pago —
+// mesmo formato que Afiliados/Indicações já usam.
+async function listCommunitiesAdminOverview() {
+  // Mesmo ajuste de listCommunitiesDirectory acima (subquery à parte pra
+  // não misturar communities.name e affiliates.name num GROUP BY só).
+  const res = await pool.query(`
+    SELECT c.id, c.affiliate_id, c.name AS community_name, c.photo_url, c.created_at,
+      a.name AS ambassador_name, a.cakto_email AS ambassador_email, a.pix_key AS ambassador_pix_key,
+      COALESCE(m.active_member_count, 0)::int AS active_member_count
+    FROM communities c
+    JOIN affiliates a ON a.id = c.affiliate_id
+    LEFT JOIN (
+      SELECT cm.community_id, SUM(CASE WHEN o.expires_at > now() THEN 1 ELSE 0 END) AS active_member_count
+      FROM community_members cm
+      JOIN organizations o ON o.id = cm.organization_id
+      GROUP BY cm.community_id
+    ) m ON m.community_id = c.id
+    ORDER BY active_member_count DESC
+  `);
+  return res.rows;
+}
+
 function planLimitsFor(plan) {
   return PLAN_LIMITS[plan] || PLAN_LIMITS.solo;
 }
@@ -857,6 +1467,44 @@ module.exports = {
   listAffiliateCommissions,
   markAffiliateCommissionPaid,
   voidAffiliateCommission,
+  getReferralCouponByUserId,
+  findReferralCouponByCode,
+  createReferralCouponRequest,
+  updateReferralCouponPix,
+  updateReferralCouponWhatsapp,
+  listReferralCoupons,
+  activateReferralCoupon,
+  createReferralCommission,
+  listReferralCommissionsByUserId,
+  listReferralCommissions,
+  markReferralCommissionPaid,
+  voidReferralCommission,
+  getCommunityByAffiliateId,
+  getCommunityById,
+  createCommunity,
+  updateCommunityDetails,
+  listCommunityChannels,
+  getCommunityChannelById,
+  createCommunityChannel,
+  deleteCommunityChannel,
+  getCommunityMembershipByOrgId,
+  joinCommunity,
+  countActiveCommunityMembers,
+  listCommunitiesDirectory,
+  createCommunityPost,
+  listCommunityPostsByChannel,
+  toggleCommunityPostLike,
+  getCommunityPostById,
+  updateCommunityPost,
+  deleteCommunityPost,
+  toggleCommunityPostPin,
+  createCommunityComment,
+  listCommunityCommentsForCommunity,
+  createCommunityCommission,
+  listCommunityCommissions,
+  markCommunityCommissionPaid,
+  voidCommunityCommission,
+  listCommunitiesAdminOverview,
   createOrganization,
   createOrganizationFromCakto,
   findOrganizationByCaktoPurchaseId,

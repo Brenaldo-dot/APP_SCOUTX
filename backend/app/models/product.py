@@ -8,6 +8,7 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     JSON,
     String,
@@ -100,6 +101,7 @@ class ProductSnapshot(Base):
     """Foto diária de um produto (Módulo 3.1)."""
 
     __tablename__ = "product_snapshots"
+    __table_args__ = (Index("ix_product_snapshots_product_captured", "product_id", "captured_at"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
