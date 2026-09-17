@@ -553,14 +553,6 @@ form.addEventListener("submit", function (e) {
   var email = document.getElementById("email").value.trim();
   var name = document.getElementById("name").value.trim();
   var phone = document.getElementById("phone").value.replace(/\\D/g, "");
-  var address = {
-    street: document.getElementById("street").value.trim(),
-    number: document.getElementById("number").value.trim(),
-    complement: document.getElementById("complement").value.trim(),
-    city: document.getElementById("city").value.trim(),
-    state: document.getElementById("state").value.trim().toUpperCase(),
-    zipcode: document.getElementById("zipcode").value.replace(/\\D/g, ""),
-  };
 
   caktoSdk.createToken(card)
     .then(function (result) {
@@ -573,7 +565,6 @@ form.addEventListener("submit", function (e) {
           name: name,
           phone: "55" + phone,
           paymentMethod: "credit",
-          address: address,
         },
       }).then(function (authResult) { return { cardToken: result.cardToken, authResult: authResult }; });
     })
@@ -594,12 +585,6 @@ form.addEventListener("submit", function (e) {
           password: password,
           phone: phone,
           docNumber: document.getElementById("docNumber").value.replace(/\\D/g, ""),
-          zipcode: address.zipcode,
-          state: address.state,
-          city: address.city,
-          street: address.street,
-          number: address.number,
-          complement: address.complement,
           cardToken: r.cardToken,
           threeDSecure: {
             cavv: r.authResult.cavv,
@@ -684,6 +669,11 @@ function createApp() {
         "font-src 'self' data:",
         `connect-src 'self'${isAssinarPage ? " https:" : ""}`,
         `frame-src 'self'${isAssinarPage ? " https:" : ""}`,
+        // worker-src: o módulo de antifraude sobe um Web Worker a partir de
+        // um blob: (comum em SDKs de fingerprint, roda o cálculo pesado sem
+        // travar a tela) — sem isso o CSP cai no fallback de script-src, que
+        // não libera blob:. Só nessa página, mesmo racional do resto acima.
+        ...(isAssinarPage ? ["worker-src 'self' blob:"] : []),
         "frame-ancestors 'self'",
         "base-uri 'self'",
         "form-action 'self'",
@@ -975,22 +965,6 @@ function createApp() {
     </fieldset>
 
     <fieldset>
-      <legend>Endereço de cobrança</legend>
-      <div class="row">
-        <div><label for="zipcode">CEP</label><input type="text" id="zipcode" required maxlength="9" value="${esc(v.zipcode)}"></div>
-        <div><label for="state">UF</label><input type="text" id="state" required maxlength="2" value="${esc(v.state)}"></div>
-      </div>
-      <label for="city">Cidade</label>
-      <input type="text" id="city" required maxlength="120" value="${esc(v.city)}">
-      <div class="row">
-        <div><label for="street">Rua</label><input type="text" id="street" required maxlength="200" value="${esc(v.street)}"></div>
-        <div><label for="number">Número</label><input type="text" id="number" required maxlength="20" value="${esc(v.number)}"></div>
-      </div>
-      <label for="complement">Complemento (opcional)</label>
-      <input type="text" id="complement" maxlength="120" value="${esc(v.complement)}">
-    </fieldset>
-
-    <fieldset>
       <legend>Cartão de crédito</legend>
       <label for="cardHolder">Nome impresso no cartão</label>
       <input type="text" id="cardHolder" required maxlength="120">
@@ -1021,11 +995,7 @@ function createApp() {
   });
 
   app.post("/api/assinar", async (req, res) => {
-    const {
-      planKey, name, email, password, phone, docNumber,
-      zipcode, state, city, street, number, complement,
-      cardToken, threeDSecure, antifraudReference,
-    } = req.body || {};
+    const { planKey, name, email, password, phone, docNumber, cardToken, threeDSecure, antifraudReference } = req.body || {};
 
     const offer = ASSINAR_OFFERS[planKey === "pro" ? "pro" : "standard"];
     const cleanEmail = String(email || "").trim().toLowerCase();
@@ -1061,15 +1031,6 @@ function createApp() {
           phone: `55${cleanPhone}`,
           docType: "cpf",
           docNumber: cleanDoc,
-        },
-        address: {
-          country: "BR",
-          state: String(state || "").toUpperCase(),
-          city: String(city || ""),
-          zipcode: String(zipcode || "").replace(/\D/g, ""),
-          street: String(street || ""),
-          number: String(number || ""),
-          complement: complement ? String(complement) : undefined,
         },
         cardToken,
         threeDSecure,
