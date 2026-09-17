@@ -6,7 +6,8 @@ const cheerio = require("cheerio");
 const { analyzeStore, UnsupportedStoreError } = require("./shopify-spy");
 const { sign, verify, parseCookies, serializeCookie } = require("./auth");
 const { createPinnedFetch } = require("./safe-fetch");
-const { handleCaktoWebhook } = require("./cakto");
+const { handleCaktoWebhook, CAKTO_OFFER_PLAN_MAP } = require("./cakto");
+const { createTrialPayment } = require("./caktoPayments");
 const caktoApi = require("./caktoApi");
 const db = require("./db");
 const { TIERS, tierForActiveMembers } = require("./communityTiers");
@@ -495,6 +496,137 @@ if (form) {
 }
 `;
 
+// Orquestra o fluxo completo de cartão (tokenização + 3DS + antifraude,
+// tudo no navegador) seguindo à risca docs.cakto.com.br/sdk/3ds.md — o
+// PRÓPRIO backend não toca em número de cartão nenhum, só recebe o que o
+// SDK devolve aqui (cardToken, dados do 3DS, referência antifraude) e
+// repassa pra Cakto por fora do browser (ver caktoPayments.js).
+const ASSINAR_PAGE_SCRIPT = `
+var caktoSdk = new Cakto.CaktoSDK({ client_id: document.body.dataset.caktoClientId });
+var priceCents = Number(document.body.dataset.priceCents);
+caktoSdk.initAntifraud().catch(function (err) { console.error("Antifraude Cakto:", err); });
+
+var form = document.getElementById("assinar-form");
+var submitBtn = document.getElementById("submit-btn");
+var errorBox = document.getElementById("form-error");
+
+function showError(msg) {
+  errorBox.textContent = msg;
+  errorBox.style.display = "block";
+  errorBox.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function luhnValid(number) {
+  var sum = 0, alt = false;
+  for (var i = number.length - 1; i >= 0; i--) {
+    var n = parseInt(number.charAt(i), 10);
+    if (alt) { n *= 2; if (n > 9) n -= 9; }
+    sum += n;
+    alt = !alt;
+  }
+  return sum % 10 === 0;
+}
+
+form.addEventListener("submit", function (e) {
+  e.preventDefault();
+  errorBox.style.display = "none";
+
+  var password = document.getElementById("password").value;
+  var cardNumber = document.getElementById("cardNumber").value.replace(/\\D/g, "");
+  var cardExpiry = document.getElementById("cardExpiry").value.trim();
+  var expMatch = cardExpiry.match(/^(\\d{2})\\/(\\d{2})$/);
+
+  if (password.length < 8) return showError("A senha precisa ter no mínimo 8 caracteres.");
+  if (!luhnValid(cardNumber)) return showError("Número do cartão inválido, confira os dígitos.");
+  if (!expMatch) return showError("Validade do cartão inválida — use o formato MM/AA.");
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Processando…";
+
+  var card = {
+    holderName: document.getElementById("cardHolder").value.trim(),
+    cardNumber: cardNumber,
+    cvv: document.getElementById("cardCvv").value.trim(),
+    expMonth: expMatch[1],
+    expYear: expMatch[2],
+  };
+  var email = document.getElementById("email").value.trim();
+  var name = document.getElementById("name").value.trim();
+  var phone = document.getElementById("phone").value.replace(/\\D/g, "");
+  var address = {
+    street: document.getElementById("street").value.trim(),
+    number: document.getElementById("number").value.trim(),
+    complement: document.getElementById("complement").value.trim(),
+    city: document.getElementById("city").value.trim(),
+    state: document.getElementById("state").value.trim().toUpperCase(),
+    zipcode: document.getElementById("zipcode").value.replace(/\\D/g, ""),
+  };
+
+  caktoSdk.createToken(card)
+    .then(function (result) {
+      return caktoSdk.authenticate3DS({
+        card: card,
+        customer: {
+          amount: priceCents,
+          currency: "BRL",
+          email: email,
+          name: name,
+          phone: "55" + phone,
+          paymentMethod: "credit",
+          address: address,
+        },
+      }).then(function (authResult) { return { cardToken: result.cardToken, authResult: authResult }; });
+    })
+    .then(function (r) {
+      if (!r.authResult.success) {
+        throw new Error(r.authResult.error || "Não foi possível autenticar o cartão com o banco.");
+      }
+      return caktoSdk.completeAntifraudProfile().then(function () { return r; });
+    })
+    .then(function (r) {
+      return fetch("/api/assinar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          planKey: document.getElementById("planKey").value,
+          name: name,
+          email: email,
+          password: password,
+          phone: phone,
+          docNumber: document.getElementById("docNumber").value.replace(/\\D/g, ""),
+          zipcode: address.zipcode,
+          state: address.state,
+          city: address.city,
+          street: address.street,
+          number: address.number,
+          complement: address.complement,
+          cardToken: r.cardToken,
+          threeDSecure: {
+            cavv: r.authResult.cavv,
+            eci: r.authResult.eci,
+            xid: r.authResult.xid,
+            referenceId: r.authResult.referenceId,
+            version: r.authResult.version,
+          },
+          antifraudReference: caktoSdk.getAntifraudReference(),
+        }),
+      });
+    })
+    .then(function (resp) { return resp.json().then(function (data) { return { ok: resp.ok, data: data }; }); })
+    .then(function (r) {
+      if (!r.ok) throw new Error(r.data.error || "Não foi possível concluir sua assinatura.");
+      caktoSdk.cleanupAntifraud();
+      window.location.href = "/";
+    })
+    .catch(function (err) {
+      console.error("Assinar:", err);
+      showError(err.message || "Algo deu errado, tente novamente.");
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Começar meus 7 dias grátis";
+    });
+});
+`;
+
 function createApp() {
   const app = express();
   app.set("trust proxy", 1);
@@ -528,15 +660,32 @@ function createApp() {
     res.setHeader("X-Frame-Options", "SAMEORIGIN");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    // /assinar precisa de um CSP mais frouxo SÓ nessa rota: o SDK oficial da
+    // Cakto (tokenização de cartão + antifraude + 3DS, ver
+    // docs.cakto.com.br/sdk/visao-geral) injeta um <script> INLINE por
+    // conta própria — fora do nosso controle, sem jeito de mandar ele usar
+    // um arquivo separado como fizemos com /auth.js. 'unsafe-inline' só
+    // entra pra ESSA página (não pro resto do app, onde o script-src
+    // continua tão restrito quanto antes) — o risco fica contido ao
+    // formulário de cadastro, que de qualquer forma nunca mostra dado de
+    // outro usuário nem processa HTML de terceiro (diferente da prévia de
+    // produto, por exemplo, onde 'unsafe-inline' seria bem mais perigoso).
+    const isAssinarPage = req.path === "/assinar" || req.path === "/assinar.js";
     res.setHeader(
       "Content-Security-Policy",
       [
         "default-src 'self'",
-        "script-src 'self'",
+        // cakto-sdk.pages.dev: SDK oficial da Cakto. api.cakto.com.br:
+        // chamadas que o PRÓPRIO SDK faz no navegador (não o nosso backend,
+        // que já fala com a Cakto por fora do browser). Domínio do desafio
+        // 3DS em si (banco emissor) varia por banco — liberado via
+        // frame-src *https: só nessa página, não solto no resto do CSP.
+        `script-src 'self' https://cakto-sdk.pages.dev${isAssinarPage ? " 'unsafe-inline'" : ""}`,
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: https:",
         "font-src 'self' data:",
-        "connect-src 'self'",
+        `connect-src 'self'${isAssinarPage ? " https://api.cakto.com.br https://cakto-sdk.pages.dev" : ""}`,
+        `frame-src 'self'${isAssinarPage ? " https:" : ""}`,
         "frame-ancestors 'self'",
         "base-uri 'self'",
         "form-action 'self'",
@@ -697,6 +846,286 @@ function createApp() {
     } catch (err) {
       console.error("Erro inesperado em POST /registrar:", err);
       rerender(500, "Erro inesperado, tenta de novo em instantes.");
+    }
+  });
+
+  // ---------- Assinar (teste grátis de 7 dias, cobrança direta) ----------
+  // Alternativa a mandar a pessoa pro checkout da Cakto: ela cria a conta e
+  // preenche o cartão dentro do PRÓPRIO ScoutX (SDK deles tokeniza tudo no
+  // navegador, o cartão nunca passa pelo nosso servidor), e a gente fecha a
+  // cobrança pela API — mesma oferta de teste, mesmo resultado, só que sem
+  // sair do nosso domínio nem assustar com uma tela de pagamento genérica
+  // sem explicação nenhuma. Ver web/caktoPayments.js.
+
+  // plan/label vêm do MESMO mapa que o webhook usa (cakto.js) — nunca duas
+  // fontes de verdade pra "qual offer.id é qual plano". Preço só existe
+  // aqui (a Cakto não devolve isso no schema da oferta pela API pública),
+  // tem que bater manualmente com o que foi configurado lá se o preço mudar.
+  const ASSINAR_OFFERS = {
+    standard: { offerId: "3dwqhjp", plan: CAKTO_OFFER_PLAN_MAP["3dwqhjp"].plan, label: "Standard", priceLabel: "127" },
+    pro: { offerId: "vzdzujz", plan: CAKTO_OFFER_PLAN_MAP.vzdzujz.plan, label: "Pro", priceLabel: "187" },
+  };
+
+  function assinarPage({ planKey, error, values }) {
+    const offer = ASSINAR_OFFERS[planKey] || ASSINAR_OFFERS.standard;
+    const v = values || {};
+    const esc = (s) => escapeHtml(s || "");
+    return `<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ScoutX — Comece seu teste grátis</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, sans-serif; background: #05070d; color: #f3f4f6;
+    display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0;
+    position: relative; overflow-x: hidden; padding: 32px 16px;
+  }
+  body::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(59,130,246,0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(59,130,246,0.08) 1px, transparent 1px);
+    background-size: 46px 46px;
+    -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 40%, transparent 100%);
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 40%, transparent 100%);
+  }
+  body::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(circle at 12% 8%, rgba(59,130,246,0.3) 0%, transparent 42%),
+      radial-gradient(circle at 88% 92%, rgba(34,211,238,0.2) 0%, transparent 40%);
+  }
+  .card {
+    position: relative; z-index: 1;
+    background: linear-gradient(180deg, rgba(18,20,30,0.9), rgba(10,12,20,0.94));
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(96,165,250,0.18);
+    padding: 34px; border-radius: 20px; width: 460px; max-width: calc(100vw - 32px);
+    box-shadow: 0 24px 70px rgba(0,0,0,0.55);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+  .brand img { width: 36px; height: 36px; border-radius: 10px; object-fit: cover; }
+  .brand span { font-weight: 700; font-size: 16px; }
+  .trial-badge {
+    display: inline-flex; align-items: center; gap: 6px; background: rgba(16,185,129,0.15);
+    border: 1px solid rgba(16,185,129,0.35); color: #34d399; font-size: 12px; font-weight: 700;
+    padding: 6px 12px; border-radius: 999px; margin-bottom: 14px;
+  }
+  h1 { font-size: 21px; margin: 0 0 6px; }
+  p.subtitle { color: #9ca3af; font-size: 13px; margin: 0 0 20px; line-height: 1.5; }
+  .plan-toggle { display: flex; gap: 8px; margin-bottom: 22px; }
+  .plan-toggle a {
+    flex: 1; text-align: center; padding: 10px; border-radius: 10px; font-size: 13px; font-weight: 600;
+    text-decoration: none; border: 1px solid rgba(96,165,250,0.16); color: #9ca3af;
+  }
+  .plan-toggle a.active { background: rgba(59,130,246,0.15); border-color: #3b82f6; color: #93c5fd; }
+  fieldset { border: none; padding: 0; margin: 0 0 18px; }
+  legend {
+    font-size: 11px; font-weight: 700; color: #60a5fa; text-transform: uppercase;
+    letter-spacing: 0.5px; margin-bottom: 10px; padding: 0;
+  }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; min-width: 0; }
+  label { display: block; font-size: 11px; font-weight: 600; color: #93c5fd; margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+  input, select {
+    width: 100%; padding: 11px 13px; margin-bottom: 14px; border-radius: 10px;
+    border: 1px solid rgba(96,165,250,0.16); background: rgba(5,7,13,0.7); color: #f3f4f6; font-size: 14px;
+  }
+  input:focus, select:focus { outline: none; border-color: #22d3ee; box-shadow: 0 0 0 3px rgba(34,211,238,0.18); }
+  button[type="submit"] {
+    width: 100%; padding: 14px; border-radius: 9999px; border: none;
+    background: linear-gradient(90deg, #1d4ed8 0%, #3b82f6 50%, #22d3ee 100%);
+    color: #fff; font-weight: 700; font-size: 14px; cursor: pointer;
+    box-shadow: 0 8px 28px rgba(59,130,246,0.4);
+  }
+  button[type="submit"]:disabled { opacity: 0.6; cursor: not-allowed; }
+  .error {
+    background: rgba(127,29,29,0.25); color: #f87171; border: 1px solid #7f1d1d;
+    padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; display: ${error ? "block" : "none"};
+  }
+  .fineprint { color: #6b7280; font-size: 11px; text-align: center; margin-top: 14px; line-height: 1.5; }
+</style></head>
+<body data-cakto-client-id="${esc(process.env.CAKTO_API_CLIENT_ID || "")}" data-price-cents="${Math.round(Number(offer.priceLabel) * 100)}">
+<div class="card">
+  <div class="brand"><img src="${SCOUTX_LOGO_DATA_URI}" alt="ScoutX"><span>ScoutX</span></div>
+  <div class="trial-badge">🎁 7 dias grátis</div>
+  <h1>Comece seu teste grátis</h1>
+  <p class="subtitle">Você só é cobrado depois dos 7 dias — cancele quando quiser antes disso, sem pagar nada.</p>
+
+  <div class="plan-toggle">
+    <a href="/assinar?plano=standard" class="${planKey !== "pro" ? "active" : ""}">Standard · R$127/mês</a>
+    <a href="/assinar?plano=pro" class="${planKey === "pro" ? "active" : ""}">Pro · R$187/mês</a>
+  </div>
+
+  <div class="error" id="form-error">${esc(error)}</div>
+
+  <form id="assinar-form" novalidate>
+    <input type="hidden" id="planKey" value="${planKey === "pro" ? "pro" : "standard"}">
+
+    <fieldset>
+      <legend>Sua conta</legend>
+      <label for="name">Nome completo</label>
+      <input type="text" id="name" required maxlength="120" value="${esc(v.name)}">
+      <label for="email">Email</label>
+      <input type="email" id="email" required maxlength="200" value="${esc(v.email)}">
+      <label for="password">Senha</label>
+      <input type="password" id="password" required minlength="8" autocomplete="new-password">
+      <label for="phone">WhatsApp (com DDD)</label>
+      <input type="tel" id="phone" required placeholder="11999999999" maxlength="11" value="${esc(v.phone)}">
+      <label for="docNumber">CPF</label>
+      <input type="text" id="docNumber" required placeholder="somente números" maxlength="14" value="${esc(v.docNumber)}">
+    </fieldset>
+
+    <fieldset>
+      <legend>Endereço de cobrança</legend>
+      <div class="row">
+        <div><label for="zipcode">CEP</label><input type="text" id="zipcode" required maxlength="9" value="${esc(v.zipcode)}"></div>
+        <div><label for="state">UF</label><input type="text" id="state" required maxlength="2" value="${esc(v.state)}"></div>
+      </div>
+      <label for="city">Cidade</label>
+      <input type="text" id="city" required maxlength="120" value="${esc(v.city)}">
+      <div class="row">
+        <div><label for="street">Rua</label><input type="text" id="street" required maxlength="200" value="${esc(v.street)}"></div>
+        <div><label for="number">Número</label><input type="text" id="number" required maxlength="20" value="${esc(v.number)}"></div>
+      </div>
+      <label for="complement">Complemento (opcional)</label>
+      <input type="text" id="complement" maxlength="120" value="${esc(v.complement)}">
+    </fieldset>
+
+    <fieldset>
+      <legend>Cartão de crédito</legend>
+      <label for="cardHolder">Nome impresso no cartão</label>
+      <input type="text" id="cardHolder" required maxlength="120">
+      <label for="cardNumber">Número do cartão</label>
+      <input type="text" id="cardNumber" required inputmode="numeric" maxlength="19" placeholder="0000 0000 0000 0000">
+      <div class="row">
+        <div><label for="cardExpiry">Validade (MM/AA)</label><input type="text" id="cardExpiry" required maxlength="5" placeholder="MM/AA"></div>
+        <div><label for="cardCvv">CVV</label><input type="text" id="cardCvv" required inputmode="numeric" maxlength="4"></div>
+      </div>
+    </fieldset>
+
+    <button type="submit" id="submit-btn">Começar meus 7 dias grátis</button>
+    <p class="fineprint">Ao continuar, um cartão válido é registrado mas NADA é cobrado agora. Se você não cancelar, a cobrança de R$${offer.priceLabel}/mês começa automaticamente após o 7º dia.</p>
+  </form>
+</div>
+<script src="https://cakto-sdk.pages.dev/cakto-sdk.min.js"></script>
+<script src="/assinar.js"></script>
+</body></html>`;
+  }
+
+  app.get("/assinar", (req, res) => {
+    const planKey = req.query.plano === "pro" ? "pro" : "standard";
+    res.send(assinarPage({ planKey }));
+  });
+
+  app.get("/assinar.js", (req, res) => {
+    res.type("application/javascript").send(ASSINAR_PAGE_SCRIPT);
+  });
+
+  app.post("/api/assinar", async (req, res) => {
+    const {
+      planKey, name, email, password, phone, docNumber,
+      zipcode, state, city, street, number, complement,
+      cardToken, threeDSecure, antifraudReference,
+    } = req.body || {};
+
+    const offer = ASSINAR_OFFERS[planKey === "pro" ? "pro" : "standard"];
+    const cleanEmail = String(email || "").trim().toLowerCase();
+    const cleanName = String(name || "").trim();
+    const cleanPhone = String(phone || "").replace(/\D/g, "");
+    const cleanDoc = String(docNumber || "").replace(/\D/g, "");
+
+    if (!cleanEmail || !cleanName || !password || !cleanPhone || !cleanDoc) {
+      return res.status(400).json({ error: "Preencha todos os campos obrigatórios." });
+    }
+    if (String(password).length < 8) {
+      return res.status(400).json({ error: "A senha precisa ter no mínimo 8 caracteres." });
+    }
+    if (!cardToken || !threeDSecure || !antifraudReference) {
+      return res.status(400).json({ error: "Não foi possível validar o cartão, revise os dados e tente de novo." });
+    }
+
+    const existing = await db.findUserByEmail(cleanEmail);
+    if (existing) {
+      return res.status(409).json({ error: "Já existe uma conta com esse email. Faça login, ou use outro email." });
+    }
+    if (await isPasswordPwned(String(password))) {
+      return res.status(400).json({ error: "Essa senha já apareceu em vazamentos conhecidos, escolha outra." });
+    }
+
+    let payment;
+    try {
+      payment = await createTrialPayment({
+        offerId: offer.offerId,
+        customer: {
+          name: cleanName,
+          email: cleanEmail,
+          phone: `55${cleanPhone}`,
+          docType: "cpf",
+          docNumber: cleanDoc,
+        },
+        address: {
+          country: "BR",
+          state: String(state || "").toUpperCase(),
+          city: String(city || ""),
+          zipcode: String(zipcode || "").replace(/\D/g, ""),
+          street: String(street || ""),
+          number: String(number || ""),
+          complement: complement ? String(complement) : undefined,
+        },
+        cardToken,
+        threeDSecure,
+        antifraudReference,
+        idempotencyKey: `assinar-${cleanEmail}-${offer.offerId}`,
+      });
+    } catch (err) {
+      console.error(`Assinar: pagamento recusado pra ${cleanEmail} (oferta ${offer.offerId}):`, err.message);
+      return res.status(402).json({ error: "Não foi possível validar o cartão. Confira os dados e tente novamente, ou use outro cartão." });
+    }
+
+    try {
+      const passwordHash = await bcrypt.hash(String(password), 10);
+      const planLabel = db.planLimitsFor(offer.plan).label;
+      const org = await db.createOrganizationFromCakto({
+        name: `${cleanName} (Cakto)`,
+        plan: offer.plan,
+        billingCycle: "mensal",
+        notes: `Teste grátis de 7 dias criado via /assinar, compra ${payment.id}, oferta "${offer.label}"`,
+        purchaseId: payment.id,
+        customerEmail: cleanEmail,
+        isTrial: true,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      });
+      const user = await db.createUser({
+        name: cleanName,
+        email: cleanEmail,
+        passwordHash,
+        role: "collaborator",
+        organizationId: org.id,
+        needsPasswordSetup: false,
+      });
+      await db.logAdminAction(
+        null,
+        "Assinar (auto-atendimento)",
+        user.id,
+        user.name,
+        "created",
+        `Plano ${planLabel} · teste grátis de 7 dias · compra Cakto ${payment.id}`
+      );
+      db.logLogin(user.id, req.ip).catch((e) => console.error("log login:", e));
+      setSessionCookie(res, user.id, user.token_version);
+      res.json({ ok: true });
+    } catch (err) {
+      // O pagamento JÁ foi aceito pela Cakto nesse ponto — se a criação da
+      // conta falhar aqui, não podemos simplesmente devolver erro genérico
+      // (a pessoa foi cobrada/tem assinatura em teste, mas sem conta pra
+      // usar). Fica visível no log pra revisão manual; o webhook
+      // subscription_created (cakto.js) é uma rede de segurança que ainda
+      // tenta criar a conta de qualquer jeito quando chegar.
+      console.error(`Assinar: pagamento ${payment.id} aprovado mas falha ao criar conta pra ${cleanEmail} — revise manualmente:`, err);
+      res.status(500).json({
+        error: "Seu pagamento foi aprovado, mas tivemos um problema pra criar sua conta. Nossa equipe já foi avisada — fale com o suporte informando esse email.",
+      });
     }
   });
 

@@ -385,10 +385,20 @@ async function handleSubscriptionCreated(data) {
 
   const existing = await db.findUserByEmail(email);
   if (existing) {
-    // Mesmo raciocínio de handlePurchaseApproved pra email repetido: não dá
-    // pra saber com segurança o que fazer com uma conta que já existe (é
-    // renovação? outra pessoa com mesmo email? conta manual do admin?) —
-    // falha alto e fica visível pra revisão manual em vez de arriscar.
+    // Achado ao vivo (2026-09-17, tela /assinar em server.js): quando a
+    // pessoa cria a conta E o cartão na hora dentro do próprio ScoutX (em
+    // vez de ir pro checkout da Cakto), NOSSO backend já cria a conta ANTES
+    // desse webhook chegar — o webhook só confirma algo que já demos conta.
+    // Se o cakto_purchase_id bater com essa MESMA compra, é exatamente esse
+    // caso: não é erro, não faz nada de novo, só loga e sai. Qualquer OUTRA
+    // situação (email já usado por conta diferente, purchase_id diferente)
+    // continua caindo no mesmo "falha alto" de sempre — não dá pra saber
+    // com segurança o que fazer, melhor revisão manual do que arriscar.
+    const org = existing.organization_id ? await db.getOrganizationById(existing.organization_id) : null;
+    if (org && org.cakto_purchase_id === data.id) {
+      console.log(`Webhook Cakto: organização "${org.name}" já tinha sido criada por /assinar pra essa mesma compra (${data.id}) — nada a fazer.`);
+      return;
+    }
     throw new Error(
       `já existe um usuário com o email ${email} (id ${existing.id}) — início de teste grátis (compra ${data.id}) não foi processado automaticamente, revise manualmente`
     );
