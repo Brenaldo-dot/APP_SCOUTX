@@ -293,6 +293,30 @@ async function migrate() {
   // expires_at no passado já barra o acesso, teste convertido ou não.
   await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS is_trial BOOLEAN NOT NULL DEFAULT false;`);
 
+  // /assinar em 2 passos (2026-09-17, pedido do usuário) — passo 1 (nome,
+  // email, senha, WhatsApp) já salva aqui, ANTES de pedir CPF/cartão no
+  // passo 2. Motivo: cartão espanta gente mesmo avisando que só cobra
+  // depois de 7 dias — separar os passos deixa mais gente começar a
+  // preencher, e quem abandona no meio vira um lead pra equipe de suporte
+  // entrar em contato depois (em vez de só sumir sem rastro nenhum).
+  // completed_at/organization_id ficam NULL até o passo 2 terminar com
+  // pagamento aprovado — nunca cria organização/app_user aqui, só guarda o
+  // que a pessoa já digitou.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS assinar_leads (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      plan_key TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      completed_at TIMESTAMPTZ,
+      organization_id INTEGER REFERENCES organizations(id)
+    );
+  `);
+
   // Idempotência do webhook: a Cakto pode reenviar o mesmo evento (timeout,
   // retry automático dela) — sem isso, um reenvio de "purchase_approved"
   // criaria uma segunda organização/usuário pra mesma compra. Chave composta
@@ -1307,6 +1331,45 @@ async function createOrganizationFromCakto({
   return res.rows[0];
 }
 
+// upsert: retomar o passo 1 com o mesmo email (ex: fechou a aba e voltou
+// depois) atualiza os dados em vez de duplicar — mas só se ainda não tiver
+// completado o passo 2 (completed_at IS NULL). Se já completou, o UPDATE
+// simplesmente não roda (WHERE barra) e quem chamou trata como "já existe
+// conta" do mesmo jeito que já faz pra email repetido em app_users.
+async function upsertAssinarLead({ name, email, passwordHash, phone }) {
+  const res = await pool.query(
+    `INSERT INTO assinar_leads (name, email, password_hash, phone)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (email) DO UPDATE
+       SET name = EXCLUDED.name, password_hash = EXCLUDED.password_hash, phone = EXCLUDED.phone, updated_at = now()
+       WHERE assinar_leads.completed_at IS NULL
+     RETURNING *`,
+    [name, email.toLowerCase().trim(), passwordHash, phone]
+  );
+  return res.rows[0] || null; // null = email já tinha lead COMPLETO (WHERE do ON CONFLICT barrou)
+}
+
+async function getAssinarLeadByEmail(email) {
+  const res = await pool.query("SELECT * FROM assinar_leads WHERE email = $1", [email.toLowerCase().trim()]);
+  return res.rows[0] || null;
+}
+
+async function markAssinarLeadCompleted(email, organizationId, planKey) {
+  await pool.query(
+    "UPDATE assinar_leads SET completed_at = now(), organization_id = $1, plan_key = $2 WHERE email = $3",
+    [organizationId, planKey, email.toLowerCase().trim()]
+  );
+}
+
+// Admin (aba Usuários) — quem começou o passo 1 mas nunca completou o
+// passo 2, pra equipe de suporte entrar em contato e ajudar a fechar.
+async function listAbandonedAssinarLeads() {
+  const res = await pool.query(
+    "SELECT id, name, email, phone, plan_key, created_at, updated_at FROM assinar_leads WHERE completed_at IS NULL ORDER BY updated_at DESC"
+  );
+  return res.rows;
+}
+
 async function findOrganizationByCaktoPurchaseId(purchaseId) {
   const res = await pool.query("SELECT * FROM organizations WHERE cakto_purchase_id = $1", [purchaseId]);
   return res.rows[0] || null;
@@ -1533,6 +1596,10 @@ module.exports = {
   createOrganizationFromCakto,
   findOrganizationByCaktoPurchaseId,
   findOrganizationByCaktoEmail,
+  upsertAssinarLead,
+  getAssinarLeadByEmail,
+  markAssinarLeadCompleted,
+  listAbandonedAssinarLeads,
   recordCaktoEvent,
   updateCaktoEventStatus,
   completePasswordSetup,

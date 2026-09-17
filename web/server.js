@@ -501,19 +501,27 @@ if (form) {
 // PRÓPRIO backend não toca em número de cartão nenhum, só recebe o que o
 // SDK devolve aqui (cardToken, dados do 3DS, referência antifraude) e
 // repassa pra Cakto por fora do browser (ver caktoPayments.js).
+const ASSINAR_PRICE_CENTS = { standard: 12700, pro: 18700 };
+
 const ASSINAR_PAGE_SCRIPT = `
 var caktoSdk = new Cakto.CaktoSDK({ client_id: document.body.dataset.caktoClientId });
-var priceCents = Number(document.body.dataset.priceCents);
 caktoSdk.initAntifraud().catch(function (err) { console.error("Antifraude Cakto:", err); });
 
-var form = document.getElementById("assinar-form");
-var submitBtn = document.getElementById("submit-btn");
+var PRICE_CENTS = ${JSON.stringify(ASSINAR_PRICE_CENTS)};
+var step1 = document.getElementById("step-1");
+var step2 = document.getElementById("step-2");
 var errorBox = document.getElementById("form-error");
+var leadData = null; // { name, email, phone } — preenchido depois do passo 1 dar certo
+var selectedPlan = "standard";
 
 function showError(msg) {
   errorBox.textContent = msg;
   errorBox.style.display = "block";
   errorBox.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function clearError() {
+  errorBox.style.display = "none";
 }
 
 function luhnValid(number) {
@@ -527,16 +535,72 @@ function luhnValid(number) {
   return sum % 10 === 0;
 }
 
-form.addEventListener("submit", function (e) {
-  e.preventDefault();
-  errorBox.style.display = "none";
+// ---------- Seleção de plano (passo 2) ----------
+var planCards = document.querySelectorAll(".plan-card");
+planCards.forEach(function (el) {
+  el.addEventListener("click", function () {
+    selectedPlan = el.dataset.plan;
+    planCards.forEach(function (c) { c.classList.toggle("selected", c === el); });
+  });
+});
+var initialPlan = document.getElementById("plan-cards").dataset.initialPlan || "standard";
+var preselect = document.querySelector(".plan-card[data-plan=\\"" + initialPlan + "\\"]") || planCards[0];
+if (preselect) { selectedPlan = preselect.dataset.plan; preselect.classList.add("selected"); }
 
+document.getElementById("back-btn").addEventListener("click", function () {
+  clearError();
+  step2.classList.remove("active");
+  step1.classList.add("active");
+});
+
+// ---------- Passo 1: cria o lead (sem cartão nenhum ainda) ----------
+var step1Btn = document.getElementById("step1-btn");
+step1Btn.addEventListener("click", function () {
+  clearError();
+  var name = document.getElementById("name").value.trim();
+  var email = document.getElementById("email").value.trim();
   var password = document.getElementById("password").value;
+  var phone = document.getElementById("phone").value.replace(/\\D/g, "");
+
+  if (!name || !email || !phone) return showError("Preencha todos os campos.");
+  if (password.length < 8) return showError("A senha precisa ter no mínimo 8 caracteres.");
+
+  step1Btn.disabled = true;
+  step1Btn.textContent = "Continuando…";
+
+  fetch("/api/assinar/lead", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: name, email: email, password: password, phone: phone }),
+  })
+    .then(function (resp) { return resp.json().then(function (data) { return { ok: resp.ok, data: data }; }); })
+    .then(function (r) {
+      if (!r.ok) throw new Error(r.data.error || "Não foi possível continuar, tente de novo.");
+      leadData = { name: name, email: email, phone: phone };
+      step1.classList.remove("active");
+      step2.classList.add("active");
+    })
+    .catch(function (err) {
+      showError(err.message || "Algo deu errado, tente novamente.");
+    })
+    .finally(function () {
+      step1Btn.disabled = false;
+      step1Btn.textContent = "Continuar";
+    });
+});
+
+// ---------- Passo 2: plano + CPF + cartão, fecha a assinatura ----------
+var submitBtn = document.getElementById("submit-btn");
+submitBtn.addEventListener("click", function () {
+  clearError();
+  if (!leadData) return showError("Volta pro passo anterior e preenche seus dados primeiro.");
+
+  var docNumber = document.getElementById("docNumber").value.replace(/\\D/g, "");
   var cardNumber = document.getElementById("cardNumber").value.replace(/\\D/g, "");
   var cardExpiry = document.getElementById("cardExpiry").value.trim();
   var expMatch = cardExpiry.match(/^(\\d{2})\\/(\\d{2})$/);
 
-  if (password.length < 8) return showError("A senha precisa ter no mínimo 8 caracteres.");
+  if (!docNumber) return showError("Preencha seu CPF.");
   if (!luhnValid(cardNumber)) return showError("Número do cartão inválido, confira os dígitos.");
   if (!expMatch) return showError("Validade do cartão inválida — use o formato MM/AA.");
 
@@ -550,20 +614,17 @@ form.addEventListener("submit", function (e) {
     expMonth: expMatch[1],
     expYear: expMatch[2],
   };
-  var email = document.getElementById("email").value.trim();
-  var name = document.getElementById("name").value.trim();
-  var phone = document.getElementById("phone").value.replace(/\\D/g, "");
 
   caktoSdk.createToken(card)
     .then(function (result) {
       return caktoSdk.authenticate3DS({
         card: card,
         customer: {
-          amount: priceCents,
+          amount: PRICE_CENTS[selectedPlan],
           currency: "BRL",
-          email: email,
-          name: name,
-          phone: "55" + phone,
+          email: leadData.email,
+          name: leadData.name,
+          phone: "55" + leadData.phone,
           paymentMethod: "credit",
         },
       }).then(function (authResult) { return { cardToken: result.cardToken, authResult: authResult }; });
@@ -579,12 +640,9 @@ form.addEventListener("submit", function (e) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          planKey: document.getElementById("planKey").value,
-          name: name,
-          email: email,
-          password: password,
-          phone: phone,
-          docNumber: document.getElementById("docNumber").value.replace(/\\D/g, ""),
+          email: leadData.email,
+          planKey: selectedPlan,
+          docNumber: docNumber,
           cardToken: r.cardToken,
           threeDSecure: {
             cavv: r.authResult.cavv,
@@ -920,36 +978,46 @@ function createApp() {
     border: 1px solid rgba(96,165,250,0.16); background: rgba(5,7,13,0.7); color: #f3f4f6; font-size: 14px;
   }
   input:focus, select:focus { outline: none; border-color: #22d3ee; box-shadow: 0 0 0 3px rgba(34,211,238,0.18); }
-  button[type="submit"] {
+  .btn-primary {
     width: 100%; padding: 14px; border-radius: 9999px; border: none;
     background: linear-gradient(90deg, #1d4ed8 0%, #3b82f6 50%, #22d3ee 100%);
     color: #fff; font-weight: 700; font-size: 14px; cursor: pointer;
     box-shadow: 0 8px 28px rgba(59,130,246,0.4);
   }
-  button[type="submit"]:disabled { opacity: 0.6; cursor: not-allowed; }
+  .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
   .error {
     background: rgba(127,29,29,0.25); color: #f87171; border: 1px solid #7f1d1d;
     padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; display: ${error ? "block" : "none"};
   }
   .fineprint { color: #6b7280; font-size: 11px; text-align: center; margin-top: 14px; line-height: 1.5; }
+  .step { display: none; }
+  .step.active { display: block; }
+  .back-link { display: inline-block; background: none; border: none; color: #6b7280; font-size: 12px; cursor: pointer; margin-bottom: 14px; padding: 0; }
+  .back-link:hover { color: #9ca3af; }
+  .plan-cards { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+  .plan-card {
+    border: 1px solid rgba(96,165,250,0.16); border-radius: 14px; padding: 16px; cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .plan-card.selected { border-color: #3b82f6; background: rgba(59,130,246,0.08); }
+  .plan-card-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+  .plan-card-head .name { font-weight: 700; font-size: 15px; }
+  .plan-card-head .price { font-weight: 700; font-size: 15px; color: #60a5fa; }
+  .plan-card-head .price small { font-weight: 500; color: #6b7280; font-size: 11px; }
+  .plan-card ul { margin: 0; padding: 0; list-style: none; }
+  .plan-card li { font-size: 12.5px; color: #9ca3af; margin-bottom: 4px; padding-left: 18px; position: relative; }
+  .plan-card li::before { content: "✓"; position: absolute; left: 0; color: #34d399; font-weight: 700; }
 </style></head>
-<body data-cakto-client-id="${esc(process.env.CAKTO_API_CLIENT_ID || "")}" data-price-cents="${Math.round(Number(offer.priceLabel) * 100)}">
+<body data-cakto-client-id="${esc(process.env.CAKTO_API_CLIENT_ID || "")}">
 <div class="card">
   <div class="brand"><img src="${SCOUTX_LOGO_DATA_URI}" alt="ScoutX"><span>ScoutX</span></div>
   <div class="trial-badge">🎁 7 dias grátis</div>
   <h1>Comece seu teste grátis</h1>
   <p class="subtitle">Você só é cobrado depois dos 7 dias — cancele quando quiser antes disso, sem pagar nada.</p>
 
-  <div class="plan-toggle">
-    <a href="/assinar?plano=standard" class="${planKey !== "pro" ? "active" : ""}">Standard · R$127/mês</a>
-    <a href="/assinar?plano=pro" class="${planKey === "pro" ? "active" : ""}">Pro · R$187/mês</a>
-  </div>
-
   <div class="error" id="form-error">${esc(error)}</div>
 
-  <form id="assinar-form" novalidate>
-    <input type="hidden" id="planKey" value="${planKey === "pro" ? "pro" : "standard"}">
-
+  <div class="step active" id="step-1">
     <fieldset>
       <legend>Sua conta</legend>
       <label for="name">Nome completo</label>
@@ -960,25 +1028,58 @@ function createApp() {
       <input type="password" id="password" required minlength="8" autocomplete="new-password">
       <label for="phone">WhatsApp (com DDD)</label>
       <input type="tel" id="phone" required placeholder="11999999999" maxlength="11" value="${esc(v.phone)}">
+    </fieldset>
+    <button type="button" id="step1-btn" class="btn-primary">Continuar</button>
+    <p class="fineprint">Só no próximo passo a gente pede o cartão — nada é cobrado agora nem depois, a não ser que você não cancele o teste dentro de 7 dias.</p>
+  </div>
+
+  <div class="step" id="step-2">
+    <button type="button" class="back-link" id="back-btn">‹ Voltar</button>
+    <fieldset>
+      <legend>Escolha seu plano</legend>
+      <div class="plan-cards" id="plan-cards" data-initial-plan="${planKey === "pro" ? "pro" : "standard"}">
+        <div class="plan-card" data-plan="standard">
+          <div class="plan-card-head"><span class="name">Standard</span><span class="price">R$127<small>/mês</small></span></div>
+          <ul>
+            <li>Todas as ferramentas do ScoutX liberadas</li>
+            <li>Cadastre até 50 lojas concorrentes</li>
+            <li>Ferramentas instantâneas ilimitadas</li>
+            <li>Alertas limitados</li>
+          </ul>
+        </div>
+        <div class="plan-card" data-plan="pro">
+          <div class="plan-card-head"><span class="name">Pro</span><span class="price">R$187<small>/mês</small></span></div>
+          <ul>
+            <li>Tudo do plano Standard</li>
+            <li>Cadastre até 250 lojas concorrentes</li>
+            <li>Até 3 operações/países</li>
+            <li>Alertas ilimitados no Discord</li>
+          </ul>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Seus dados</legend>
       <label for="docNumber">CPF</label>
-      <input type="text" id="docNumber" required placeholder="somente números" maxlength="14" value="${esc(v.docNumber)}">
+      <input type="text" id="docNumber" placeholder="somente números" maxlength="14" value="${esc(v.docNumber)}">
     </fieldset>
 
     <fieldset>
       <legend>Cartão de crédito</legend>
       <label for="cardHolder">Nome impresso no cartão</label>
-      <input type="text" id="cardHolder" required maxlength="120">
+      <input type="text" id="cardHolder" maxlength="120">
       <label for="cardNumber">Número do cartão</label>
-      <input type="text" id="cardNumber" required inputmode="numeric" maxlength="19" placeholder="0000 0000 0000 0000">
+      <input type="text" id="cardNumber" inputmode="numeric" maxlength="19" placeholder="0000 0000 0000 0000">
       <div class="row">
-        <div><label for="cardExpiry">Validade (MM/AA)</label><input type="text" id="cardExpiry" required maxlength="5" placeholder="MM/AA"></div>
-        <div><label for="cardCvv">CVV</label><input type="text" id="cardCvv" required inputmode="numeric" maxlength="4"></div>
+        <div><label for="cardExpiry">Validade (MM/AA)</label><input type="text" id="cardExpiry" maxlength="5" placeholder="MM/AA"></div>
+        <div><label for="cardCvv">CVV</label><input type="text" id="cardCvv" inputmode="numeric" maxlength="4"></div>
       </div>
     </fieldset>
 
-    <button type="submit" id="submit-btn">Começar meus 7 dias grátis</button>
-    <p class="fineprint">Ao continuar, um cartão válido é registrado mas NADA é cobrado agora. Se você não cancelar, a cobrança de R$${offer.priceLabel}/mês começa automaticamente após o 7º dia.</p>
-  </form>
+    <button type="button" id="submit-btn" class="btn-primary">Começar meus 7 dias grátis</button>
+    <p class="fineprint" id="fineprint-2">Ao continuar, um cartão válido é registrado mas NADA é cobrado agora. Se você não cancelar, a cobrança começa automaticamente após o 7º dia.</p>
+  </div>
 </div>
 <script src="https://cakto-sdk.pages.dev/cakto-sdk.min.js"></script>
 <script src="/assinar.js"></script>
@@ -994,31 +1095,66 @@ function createApp() {
     res.type("application/javascript").send(ASSINAR_PAGE_SCRIPT);
   });
 
-  app.post("/api/assinar", async (req, res) => {
-    const { planKey, name, email, password, phone, docNumber, cardToken, threeDSecure, antifraudReference } = req.body || {};
-
-    const offer = ASSINAR_OFFERS[planKey === "pro" ? "pro" : "standard"];
+  // Passo 1 — só conta (nome, email, senha, WhatsApp). Salva na hora como
+  // lead, ANTES de pedir cartão/CPF — quem abandona depois disso ainda vira
+  // um contato que o suporte pode alcançar (ver db.js:upsertAssinarLead).
+  app.post("/api/assinar/lead", async (req, res) => {
+    const { name, email, password, phone } = req.body || {};
     const cleanEmail = String(email || "").trim().toLowerCase();
     const cleanName = String(name || "").trim();
     const cleanPhone = String(phone || "").replace(/\D/g, "");
-    const cleanDoc = String(docNumber || "").replace(/\D/g, "");
 
-    if (!cleanEmail || !cleanName || !password || !cleanPhone || !cleanDoc) {
+    if (!cleanEmail || !cleanName || !password || !cleanPhone) {
       return res.status(400).json({ error: "Preencha todos os campos obrigatórios." });
     }
     if (String(password).length < 8) {
       return res.status(400).json({ error: "A senha precisa ter no mínimo 8 caracteres." });
     }
-    if (!cardToken || !threeDSecure || !antifraudReference) {
-      return res.status(400).json({ error: "Não foi possível validar o cartão, revise os dados e tente de novo." });
-    }
 
-    const existing = await db.findUserByEmail(cleanEmail);
-    if (existing) {
+    const existingUser = await db.findUserByEmail(cleanEmail);
+    if (existingUser) {
       return res.status(409).json({ error: "Já existe uma conta com esse email. Faça login, ou use outro email." });
     }
     if (await isPasswordPwned(String(password))) {
       return res.status(400).json({ error: "Essa senha já apareceu em vazamentos conhecidos, escolha outra." });
+    }
+
+    const passwordHash = await bcrypt.hash(String(password), 10);
+    const lead = await db.upsertAssinarLead({ name: cleanName, email: cleanEmail, passwordHash, phone: cleanPhone });
+    if (!lead) {
+      // upsertAssinarLead devolve null só quando o email já tem um lead
+      // COMPLETO (virou conta de verdade) — mesmo aviso de email duplicado.
+      return res.status(409).json({ error: "Já existe uma conta com esse email. Faça login, ou use outro email." });
+    }
+    res.json({ ok: true });
+  });
+
+  // Passo 2 — plano, CPF e cartão. Busca nome/senha/telefone do lead salvo
+  // no passo 1 (não pede de novo) — só funciona se o passo 1 já rodou.
+  app.post("/api/assinar", async (req, res) => {
+    const { email, planKey, docNumber, cardToken, threeDSecure, antifraudReference } = req.body || {};
+
+    const offer = ASSINAR_OFFERS[planKey === "pro" ? "pro" : "standard"];
+    const cleanEmail = String(email || "").trim().toLowerCase();
+    const cleanDoc = String(docNumber || "").replace(/\D/g, "");
+
+    if (!cleanEmail || !cleanDoc) {
+      return res.status(400).json({ error: "Preencha todos os campos obrigatórios." });
+    }
+    if (!cardToken || !threeDSecure || !antifraudReference) {
+      return res.status(400).json({ error: "Não foi possível validar o cartão, revise os dados e tente de novo." });
+    }
+
+    const lead = await db.getAssinarLeadByEmail(cleanEmail);
+    if (!lead) {
+      return res.status(400).json({ error: "Não encontramos os dados da sua conta, volte pro passo anterior e preencha de novo." });
+    }
+    if (lead.completed_at) {
+      return res.status(409).json({ error: "Já existe uma conta com esse email. Faça login, ou use outro email." });
+    }
+    const existingUser = await db.findUserByEmail(cleanEmail);
+    if (existingUser) {
+      return res.status(409).json({ error: "Já existe uma conta com esse email. Faça login, ou use outro email." });
     }
 
     let payment;
@@ -1026,9 +1162,9 @@ function createApp() {
       payment = await createTrialPayment({
         offerId: offer.offerId,
         customer: {
-          name: cleanName,
+          name: lead.name,
           email: cleanEmail,
-          phone: `55${cleanPhone}`,
+          phone: `55${lead.phone}`,
           docType: "cpf",
           docNumber: cleanDoc,
         },
@@ -1043,10 +1179,9 @@ function createApp() {
     }
 
     try {
-      const passwordHash = await bcrypt.hash(String(password), 10);
       const planLabel = db.planLimitsFor(offer.plan).label;
       const org = await db.createOrganizationFromCakto({
-        name: `${cleanName} (Cakto)`,
+        name: `${lead.name} (Cakto)`,
         plan: offer.plan,
         billingCycle: "mensal",
         notes: `Teste grátis de 7 dias criado via /assinar, compra ${payment.id}, oferta "${offer.label}"`,
@@ -1056,13 +1191,14 @@ function createApp() {
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       });
       const user = await db.createUser({
-        name: cleanName,
+        name: lead.name,
         email: cleanEmail,
-        passwordHash,
+        passwordHash: lead.password_hash,
         role: "collaborator",
         organizationId: org.id,
         needsPasswordSetup: false,
       });
+      await db.markAssinarLeadCompleted(cleanEmail, org.id, planKey === "pro" ? "pro" : "standard");
       await db.logAdminAction(
         null,
         "Assinar (auto-atendimento)",
@@ -2108,6 +2244,23 @@ function createApp() {
   app.get("/api/admin/organizations", requireAdmin, async (req, res) => {
     const rows = await db.listOrganizationsWithCounts();
     res.json(rows.map(serializeOrg));
+  });
+
+  // Passo 1 de /assinar sem passo 2 — pra suporte entrar em contato com
+  // quem começou mas não terminou (ver db.js:listAbandonedAssinarLeads).
+  app.get("/api/admin/assinar-leads", requireAdmin, async (req, res) => {
+    const rows = await db.listAbandonedAssinarLeads();
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        email: r.email,
+        phone: r.phone,
+        planKey: r.plan_key,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+      }))
+    );
   });
 
   app.post("/api/admin/organizations", requireAdmin, async (req, res) => {

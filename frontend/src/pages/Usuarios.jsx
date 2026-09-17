@@ -149,6 +149,7 @@ export default function Usuarios() {
   const [retentionMsg, setRetentionMsg] = useState(null)
   const [celeryDiag, setCeleryDiag] = useState(null)
   const [loadingDiag, setLoadingDiag] = useState(false)
+  const [assinarLeads, setAssinarLeads] = useState(null)
   const [searchParams, setSearchParams] = useSearchParams()
   const orgFilter = searchParams.get('org') || ''
 
@@ -224,6 +225,7 @@ export default function Usuarios() {
       rawApi.listAuditLog().then(setAuditLog).catch(() => setAuditLog([])),
       rawApi.listOrganizations().then(setOrganizations).catch(() => setOrganizations([])),
       api.listProtectedStores().then(setProtectedStores).catch(() => setProtectedStores([])),
+      rawApi.listAssinarLeads().then(setAssinarLeads).catch(() => setAssinarLeads([])),
     ])
   }
 
@@ -594,6 +596,34 @@ export default function Usuarios() {
             )}
           </div>
         </div>
+
+        {assinarLeads?.length > 0 && (
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-5">
+            <h3 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-400">
+              📋 Começaram mas não terminaram ({assinarLeads.length})
+            </h3>
+            <p className="mb-3.5 text-sm text-[var(--text-tertiary)]">
+              Preencheram nome/email/WhatsApp em <code>/assinar</code> mas abandonaram antes de escolher o plano e
+              preencher o cartão — vale entrar em contato.
+            </p>
+            <div className="space-y-2">
+              {assinarLeads.map((lead) => (
+                <div
+                  key={lead.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/20 bg-[var(--bg-surface-2)] px-3.5 py-2.5 text-sm"
+                >
+                  <div>
+                    <p className="font-medium text-[var(--text-primary)]">{lead.name}</p>
+                    <p className="text-xs text-[var(--text-muted)]">
+                      {lead.email} · {lead.phone}
+                    </p>
+                  </div>
+                  <p className="text-xs text-[var(--text-muted)]">{formatDateTime(lead.updatedAt)}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
           <h3 className="mb-3.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Criar novo usuário</h3>
