@@ -35,6 +35,17 @@ const CAKTO_OFFER_PLAN_MAP = {
   "36wjk7s": { plan: "solo", billingCycle: "anual", label: "Standard Anual (novo)" },
   cpspn3i: { plan: "pro", billingCycle: "anual", label: "PRO Anual (novo)" },
   "9j9t3aq": { plan: "agencia", billingCycle: "anual", label: "Enterprise Anual (novo)" },
+
+  // Teste grátis de 7 dias (2026-09-17, pedido do usuário) — ofertas NOVAS,
+  // criadas direto pela API da Cakto (o painel não expõe o campo trial_days
+  // pra ofertas de assinatura, só a API tem) com trial_days=7. `isTrial`
+  // marca essas duas como o gatilho pra handleSubscriptionCreated criar a
+  // conta já no início do teste, em vez de esperar handlePurchaseApproved
+  // (que só dispara depois dos 7 dias, na primeira cobrança de verdade).
+  // Só Standard e Pro têm teste — Enterprise NUNCA deve ter uma oferta assim
+  // (ver a trava em handleSubscriptionCreated).
+  "3dwqhjp": { plan: "solo", billingCycle: "mensal", label: "Standard - Teste 7 dias", isTrial: true },
+  vzdzujz: { plan: "pro", billingCycle: "mensal", label: "Pro - Teste 7 dias", isTrial: true },
 };
 
 // Nomes confirmados na documentação oficial da Cakto
@@ -44,11 +55,21 @@ const CAKTO_OFFER_PLAN_MAP = {
 // verdade). Antes de confiar 100%, dispare um "Evento de Teste" de cada um
 // desses no painel da Cakto (Integrações → Webhooks → seu webhook → testar)
 // e confira no log do Railway se handleCancellationEvent achou a
-// organização certa. "subscription_renewal_refused" (pagamento da
-// renovação recusado) fica de fora de propósito — não é bem um
-// cancelamento, precisa decidir com o Samuel se isso também suspende ou só
-// avisa.
-const CANCELLATION_EVENTS = new Set(["refund", "chargeback", "subscription_canceled"]);
+// organização certa.
+//
+// "subscription_renewal_refused" ficava de fora de propósito (decisão
+// pendente: "é bem um cancelamento?"). Resolvido em 2026-09-17 com o teste
+// grátis: se a cobrança da primeira mensalidade falhar depois dos 7 dias
+// (cartão recusado, sem saldo, etc.), a conta TEM que perder acesso — senão
+// vira teste grátis pra sempre pra quem não pagou. Mesmo raciocínio vale
+// pra uma renovação normal (não-teste) que falhar, então entra pra
+// CANCELLATION_EVENTS pros dois casos, não só teste.
+const CANCELLATION_EVENTS = new Set([
+  "refund",
+  "chargeback",
+  "subscription_canceled",
+  "subscription_renewal_refused",
+]);
 
 // Senha PLACEHOLDER — ninguém nunca vê esse valor, nem loga, nem entrega
 // em lugar nenhum. Existe só porque password_hash é NOT NULL. A conta
@@ -315,6 +336,94 @@ async function handlePurchaseApproved(data) {
   await autoJoinCommunityIfAny(resolvedAffiliate?.affiliate, org);
 }
 
+// Teste grátis de 7 dias (2026-09-17) — "subscription_created" dispara
+// assim que a pessoa preenche o cartão e o teste começa, ANTES de qualquer
+// cobrança de verdade (que só chega em "purchase_approved"/
+// "subscription_renewed" depois dos 7 dias). Sem tratar esse evento, a
+// pessoa preenchia o cartão mas não ganhava acesso nenhum durante o teste
+// — só depois de pagar, o que anula o sentido de "teste grátis".
+//
+// Só age se a oferta for uma das marcadas `isTrial: true` no mapa acima —
+// pra qualquer outra oferta (assinatura normal, sem teste), não faz nada
+// aqui: a conta dela já é criada por handlePurchaseApproved na hora da
+// primeira cobrança, como sempre foi. Isso evita criar a organização DUAS
+// vezes (uma aqui, outra em purchase_approved) pra quem não está em teste.
+async function handleSubscriptionCreated(data) {
+  const offerId = data.offer?.id;
+  const mapping = offerId ? CAKTO_OFFER_PLAN_MAP[offerId] : null;
+  if (!mapping?.isTrial) {
+    return; // não é uma das nossas ofertas de teste grátis — nada a fazer aqui.
+  }
+
+  // Defesa em profundidade (pedido explícito do usuário: "o Enterprise não
+  // tem 7 dias grátis") — nunca deveria acontecer, já que só existem 2
+  // ofertas com isTrial:true e nenhuma delas é agencia, mas se algum dia
+  // alguém marcar isTrial numa oferta Enterprise por engano, falha alto em
+  // vez de silenciosamente dar teste grátis de um plano que não devia ter.
+  if (mapping.plan === "agencia") {
+    throw new Error(
+      `oferta de teste "${offerId}" está mapeada pro plano Enterprise em CAKTO_OFFER_PLAN_MAP — Enterprise não tem teste grátis, corrija o mapeamento (compra ${data.id})`
+    );
+  }
+
+  const email = String(data.customer?.email || "").trim().toLowerCase();
+  const name = String(data.customer?.name || "").trim();
+  if (!email || !name) {
+    throw new Error(`payload incompleto pra criar organização de teste (email=${email || "?"}, name=${name || "?"}, compra ${data.id})`);
+  }
+
+  const existing = await db.findUserByEmail(email);
+  if (existing) {
+    // Mesmo raciocínio de handlePurchaseApproved pra email repetido: não dá
+    // pra saber com segurança o que fazer com uma conta que já existe (é
+    // renovação? outra pessoa com mesmo email? conta manual do admin?) —
+    // falha alto e fica visível pra revisão manual em vez de arriscar.
+    throw new Error(
+      `já existe um usuário com o email ${email} (id ${existing.id}) — início de teste grátis (compra ${data.id}) não foi processado automaticamente, revise manualmente`
+    );
+  }
+
+  const planLabel = db.planLimitsFor(mapping.plan).label;
+  // A Cakto manda a data exata da primeira cobrança de verdade em
+  // data.subscription.next_payment_date — usa ela como validade do teste
+  // (mais preciso que calcular "+7 dias" na mão aqui). Se por algum motivo
+  // não vier, cai num fallback de 7 dias corridos a partir de agora.
+  const trialEndsAt = data.subscription?.next_payment_date
+    ? new Date(data.subscription.next_payment_date)
+    : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  const passwordHash = await bcrypt.hash(generateUnusablePlaceholderPassword(), 10);
+  const org = await db.createOrganizationFromCakto({
+    name: `${name} (Cakto)`,
+    plan: mapping.plan,
+    billingCycle: mapping.billingCycle,
+    notes: `Teste grátis de 7 dias criado automaticamente via webhook Cakto, compra ${data.id}, oferta "${mapping.label}"`,
+    purchaseId: data.id,
+    customerEmail: email,
+    isTrial: true,
+    expiresAt: trialEndsAt,
+  });
+  const user = await db.createUser({
+    name,
+    email,
+    passwordHash,
+    role: "collaborator",
+    organizationId: org.id,
+    needsPasswordSetup: true,
+  });
+  await db.logAdminAction(
+    null,
+    "Cakto (automático)",
+    user.id,
+    user.name,
+    "created",
+    `Plano ${planLabel} · teste grátis até ${trialEndsAt.toLocaleDateString("pt-BR")} · compra Cakto ${data.id}`
+  );
+  console.log(
+    `Webhook Cakto: organização "${org.name}" e usuário ${email} criados em TESTE GRÁTIS (${planLabel}, até ${trialEndsAt.toISOString()}) a partir da compra ${data.id}.`
+  );
+}
+
 async function handleCancellationEvent(data, eventName) {
   const email = String(data.customer?.email || "").trim().toLowerCase();
   let org = data.id ? await db.findOrganizationByCaktoPurchaseId(data.id) : null;
@@ -447,6 +556,8 @@ async function handleCaktoWebhook(body) {
       await handleCancellationEvent(data, event);
     } else if (event === "subscription_renewed") {
       await handleSubscriptionRenewed(data);
+    } else if (event === "subscription_created") {
+      await handleSubscriptionCreated(data);
     } else {
       console.warn(`Webhook Cakto: evento "${event}" recebido (compra ${data.id}) mas ainda não é tratado automaticamente — só logado.`);
       await db.updateCaktoEventStatus(data.id, event, "ignored_event");

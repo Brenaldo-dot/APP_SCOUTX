@@ -285,6 +285,14 @@ async function migrate() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_organizations_cakto_purchase ON organizations(cakto_purchase_id) WHERE cakto_purchase_id IS NOT NULL;`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_organizations_cakto_email ON organizations(cakto_customer_email) WHERE cakto_customer_email IS NOT NULL;`);
 
+  // Teste grátis de 7 dias (2026-09-17) — true entre o "subscription_created"
+  // (cartão salvo, teste começou) e a primeira cobrança de verdade passar.
+  // renewOrganization sempre zera isso pra false (qualquer renovação bem
+  // sucedida = converteu de teste pra cliente de verdade, ou já não era
+  // teste); handleCancellationEvent (cakto.js) não precisa mexer aqui —
+  // expires_at no passado já barra o acesso, teste convertido ou não.
+  await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS is_trial BOOLEAN NOT NULL DEFAULT false;`);
+
   // Idempotência do webhook: a Cakto pode reenviar o mesmo evento (timeout,
   // retry automático dela) — sem isso, um reenvio de "purchase_approved"
   // criaria uma segunda organização/usuário pra mesma compra. Chave composta
@@ -1276,12 +1284,25 @@ async function createOrganization({ name, plan, billingCycle, notes }) {
 // Cakto que originou essa organização (ver colunas cakto_* em migrate()) —
 // é o que permite um evento de cancelamento/reembolso futuro achar essa
 // organização de volta.
-async function createOrganizationFromCakto({ name, plan, billingCycle, notes, purchaseId, customerEmail }) {
+async function createOrganizationFromCakto({
+  name,
+  plan,
+  billingCycle,
+  notes,
+  purchaseId,
+  customerEmail,
+  isTrial = false,
+  expiresAt = null,
+}) {
+  // `expiresAt` explícito (teste grátis, ver cakto.js:handleSubscriptionCreated)
+  // sobrepõe o cálculo padrão por billingCycle — o teste dura os dias que a
+  // própria Cakto mandou no webhook (data.subscription.next_payment_date),
+  // não o ciclo de cobrança que só vale depois de virar cliente de verdade.
   const days = BILLING_CYCLE_DAYS[billingCycle];
   const res = await pool.query(
-    `INSERT INTO organizations (name, plan, billing_cycle, expires_at, notes, cakto_purchase_id, cakto_customer_email)
-     VALUES ($1, $2, $3, now() + ($4 || ' days')::interval, $5, $6, $7) RETURNING *`,
-    [name, plan, billingCycle, days, notes || null, purchaseId, customerEmail]
+    `INSERT INTO organizations (name, plan, billing_cycle, expires_at, notes, cakto_purchase_id, cakto_customer_email, is_trial)
+     VALUES ($1, $2, $3, COALESCE($4, now() + ($5 || ' days')::interval), $6, $7, $8, $9) RETURNING *`,
+    [name, plan, billingCycle, expiresAt, days, notes || null, purchaseId, customerEmail, isTrial]
   );
   return res.rows[0];
 }
@@ -1362,8 +1383,11 @@ async function renewOrganization(id, plan, billingCycle) {
   if (!org) return null;
   const days = BILLING_CYCLE_DAYS[billingCycle];
   const base = new Date(org.expires_at) > new Date() ? "expires_at" : "now()";
+  // is_trial sempre vira false aqui — qualquer renovação bem sucedida quer
+  // dizer que ou converteu de teste grátis pra cliente de verdade, ou já não
+  // era teste (não custa nada zerar de novo nesse segundo caso).
   const res = await pool.query(
-    `UPDATE organizations SET plan = $1, billing_cycle = $2, expires_at = ${base} + ($3 || ' days')::interval
+    `UPDATE organizations SET plan = $1, billing_cycle = $2, expires_at = ${base} + ($3 || ' days')::interval, is_trial = false
      WHERE id = $4 RETURNING *`,
     [plan, billingCycle, days, id]
   );

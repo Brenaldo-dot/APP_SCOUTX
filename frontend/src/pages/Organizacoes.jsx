@@ -102,6 +102,13 @@ export default function Organizacoes() {
     }
   }, [orgs])
 
+  // Teste grátis de 7 dias (2026-09-17) — is_trial some sozinho (vira false)
+  // assim que a primeira cobrança de verdade passa (ver web/db.js:
+  // renewOrganization), então essa lista só mostra quem AINDA está testando;
+  // ela sai daqui e aparece igual a todo mundo na tabela principal abaixo
+  // sem precisar mexer em nada manualmente.
+  const trialOrgs = useMemo(() => (orgs ? orgs.filter((o) => o.isTrial) : []), [orgs])
+
   async function handleCreate() {
     setFormMsg(null)
     if (!form.name.trim()) {
@@ -208,6 +215,38 @@ export default function Organizacoes() {
         </div>
       )}
 
+      {trialOrgs.length > 0 && (
+        <div className="rounded-2xl border border-violet-500/30 bg-violet-500/5 p-5">
+          <h3 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-violet-400">
+            🎁 Em teste grátis ({trialOrgs.length})
+          </h3>
+          <p className="mb-3.5 text-sm text-[var(--text-tertiary)]">
+            Cartão já salvo — se não cancelarem, a cobrança de verdade acontece sozinha na data abaixo e elas somem
+            dessa lista e passam a aparecer igual a todo mundo, na tabela principal.
+          </p>
+          <div className="space-y-2">
+            {trialOrgs.map((org) => {
+              const days = daysUntil(org.expiresAt)
+              return (
+                <div
+                  key={org.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-violet-500/20 bg-[var(--bg-surface)] px-3.5 py-2.5"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-[var(--text-primary)]">{org.name}</p>
+                    <p className="text-xs text-[var(--text-muted)]">{org.planLabel}</p>
+                  </div>
+                  <div className="text-right text-xs">
+                    <p className="text-violet-400">{org.expired ? 'Teste vencido' : `cobra em ${days} dia${days === 1 ? '' : 's'}`}</p>
+                    <p className="text-[var(--text-muted)]">{formatDateTime(org.expiresAt)}</p>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
         <h3 className="mb-3.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Nova organização</h3>
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
@@ -271,6 +310,11 @@ export default function Organizacoes() {
                       <span className="rounded-full bg-brand-500/15 px-2 py-0.5 text-xs font-semibold text-brand-500">
                         {org.planLabel}
                       </span>
+                      {org.isTrial && (
+                        <span className="ml-1.5 rounded-full bg-violet-500/15 px-2 py-0.5 text-xs font-semibold text-violet-400">
+                          🎁 Teste
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3.5 capitalize text-[var(--text-tertiary)]">{org.billingCycle}</td>
                     <td className="px-4 py-3.5 tabular-nums text-[var(--text-tertiary)]">
