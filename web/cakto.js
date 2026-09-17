@@ -169,6 +169,11 @@ async function recordAffiliateCommissionIfAny(data, commissionType, resolved) {
 const REFERRAL_COMMISSION_PERCENTAGE = 50;
 
 async function recordReferralCommissionIfAny(data) {
+  // DESATIVADO URGENTE (2026-09-17): Indicação foi ao ar sem querer nesse
+  // deploy (feature nunca publicada de uma sessão anterior). No-op até a
+  // limpeza de verdade — ver o mesmo aviso em server.js.
+  return;
+  // eslint-disable-next-line no-unreachable
   const couponCode = String(data.couponCode || "").trim();
   if (!couponCode) return;
   try {
@@ -198,6 +203,9 @@ async function recordReferralCommissionIfAny(data) {
 // automaticamente nela. Só roda no ramo de organização NOVA (a pessoa só
 // entra numa comunidade na primeira compra, nunca de novo depois).
 async function autoJoinCommunityIfAny(affiliate, org) {
+  // DESATIVADO URGENTE (2026-09-17) — ver aviso em recordReferralCommissionIfAny.
+  return;
+  // eslint-disable-next-line no-unreachable
   if (!affiliate) return;
   try {
     const community = await db.getCommunityByAffiliateId(affiliate.id);
@@ -217,6 +225,9 @@ async function autoJoinCommunityIfAny(affiliate, org) {
 // cresceu/encolheu desde a última renovação, a % já reflete isso
 // automaticamente, sem precisar recalcular nada em lote depois.
 async function recordCommunityCommissionIfAny(data, org) {
+  // DESATIVADO URGENTE (2026-09-17) — ver aviso em recordReferralCommissionIfAny.
+  return;
+  // eslint-disable-next-line no-unreachable
   try {
     const membership = await db.getCommunityMembershipByOrgId(org.id);
     if (!membership) return; // organização não está em nenhuma comunidade

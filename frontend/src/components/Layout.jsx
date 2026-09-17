@@ -456,49 +456,8 @@ export default function Layout() {
               </NavLink>
             )}
 
-            {me?.isAdmin && (
-              <NavLink to="/admin/indicacoes" title={effectiveCollapsed ? t('nav.adminIndicacoes') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
-                {({ isActive }) => (
-                  <>
-                    <NavIcon Icon={Gift} active={isActive} />
-                    {!effectiveCollapsed && t('nav.adminIndicacoes')}
-                  </>
-                )}
-              </NavLink>
-            )}
-
-            {me && (
-              <NavLink to="/indicacao" title={effectiveCollapsed ? t('nav.indicacao') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
-                {({ isActive }) => (
-                  <>
-                    <NavIcon Icon={Gift} active={isActive} />
-                    {!effectiveCollapsed && t('nav.indicacao')}
-                  </>
-                )}
-              </NavLink>
-            )}
-
-            {me?.isAdmin && (
-              <NavLink to="/admin/comunidades" title={effectiveCollapsed ? t('nav.adminComunidades') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
-                {({ isActive }) => (
-                  <>
-                    <NavIcon Icon={Users} active={isActive} />
-                    {!effectiveCollapsed && t('nav.adminComunidades')}
-                  </>
-                )}
-              </NavLink>
-            )}
-
-            {me && (
-              <NavLink to="/comunidade" title={effectiveCollapsed ? t('nav.comunidade') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
-                {({ isActive }) => (
-                  <>
-                    <NavIcon Icon={Users} active={isActive} />
-                    {!effectiveCollapsed && t('nav.comunidade')}
-                  </>
-                )}
-              </NavLink>
-            )}
+            {/* Indicação e Comunidade DESATIVADAS URGENTE (2026-09-17) — ver
+                aviso em App.jsx. */}
 
             {me && (
               <NavLink to="/suporte" title={effectiveCollapsed ? t('nav.suporte') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>

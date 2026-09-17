@@ -1062,6 +1062,15 @@ function createApp() {
     res.json(updated);
   });
 
+  // DESATIVADO URGENTE (2026-09-17, pedido do usuário): Indicação e
+  // Comunidade de Embaixadores foram ao ar sem querer nesse mesmo deploy
+  // (feature "construída e testada localmente, nunca publicada" de uma
+  // sessão anterior, arrastada junto sem ninguém perceber). Envolvendo o
+  // bloco inteiro num `if (false)` em vez de apagar linha por linha —
+  // nenhuma dessas rotas fica registrada no Express (qualquer chamada cai
+  // no 404 padrão), reversível na hora removendo só este if/}. Limpeza de
+  // verdade (apagar o código) fica pra depois, sem pressa.
+  if (false) {
   // ---------- Indicação (cliente indica cliente) ----------
   // Diferente do programa de afiliados acima (cadastro manual pelo admin):
   // aqui é o próprio cliente logado que pede o cupom pela aba "Indicação" —
@@ -1413,6 +1422,7 @@ function createApp() {
     if (!updated) return res.status(404).json({ error: "Comissão não encontrada." });
     res.json(updated);
   });
+  } // fim do if (false) — Indicação/Comunidade desativadas, ver comentário acima
 
   app.get("/api/admin/users", requireAdmin, async (req, res) => {
     const users = await db.listUsersWithCounts();
