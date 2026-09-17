@@ -663,28 +663,26 @@ function createApp() {
     // /assinar precisa de um CSP mais frouxo SÓ nessa rota: o SDK oficial da
     // Cakto (tokenização de cartão + antifraude + 3DS, ver
     // docs.cakto.com.br/sdk/visao-geral) injeta um <script> INLINE por
-    // conta própria — fora do nosso controle, sem jeito de mandar ele usar
-    // um arquivo separado como fizemos com /auth.js. 'unsafe-inline' só
-    // entra pra ESSA página (não pro resto do app, onde o script-src
-    // continua tão restrito quanto antes) — o risco fica contido ao
-    // formulário de cadastro, que de qualquer forma nunca mostra dado de
-    // outro usuário nem processa HTML de terceiro (diferente da prévia de
-    // produto, por exemplo, onde 'unsafe-inline' seria bem mais perigoso).
+    // conta própria (fora do nosso controle) E o módulo de antifraude carrega
+    // um script de um provedor terceiro por trás (visto ao vivo: um domínio
+    // CloudFront, não documentado nem previsível — provavelmente varia por
+    // conta/região). Sem jeito de allowlistar domínio por domínio, então
+    // script-src e connect-src viram https: (qualquer https) só nessa
+    // página — 'unsafe-inline' só entra aqui também. Nada disso muda o
+    // resto do app, onde o CSP continua tão restrito quanto antes; o risco
+    // fica contido ao formulário de cadastro, que não mostra dado de outro
+    // usuário nem processa HTML de terceiro (diferente da prévia de
+    // produto, por exemplo, onde isso seria bem mais perigoso).
     const isAssinarPage = req.path === "/assinar" || req.path === "/assinar.js";
     res.setHeader(
       "Content-Security-Policy",
       [
         "default-src 'self'",
-        // cakto-sdk.pages.dev: SDK oficial da Cakto. api.cakto.com.br:
-        // chamadas que o PRÓPRIO SDK faz no navegador (não o nosso backend,
-        // que já fala com a Cakto por fora do browser). Domínio do desafio
-        // 3DS em si (banco emissor) varia por banco — liberado via
-        // frame-src *https: só nessa página, não solto no resto do CSP.
-        `script-src 'self' https://cakto-sdk.pages.dev${isAssinarPage ? " 'unsafe-inline'" : ""}`,
+        `script-src 'self'${isAssinarPage ? " https: 'unsafe-inline'" : " https://cakto-sdk.pages.dev"}`,
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: https:",
         "font-src 'self' data:",
-        `connect-src 'self'${isAssinarPage ? " https://api.cakto.com.br https://cakto-sdk.pages.dev" : ""}`,
+        `connect-src 'self'${isAssinarPage ? " https:" : ""}`,
         `frame-src 'self'${isAssinarPage ? " https:" : ""}`,
         "frame-ancestors 'self'",
         "base-uri 'self'",
