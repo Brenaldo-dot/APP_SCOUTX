@@ -942,6 +942,7 @@ function createApp() {
     const esc = (s) => escapeHtml(s || "");
     return `<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="/favicon.png">
 <title>ScoutX — Comece seu teste grátis</title>
 <style>
   * { box-sizing: border-box; }
@@ -1159,6 +1160,15 @@ function createApp() {
 
   app.get("/free-trial.js", (req, res) => {
     res.type("application/javascript").send(ASSINAR_PAGE_SCRIPT);
+  });
+
+  // O favicon do app React (public-minerador/favicon.png) só é servido pelo
+  // express.static lá embaixo, que fica DEPOIS de app.use(requireAuth) — ou
+  // seja, sem essa rota aqui em cima (pública), a aba do /free-trial (e do
+  // /login) nunca conseguia carregar o ícone, só ficava com o padrão do
+  // navegador.
+  app.get("/favicon.png", (req, res) => {
+    res.sendFile(path.join(__dirname, "public-minerador", "favicon.png"));
   });
 
   // Passo 1 — só conta (nome, email, senha, WhatsApp). Salva na hora como
