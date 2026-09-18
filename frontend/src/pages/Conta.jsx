@@ -520,10 +520,10 @@ export default function Conta() {
 
       <AvatarCard />
       <PlanCard />
-      <TrialCancelCard />
       <LanguageCard />
       <PasswordCard />
       <DiscordCard />
+      <TrialCancelCard />
     </div>
   )
 }
