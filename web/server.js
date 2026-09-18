@@ -535,6 +535,27 @@ function luhnValid(number) {
   return sum % 10 === 0;
 }
 
+// Formata "1234 1234 1234 1234" enquanto digita e trava em 16 dígitos —
+// sem isso o campo (maxlength calculado pro texto COM espaço) deixava
+// colar/digitar até 19 dígitos crus, 3 a mais que um cartão de verdade.
+var cardNumberEl = document.getElementById("cardNumber");
+cardNumberEl.addEventListener("input", function () {
+  var digits = cardNumberEl.value.replace(/\\D/g, "").slice(0, 16);
+  cardNumberEl.value = digits.replace(/(.{4})(?=.)/g, "$1 ");
+});
+
+// "MM/AA" com a barra sozinha, travado em 4 dígitos (mês + ano).
+var cardExpiryEl = document.getElementById("cardExpiry");
+cardExpiryEl.addEventListener("input", function () {
+  var digits = cardExpiryEl.value.replace(/\\D/g, "").slice(0, 4);
+  cardExpiryEl.value = digits.length > 2 ? digits.slice(0, 2) + "/" + digits.slice(2) : digits;
+});
+
+var cardCvvEl = document.getElementById("cardCvv");
+cardCvvEl.addEventListener("input", function () {
+  cardCvvEl.value = cardCvvEl.value.replace(/\\D/g, "").slice(0, 4);
+});
+
 // ---------- Seleção de plano (passo 2) ----------
 var planCards = document.querySelectorAll(".plan-card");
 planCards.forEach(function (el) {
@@ -603,7 +624,7 @@ submitBtn.addEventListener("click", function () {
   var cardExpiry = document.getElementById("cardExpiry").value.trim();
   var expMatch = cardExpiry.match(/^(\\d{2})\\/(\\d{2})$/);
 
-  if (!docNumber) return showError("Preencha seu CPF.");
+  if (!docNumber) return showError("Preencha seu CPF ou CNPJ.");
   if (!luhnValid(cardNumber)) return showError("Número do cartão inválido, confira os dígitos.");
   if (!expMatch) return showError("Validade do cartão inválida, use o formato MM/AA.");
 
@@ -975,6 +996,7 @@ function createApp() {
   }
   .row { display: flex; gap: 10px; }
   .row > div { flex: 1; min-width: 0; }
+  .row > div:last-child { flex: 1.3; }
   label { display: block; font-size: 11px; font-weight: 600; color: #93c5fd; margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.5px; }
   input, select {
     width: 100%; padding: 11px 13px; margin-bottom: 14px; border-radius: 10px;
@@ -993,8 +1015,11 @@ function createApp() {
     padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; display: ${error ? "block" : "none"};
   }
   .fineprint { color: #6b7280; font-size: 11px; text-align: center; margin-top: 14px; line-height: 1.5; }
-  .trust-note { color: #93c5fd; font-size: 13px; font-weight: 600; text-align: center; margin: 4px 0 20px; line-height: 1.5; }
-  .trust-note strong { color: #60a5fa; font-weight: 700; }
+  .trust-note { color: #9ca3af; font-size: 12.5px; text-align: center; margin: 4px 0 20px; line-height: 1.7; }
+  .trust-note strong {
+    color: #eff6ff; font-weight: 700; background: rgba(59,130,246,0.35);
+    padding: 1px 6px; border-radius: 4px; box-decoration-break: clone; -webkit-box-decoration-break: clone;
+  }
   .powered-by { color: #6b7280; font-size: 11px; margin: 18px 0 0; text-align: center; }
   .powered-by strong { color: #9ca3af; }
   .card-number-wrap, .cvv-wrap { position: relative; display: flex; align-items: center; }
@@ -1035,10 +1060,10 @@ function createApp() {
 </style></head>
 <body data-cakto-client-id="${esc(process.env.CAKTO_API_CLIENT_ID || "")}">
 <div class="card">
+  <button type="button" class="back-link" id="back-btn">‹ Voltar</button>
   <div class="brand"><img src="${SCOUTX_LOGO_DATA_URI}" alt="ScoutX"><span>ScoutX</span></div>
   <div class="trial-badge">🎁 7 dias grátis</div>
-  <button type="button" class="back-link" id="back-btn">‹ Voltar</button>
-  <h1>Comece seu teste grátis 🎁</h1>
+  <h1>Comece seu teste grátis</h1>
 
   <div class="error" id="form-error">${esc(error)}</div>
 
@@ -1113,7 +1138,7 @@ function createApp() {
 
     <fieldset>
       <legend>Seus dados</legend>
-      <label for="docNumber">CPF</label>
+      <label for="docNumber">CPF ou CNPJ</label>
       <input type="text" id="docNumber" placeholder="somente números" maxlength="14" value="${esc(v.docNumber)}">
     </fieldset>
 
