@@ -2663,7 +2663,14 @@ function createApp() {
   // dentro desse mesmo React (RouteGuard no frontend cuida de esconder/
   // bloquear as telas do ScoutX em si pra quem não tem canAccessMinerador).
   app.use(express.static(mineradorPublicDir));
+  // no-store só no index.html (achado ao vivo, 2026-09-18: F5 não pegava
+  // deploy novo) — os assets com hash no nome (JS/CSS) podem cachear à
+  // vontade, já que um conteúdo diferente vira um arquivo com OUTRO nome;
+  // mas o index.html é quem decide QUAL hash carregar, então ele precisa
+  // ser revalidado sempre, senão o navegador mostra a versão antiga do
+  // app inteiro até um hard refresh.
   app.get(/^(?!\/api\/).*/, (req, res) => {
+    res.set("Cache-Control", "no-store");
     res.sendFile(path.join(mineradorPublicDir, "index.html"), (err) => {
       if (err) res.status(503).send("ScoutX ainda não está disponível neste ambiente.");
     });
