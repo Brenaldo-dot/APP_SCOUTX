@@ -70,4 +70,36 @@ async function createTrialPayment({ offerId, customer, address, cardToken, three
   return data; // { id, status, offer: {...}, ... } — ver api-reference/payments/create
 }
 
-module.exports = { createTrialPayment };
+// A resposta de payments_create não traz o id da assinatura (só o id do
+// PEDIDO) — pra cancelar precisa buscar o pedido de novo e pegar o campo
+// `subscription` dele (ver api-reference/orders/retrieve).
+async function getOrder(orderId) {
+  const token = await getBearerToken();
+  const resp = await fetch(`${CAKTO_API_BASE}/public_api/orders/${orderId}/`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const err = new Error(data?.detail || `Falha ao buscar pedido na Cakto (HTTP ${resp.status}).`);
+    err.status = resp.status;
+    throw err;
+  }
+  return data;
+}
+
+async function cancelSubscription(subscriptionId) {
+  const token = await getBearerToken();
+  const resp = await fetch(`${CAKTO_API_BASE}/public_api/subscriptions/${subscriptionId}/cancel/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const err = new Error(data?.detail || `Falha ao cancelar assinatura na Cakto (HTTP ${resp.status}).`);
+    err.status = resp.status;
+    throw err;
+  }
+  return data;
+}
+
+module.exports = { createTrialPayment, getOrder, cancelSubscription };

@@ -7,7 +7,7 @@ const { analyzeStore, UnsupportedStoreError } = require("./shopify-spy");
 const { sign, verify, parseCookies, serializeCookie } = require("./auth");
 const { createPinnedFetch } = require("./safe-fetch");
 const { handleCaktoWebhook, CAKTO_OFFER_PLAN_MAP } = require("./cakto");
-const { createTrialPayment } = require("./caktoPayments");
+const { createTrialPayment, getOrder, cancelSubscription } = require("./caktoPayments");
 const caktoApi = require("./caktoApi");
 const db = require("./db");
 const { TIERS, tierForActiveMembers } = require("./communityTiers");
@@ -1460,6 +1460,7 @@ function createApp() {
       plan: req.appUser.org_plan || null,
       organizationName: req.appUser.org_name || null,
       planExpiresAt: req.appUser.org_expires_at || null,
+      isTrial: !!req.appUser.org_is_trial,
       avatarUrl: req.appUser.avatar_url || null,
       // País que ESSA ORGANIZAÇÃO escolheu na primeira vez que alguém dela
       // abriu o app — null = ainda nunca escolheu (front mostra o seletor
@@ -1580,6 +1581,54 @@ function createApp() {
     // versão nova. Sem isso a pessoa seria deslogada na hora seguinte à
     // troca bem-sucedida da própria senha dela.
     setSessionCookie(res, req.appUser.id, newTokenVersion);
+    res.json({ ok: true });
+  });
+
+  // Autoatendimento — cancela o PRÓPRIO teste grátis (só pra organizações
+  // is_trial; quem já é assinante pago cancela pela própria Cakto). A
+  // resposta de payments_create não trazia o id da assinatura, só o do
+  // pedido — por isso busca o pedido de novo (getOrder) pra achar o
+  // `subscription` antes de mandar cancelar (ver caktoPayments.js). Depois
+  // de cancelar na Cakto, já suspende o acesso na hora (mesma ação que
+  // handleCancellationEvent faria quando o webhook chegasse depois) — não dá
+  // pra deixar a pessoa esperando o webhook pra perceber que cancelou.
+  app.post("/api/me/cancel-trial", async (req, res) => {
+    if (!req.appUser.organization_id) {
+      return res.status(400).json({ error: "Sua conta não está vinculada a uma organização." });
+    }
+    if (!req.appUser.org_is_trial) {
+      return res.status(400).json({ error: "Essa conta não está em período de teste grátis." });
+    }
+    if (!req.appUser.org_cakto_purchase_id) {
+      return res.status(400).json({ error: "Não encontramos a assinatura dessa organização na Cakto. Fale com o suporte." });
+    }
+
+    let subscriptionId;
+    try {
+      const order = await getOrder(req.appUser.org_cakto_purchase_id);
+      subscriptionId = order.subscription;
+      if (!subscriptionId) throw new Error("pedido sem assinatura vinculada");
+      await cancelSubscription(subscriptionId);
+    } catch (err) {
+      console.error(
+        `Cancelar teste grátis: falha ao cancelar assinatura da organização ${req.appUser.organization_id} na Cakto (pedido ${req.appUser.org_cakto_purchase_id}):`,
+        err.message
+      );
+      return res
+        .status(502)
+        .json({ error: "Não foi possível cancelar sua assinatura na Cakto agora. Tente novamente em instantes ou fale com o suporte." });
+    }
+
+    const org = await db.updateOrganizationExpiry(req.appUser.organization_id, new Date());
+    await db.logAdminAction(
+      req.appUser.id,
+      req.appUser.name,
+      null,
+      org.name,
+      "org_renewed",
+      `Teste grátis cancelado pelo próprio usuário (assinatura Cakto ${subscriptionId})`
+    );
+    console.log(`Cancelar teste grátis: organização "${org.name}" cancelou e teve o acesso suspenso (usuário ${req.appUser.email}).`);
     res.json({ ok: true });
   });
 

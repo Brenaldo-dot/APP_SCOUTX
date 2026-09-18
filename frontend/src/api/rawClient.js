@@ -47,6 +47,7 @@ export const rawApi = {
       body: JSON.stringify({ avatarDataUrl }),
     }),
   removeMyAvatar: () => request('/api/me/avatar', { method: 'DELETE' }),
+  cancelTrial: () => request('/api/me/cancel-trial', { method: 'POST' }),
   updateMyName: (name) =>
     request('/api/me/name', {
       method: 'PATCH',

@@ -428,6 +428,73 @@ function PlanCard() {
   )
 }
 
+// Autoatendimento pra quem está no teste grátis de 7 dias (ver
+// /api/me/cancel-trial): cancela a assinatura na Cakto e encerra o acesso
+// na mesma hora. Some pra qualquer conta que não esteja em teste — quem já
+// é assinante pago cancela pela própria Cakto.
+function TrialCancelCard() {
+  const { me } = useAuth()
+  const [confirming, setConfirming] = useState(false)
+  const [canceling, setCanceling] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  if (!me?.isTrial) return null
+
+  async function handleCancel() {
+    setCanceling(true)
+    setMsg(null)
+    try {
+      await rawApi.cancelTrial()
+      setMsg({ type: 'success', text: 'Teste grátis cancelado. Seu acesso foi encerrado — redirecionando…' })
+      setTimeout(() => {
+        window.location.href = '/login'
+      }, 2500)
+    } catch (err) {
+      setMsg({ type: 'error', text: err.message || 'Erro' })
+      setCanceling(false)
+    }
+  }
+
+  return (
+    <Section title="Teste grátis" description="Sua organização está no período de 7 dias grátis.">
+      {!confirming ? (
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          className="rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-2 text-sm font-medium text-red-400 hover:bg-red-500/15"
+        >
+          Cancelar teste grátis
+        </button>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-sm text-[var(--text-secondary)]">
+            Isso cancela sua assinatura na Cakto e encerra seu acesso ao ScoutX agora mesmo. Não dá pra desfazer.
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleCancel}
+              disabled={canceling}
+              className="rounded-lg bg-red-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              {canceling ? 'Cancelando…' : 'Sim, cancelar'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              disabled={canceling}
+              className="rounded-lg border border-[var(--border)] px-3.5 py-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-surface-2)]"
+            >
+              Voltar
+            </button>
+          </div>
+        </div>
+      )}
+      <Feedback msg={msg} />
+    </Section>
+  )
+}
+
 function LanguageCard() {
   const { language, changeLanguage, t } = useLanguage()
   return (
@@ -453,6 +520,7 @@ export default function Conta() {
 
       <AvatarCard />
       <PlanCard />
+      <TrialCancelCard />
       <LanguageCard />
       <PasswordCard />
       <DiscordCard />

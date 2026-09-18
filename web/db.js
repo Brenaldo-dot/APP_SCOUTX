@@ -572,7 +572,8 @@ async function completePasswordSetup(id, passwordHash) {
 // mais em todo request autenticado só pra saber se o plano venceu.
 const USER_WITH_ORG_SELECT = `
   SELECT u.*, o.plan AS org_plan, o.expires_at AS org_expires_at, o.name AS org_name,
-         o.default_operation AS org_default_operation
+         o.default_operation AS org_default_operation, o.is_trial AS org_is_trial,
+         o.cakto_purchase_id AS org_cakto_purchase_id
   FROM app_users u
   LEFT JOIN organizations o ON o.id = u.organization_id
 `;
