@@ -994,9 +994,10 @@ function createApp() {
   .trust-note strong { color: #9ca3af; font-weight: 600; }
   .powered-by { color: #6b7280; font-size: 11px; margin: 18px 0 0; text-align: center; }
   .powered-by strong { color: #9ca3af; }
-  .card-number-wrap { position: relative; }
+  .card-number-wrap, .cvv-wrap { position: relative; display: flex; align-items: center; }
   .card-number-wrap input { padding-right: 76px; }
-  .card-brands {
+  .cvv-wrap input { padding-right: 36px; }
+  .card-brands, .cvv-icon {
     position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
     display: flex; align-items: center; gap: 5px; pointer-events: none;
   }
@@ -1005,10 +1006,11 @@ function createApp() {
     border-radius: 3px; background: #f3f4f6;
   }
   .brand-visa { color: #1a1f71; font-size: 10px; font-weight: 800; font-style: italic; letter-spacing: 0.3px; }
-  .brand-mc { width: 30px; position: relative; }
-  .mc-dot { position: absolute; top: 2px; width: 15px; height: 15px; border-radius: 50%; }
-  .mc-dot-r { left: 2px; background: #eb001b; }
-  .mc-dot-y { left: 11px; background: #f79e1b; mix-blend-mode: multiply; }
+  .brand-mc { display: flex; align-items: center; }
+  .mc-dot { width: 13px; height: 13px; border-radius: 50%; }
+  .mc-dot-r { background: #eb001b; }
+  .mc-dot-y { background: #f79e1b; margin-left: -5px; mix-blend-mode: multiply; }
+  .cvv-icon { right: 8px; }
   .step { display: none; }
   .step.active { display: block; }
   .back-link { display: inline-block; background: none; border: none; color: #6b7280; font-size: 12px; cursor: pointer; margin-bottom: 14px; padding: 0; }
@@ -1089,7 +1091,19 @@ function createApp() {
       </div>
       <div class="row">
         <div><label for="cardExpiry">Validade (MM/AA)</label><input type="text" id="cardExpiry" maxlength="5" placeholder="MM/AA"></div>
-        <div><label for="cardCvv">CVV</label><input type="text" id="cardCvv" inputmode="numeric" maxlength="4" placeholder="•••"></div>
+        <div>
+          <label for="cardCvv">CVV</label>
+          <div class="cvv-wrap">
+            <input type="text" id="cardCvv" inputmode="numeric" maxlength="4" placeholder="•••">
+            <span class="cvv-icon" aria-hidden="true">
+              <svg width="24" height="17" viewBox="0 0 24 17" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="0.5" y="0.5" width="23" height="16" rx="2" fill="#1f2430" stroke="#4b5563"/>
+                <rect x="0.5" y="4.5" width="23" height="3" fill="#111827"/>
+                <text x="21" y="14" font-size="5.5" fill="#e5e7eb" text-anchor="end" font-family="Arial, sans-serif" font-weight="700">123</text>
+              </svg>
+            </span>
+          </div>
+        </div>
       </div>
     </fieldset>
 
