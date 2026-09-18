@@ -602,13 +602,13 @@ submitBtn.addEventListener("click", function () {
 
   if (!docNumber) return showError("Preencha seu CPF.");
   if (!luhnValid(cardNumber)) return showError("Número do cartão inválido, confira os dígitos.");
-  if (!expMatch) return showError("Validade do cartão inválida — use o formato MM/AA.");
+  if (!expMatch) return showError("Validade do cartão inválida, use o formato MM/AA.");
 
   submitBtn.disabled = true;
   submitBtn.textContent = "Processando…";
 
   var card = {
-    holderName: document.getElementById("cardHolder").value.trim(),
+    holderName: leadData.name,
     cardNumber: cardNumber,
     cvv: document.getElementById("cardCvv").value.trim(),
     expMonth: expMatch[1],
@@ -1013,7 +1013,6 @@ function createApp() {
   <div class="brand"><img src="${SCOUTX_LOGO_DATA_URI}" alt="ScoutX"><span>ScoutX</span></div>
   <div class="trial-badge">🎁 7 dias grátis</div>
   <h1>Comece seu teste grátis</h1>
-  <p class="subtitle">Você só é cobrado depois dos 7 dias — cancele quando quiser antes disso, sem pagar nada.</p>
 
   <div class="error" id="form-error">${esc(error)}</div>
 
@@ -1030,7 +1029,6 @@ function createApp() {
       <input type="tel" id="phone" required placeholder="11999999999" maxlength="11" value="${esc(v.phone)}">
     </fieldset>
     <button type="button" id="step1-btn" class="btn-primary">Continuar</button>
-    <p class="fineprint">Só no próximo passo a gente pede o cartão — nada é cobrado agora nem depois, a não ser que você não cancele o teste dentro de 7 dias.</p>
   </div>
 
   <div class="step" id="step-2">
@@ -1053,9 +1051,19 @@ function createApp() {
             <li>Tudo do plano Standard</li>
             <li>Cadastre até 250 lojas concorrentes</li>
             <li>Até 3 operações/países</li>
-            <li>Alertas ilimitados no Discord</li>
+            <li>Alertas 24 horas ilimitados</li>
           </ul>
         </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Cartão de crédito</legend>
+      <label for="cardNumber">Número do cartão</label>
+      <input type="text" id="cardNumber" inputmode="numeric" maxlength="19" placeholder="0000 0000 0000 0000">
+      <div class="row">
+        <div><label for="cardExpiry">Validade (MM/AA)</label><input type="text" id="cardExpiry" maxlength="5" placeholder="MM/AA"></div>
+        <div><label for="cardCvv">CVV</label><input type="text" id="cardCvv" inputmode="numeric" maxlength="4"></div>
       </div>
     </fieldset>
 
@@ -1065,20 +1073,8 @@ function createApp() {
       <input type="text" id="docNumber" placeholder="somente números" maxlength="14" value="${esc(v.docNumber)}">
     </fieldset>
 
-    <fieldset>
-      <legend>Cartão de crédito</legend>
-      <label for="cardHolder">Nome impresso no cartão</label>
-      <input type="text" id="cardHolder" maxlength="120">
-      <label for="cardNumber">Número do cartão</label>
-      <input type="text" id="cardNumber" inputmode="numeric" maxlength="19" placeholder="0000 0000 0000 0000">
-      <div class="row">
-        <div><label for="cardExpiry">Validade (MM/AA)</label><input type="text" id="cardExpiry" maxlength="5" placeholder="MM/AA"></div>
-        <div><label for="cardCvv">CVV</label><input type="text" id="cardCvv" inputmode="numeric" maxlength="4"></div>
-      </div>
-    </fieldset>
-
     <button type="button" id="submit-btn" class="btn-primary">Começar meus 7 dias grátis</button>
-    <p class="fineprint" id="fineprint-2">Ao continuar, um cartão válido é registrado mas NADA é cobrado agora. Se você não cancelar, a cobrança começa automaticamente após o 7º dia.</p>
+    <p class="fineprint" id="fineprint-2">Só é cobrado depois dos 7 dias. Cancele quando quiser antes disso, sem pagar nada.</p>
   </div>
 </div>
 <script src="https://cakto-sdk.pages.dev/cakto-sdk.min.js"></script>
