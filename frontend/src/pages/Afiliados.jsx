@@ -82,14 +82,16 @@ export default function Afiliados() {
   async function handleBackfill(id) {
     setBackfill({ id, loading: true, text: null })
     try {
-      const { checked, created } = await rawApi.backfillAffiliate(id)
+      const { checked, created, corrected } = await rawApi.backfillAffiliate(id)
+      const parts = []
+      if (created > 0) parts.push(`${created} venda(s) antiga(s) adicionada(s)`)
+      if (corrected > 0) parts.push(`${corrected} comissão(ões) corrigida(s) pro valor real`)
       setBackfill({
         id,
         loading: false,
-        text:
-          created > 0
-            ? `${created} venda(s) antiga(s) encontrada(s) e adicionada(s) (${checked} pedidos conferidos).`
-            : `Nenhuma venda antiga nova encontrada (${checked} pedidos conferidos).`,
+        text: parts.length
+          ? `${parts.join(' e ')} (${checked} pedidos conferidos).`
+          : `Nada novo pra atualizar (${checked} pedidos conferidos).`,
       })
       load()
     } catch (err) {

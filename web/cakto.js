@@ -124,6 +124,22 @@ async function resolveAffiliateForOrder(data) {
 // si — a organização já foi criada/renovada com sucesso antes de chamar
 // isso. Aceita um `resolved` já calculado (ver handlePurchaseApproved, ramo
 // de organização nova) pra não bater na API da Cakto de novo à toa.
+// Valor que o afiliado REALMENTE recebe: o que a própria Cakto calculou e
+// vai depositar pra ele (já líquido de taxa, é o número que ele vê no painel
+// dele). Antes a gente multiplicava a nossa % pelo valor bruto da venda, o que
+// dava mais do que ele recebia de fato (ex.: R$ 202,00 na tela vs R$ 190,54
+// pagos) e gerava discussão. Cai no cálculo antigo só se a Cakto não mandar.
+function affiliateCommissionFromOrder(order, fallbackPercentage) {
+  const saleAmount = Number(order.amount ?? 0);
+  const fromCakto = (order.commissions || []).find((c) => c.type === "affiliate");
+  const caktoValue = Number(fromCakto?.commissionValue);
+  if (Number.isFinite(caktoValue) && caktoValue > 0) {
+    return { saleAmount, commissionValue: Math.round(caktoValue * 100) / 100, percentage: fallbackPercentage };
+  }
+  const commissionValue = Math.round(saleAmount * (Number(fallbackPercentage) / 100) * 100) / 100;
+  return { saleAmount, commissionValue, percentage: fallbackPercentage };
+}
+
 async function recordAffiliateCommissionIfAny(data, commissionType, resolved) {
   try {
     const { affiliate, order, emailSeenButUnregistered } = resolved || (await resolveAffiliateForOrder(data));
@@ -137,8 +153,10 @@ async function recordAffiliateCommissionIfAny(data, commissionType, resolved) {
     }
     const percentage =
       commissionType === "first_sale" ? affiliate.first_sale_percentage : affiliate.recurring_percentage;
-    const saleAmount = Number(order.amount ?? data.amount ?? 0);
-    const commissionValue = Math.round(saleAmount * (Number(percentage) / 100) * 100) / 100;
+    const { saleAmount, commissionValue } = affiliateCommissionFromOrder(
+      { ...order, amount: order.amount ?? data.amount },
+      percentage
+    );
     const inserted = await db.createAffiliateCommission({
       affiliateId: affiliate.id,
       caktoOrderId: data.id,
@@ -170,6 +188,7 @@ async function backfillAffiliateCommissions(affiliate) {
   const orgs = await db.listPaidCaktoOrganizations();
   let checked = 0;
   let created = 0;
+  let corrected = 0;
   for (const org of orgs) {
     checked += 1;
     try {
@@ -177,8 +196,7 @@ async function backfillAffiliateCommissions(affiliate) {
       if (!found || found.id !== affiliate.id) continue;
       if (order.status && order.status !== "paid") continue;
       const percentage = affiliate.first_sale_percentage;
-      const saleAmount = Number(order.amount ?? 0);
-      const commissionValue = Math.round(saleAmount * (Number(percentage) / 100) * 100) / 100;
+      const { saleAmount, commissionValue } = affiliateCommissionFromOrder(order, percentage);
       const inserted = await db.createAffiliateCommission({
         affiliateId: affiliate.id,
         caktoOrderId: org.cakto_purchase_id,
@@ -189,12 +207,16 @@ async function backfillAffiliateCommissions(affiliate) {
         commissionPercentage: percentage,
         commissionValue,
       });
-      if (inserted) created += 1;
+      if (inserted) {
+        created += 1;
+      } else if (await db.correctUnpaidAffiliateCommission(org.cakto_purchase_id, saleAmount, commissionValue)) {
+        corrected += 1;
+      }
     } catch (err) {
       console.error(`Backfill afiliado ${affiliate.name}: falha no pedido ${org.cakto_purchase_id}:`, err.message);
     }
   }
-  return { checked, created };
+  return { checked, created, corrected };
 }
 
 // Indicação (cliente indica cliente, 2026-09-10) — diferente do programa de

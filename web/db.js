@@ -826,6 +826,21 @@ async function createAffiliateCommission({
   return res.rows[0] || null;
 }
 
+// Corrige o valor de uma comissão que ainda NÃO foi paga (nunca mexe numa já
+// marcada como paga — aí o valor já foi combinado/depositado). Devolve true
+// só se algo realmente mudou.
+async function correctUnpaidAffiliateCommission(caktoOrderId, saleAmount, commissionValue) {
+  const res = await pool.query(
+    `UPDATE affiliate_commissions
+     SET sale_amount = $2, commission_value = $3
+     WHERE cakto_order_id = $1 AND paid = false
+       AND (commission_value <> $3 OR sale_amount <> $2)
+     RETURNING id`,
+    [caktoOrderId, saleAmount, commissionValue]
+  );
+  return res.rowCount > 0;
+}
+
 // Organizações criadas por uma compra real na Cakto (não teste grátis, não
 // criadas na mão) — base do "buscar vendas antigas" de um afiliado que só
 // foi cadastrado DEPOIS da venda acontecer.
@@ -1566,6 +1581,7 @@ module.exports = {
   deleteAffiliate,
   createAffiliateCommission,
   listPaidCaktoOrganizations,
+  correctUnpaidAffiliateCommission,
   listAffiliateCommissions,
   markAffiliateCommissionPaid,
   voidAffiliateCommission,
