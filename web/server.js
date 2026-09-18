@@ -990,18 +990,18 @@ function createApp() {
     padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; display: ${error ? "block" : "none"};
   }
   .fineprint { color: #6b7280; font-size: 11px; text-align: center; margin-top: 14px; line-height: 1.5; }
-  .trust-note {
-    color: #9ca3af; font-size: 12.5px; text-align: left; margin: 0 0 20px; padding: 10px 14px;
-    background: rgba(59,130,246,0.06); border-left: 3px solid #3b82f6; border-radius: 4px; line-height: 1.5;
-  }
-  .trust-note strong { color: #dbeafe; font-weight: 600; }
+  .trust-note { color: #6b7280; font-size: 12px; text-align: center; margin: 0 0 18px; line-height: 1.5; }
+  .trust-note strong { color: #9ca3af; font-weight: 600; }
   .powered-by { color: #6b7280; font-size: 11px; margin: 18px 0 0; text-align: center; }
   .powered-by strong { color: #9ca3af; }
-  .fieldset-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-  .fieldset-head legend { margin: 0; }
-  .card-brands { display: flex; align-items: center; gap: 6px; }
+  .card-number-wrap { position: relative; }
+  .card-number-wrap input { padding-right: 76px; }
+  .card-brands {
+    position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    display: flex; align-items: center; gap: 5px; pointer-events: none;
+  }
   .brand-badge {
-    display: inline-flex; align-items: center; justify-content: center; height: 20px; padding: 0 6px;
+    display: inline-flex; align-items: center; justify-content: center; height: 18px; padding: 0 5px;
     border-radius: 3px; background: #f3f4f6;
   }
   .brand-visa { color: #1a1f71; font-size: 10px; font-weight: 800; font-style: italic; letter-spacing: 0.3px; }
@@ -1009,7 +1009,6 @@ function createApp() {
   .mc-dot { position: absolute; top: 2px; width: 15px; height: 15px; border-radius: 50%; }
   .mc-dot-r { left: 2px; background: #eb001b; }
   .mc-dot-y { left: 11px; background: #f79e1b; mix-blend-mode: multiply; }
-  .brand-elo { color: #1a1a1a; font-size: 10px; font-weight: 800; font-style: italic; }
   .step { display: none; }
   .step.active { display: block; }
   .back-link { display: inline-block; background: none; border: none; color: #6b7280; font-size: 12px; cursor: pointer; margin-bottom: 14px; padding: 0; }
@@ -1079,16 +1078,15 @@ function createApp() {
     </fieldset>
 
     <fieldset>
-      <div class="fieldset-head">
-        <legend>🔒 Cartão de crédito</legend>
+      <legend>Cartão de crédito</legend>
+      <label for="cardNumber">Número do cartão</label>
+      <div class="card-number-wrap">
+        <input type="text" id="cardNumber" inputmode="numeric" maxlength="19" placeholder="1234 1234 1234 1234">
         <div class="card-brands" aria-hidden="true">
           <span class="brand-badge brand-visa">VISA</span>
           <span class="brand-badge brand-mc"><span class="mc-dot mc-dot-r"></span><span class="mc-dot mc-dot-y"></span></span>
-          <span class="brand-badge brand-elo">elo</span>
         </div>
       </div>
-      <label for="cardNumber">Número do cartão</label>
-      <input type="text" id="cardNumber" inputmode="numeric" maxlength="19" placeholder="•••• •••• •••• ••••">
       <div class="row">
         <div><label for="cardExpiry">Validade (MM/AA)</label><input type="text" id="cardExpiry" maxlength="5" placeholder="MM/AA"></div>
         <div><label for="cardCvv">CVV</label><input type="text" id="cardCvv" inputmode="numeric" maxlength="4" placeholder="•••"></div>
