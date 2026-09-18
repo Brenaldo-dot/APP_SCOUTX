@@ -11,23 +11,40 @@ const TIER_STYLES = {
 }
 
 const SIZES = {
-  sm: { box: 'h-7 w-7', icon: 13 },
-  md: { box: 'h-10 w-10', icon: 18 },
-  lg: { box: 'h-16 w-16', icon: 28 },
+  xs: { box: 'h-4 w-4', icon: 10, ring: 'ring-2' },
+  sm: { box: 'h-7 w-7', icon: 13, ring: 'ring-4' },
+  md: { box: 'h-10 w-10', icon: 18, ring: 'ring-4' },
+  lg: { box: 'h-16 w-16', icon: 28, ring: 'ring-4' },
 }
 
 export default function TierBadge({ tier, size = 'md', showLabel = false }) {
   const style = TIER_STYLES[tier] || TIER_STYLES.gold
-  const { box, icon } = SIZES[size] || SIZES.md
+  const { box, icon, ring } = SIZES[size] || SIZES.md
   const { Icon } = style
   return (
-    <span className="inline-flex items-center gap-2">
+    <span className="inline-flex items-center gap-1.5">
       <span
-        className={`inline-flex ${box} items-center justify-center rounded-full bg-gradient-to-br ${style.gradient} text-white shadow-lg ring-4 ${style.ring}`}
+        className={`inline-flex ${box} items-center justify-center rounded-full bg-gradient-to-br ${style.gradient} text-white shadow-lg ${ring} ${style.ring}`}
       >
         <Icon size={icon} strokeWidth={2.5} />
       </span>
       {showLabel && <span className="font-semibold text-[var(--text-primary)]">{style.label}</span>}
+    </span>
+  )
+}
+
+// Selo compacto pra colar ao lado de um nome/tag (nametag de post/comentário),
+// junto com a etiqueta "Embaixador" — mesma paleta de cor do TierBadge normal,
+// só que como pill com texto em vez de círculo solto.
+export function TierPill({ tier }) {
+  const style = TIER_STYLES[tier] || TIER_STYLES.gold
+  const { Icon } = style
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full bg-gradient-to-br ${style.gradient} px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm align-middle`}
+    >
+      <Icon size={10} strokeWidth={2.5} />
+      {style.label}
     </span>
   )
 }

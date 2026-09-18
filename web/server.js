@@ -699,7 +699,13 @@ function createApp() {
   app.set("trust proxy", 1);
   app.disable("x-powered-by");
   app.use(express.urlencoded({ extended: false }));
-  app.use(express.json());
+  // Limite padrão do express (100kb) estourava 413 em qualquer request com
+  // imagem em base64 (avatar até 2MB, post/comunidade até 4MB, ver
+  // MAX_AVATAR_LENGTH/MAX_COMMUNITY_IMAGE_LENGTH abaixo) — nunca dava pra
+  // reproduzir localmente porque nenhum teste anterior tinha subido foto de
+  // verdade. 10mb cobre até dois campos de 4MB (foto+banner) na mesma
+  // requisição de PATCH da comunidade, com folga pro overhead do JSON.
+  app.use(express.json({ limit: "10mb" }));
 
   // Script das telas de login/setup/registrar (mostrar/ocultar senha,
   // conferir "senha == confirmar senha" antes de enviar). Precisa ser um
@@ -750,7 +756,11 @@ function createApp() {
         "img-src 'self' data: https:",
         "font-src 'self' data:",
         `connect-src 'self'${isAssinarPage ? " https:" : ""}`,
-        `frame-src 'self'${isAssinarPage ? " https:" : ""}`,
+        // YouTube liberado pro player da Central de Conteúdo (Comunidade):
+        // sem isso o CSP bloqueia o <iframe> sem erro visível, só some o
+        // vídeo. Só YouTube de propósito (única fonte de vídeo aceita, ver
+        // isYoutubeUrl no frontend). /free-trial continua com https: amplo.
+        `frame-src 'self' https://www.youtube.com https://youtube.com${isAssinarPage ? " https:" : ""}`,
         // worker-src: o módulo de antifraude sobe um Web Worker a partir de
         // um blob: (comum em SDKs de fingerprint, roda o cálculo pesado sem
         // travar a tela) — sem isso o CSP cai no fallback de script-src, que
@@ -1751,6 +1761,14 @@ function createApp() {
     }
   });
 
+  // Projeções de "período de teste" (ver web/cakto.js
+  // recordAffiliateTrialProjection) — ainda não é comissão de verdade, só
+  // mostra pro admin o que está a caminho de virar uma se o teste converter
+  // em cobrança.
+  app.get("/api/admin/affiliate-trial-referrals", requireAdmin, async (req, res) => {
+    res.json(await db.listAllAffiliateTrialReferrals());
+  });
+
   app.get("/api/admin/affiliate-commissions", requireAdmin, async (req, res) => {
     res.json(await db.listAffiliateCommissions());
   });
@@ -1837,12 +1855,9 @@ function createApp() {
     res.json(updated);
   });
 
-  // DESATIVADO URGENTE (2026-09-17, pedido do usuário): Comunidade de
-  // Embaixadores foi ao ar sem querer no mesmo deploy da Indicação (que já
-  // foi religada acima em 2026-09-18). Continua envolvida num `if (false)`
-  // até ser pedida de verdade — nenhuma dessas rotas fica registrada no
-  // Express, reversível na hora removendo só este if/}.
-  if (false) {
+  // Comunidade de Embaixadores religada de propósito (2026-09-19, pedido do
+  // Samuel): estava desligada num `if (false)` desde o desligamento de
+  // emergência de 2026-09-17 (foi ao ar sem querer, sem ninguém ter pedido).
   // ---------- Comunidade de embaixadores ----------
   // Extensão do programa de afiliados: quem já é afiliado (identificado
   // comparando o email da sessão com affiliates.cakto_email, mesmo truque
@@ -1867,9 +1882,24 @@ function createApp() {
     const { affiliate, community } = await getMyAmbassadorContext(req);
     let ambassadorStats = null;
     if (community) {
-      const activeMemberCount = await db.countActiveCommunityMembers(community.id);
+      const [activeMemberCount, referredActiveMemberCount] = await Promise.all([
+        db.countActiveCommunityMembers(community.id),
+        db.countActiveReferredCommunityMembers(community.id),
+      ]);
+      // Ajuste do Samuel (2026-09-19): o NÍVEL (Gold/Platinum/Diamond) volta
+      // a crescer com o tamanho TOTAL da comunidade (todo mundo, referido ou
+      // não) — só o valor de fato pago em comissão continua restrito a quem
+      // foi referido (ver recordCommunityCommissionIfAny em cakto.js). Uma
+      // comunidade grande sobe de nível mesmo com gente que entrou sozinha
+      // pelo diretório, mas o embaixador só RECEBE % sobre quem ele trouxe.
       const tier = tierForActiveMembers(activeMemberCount);
-      ambassadorStats = { activeMemberCount, tier: tier.name, tierLabel: tier.label, tierPercentage: tier.percentage };
+      ambassadorStats = {
+        activeMemberCount,
+        referredActiveMemberCount,
+        tier: tier.name,
+        tierLabel: tier.label,
+        tierPercentage: tier.percentage,
+      };
     }
     const membership = req.appUser.organization_id
       ? await db.getCommunityMembershipByOrgId(req.appUser.organization_id)
@@ -1925,11 +1955,11 @@ function createApp() {
     const community = await db.getCommunityById(communityId);
     if (!community) return null;
     const { affiliate } = await getMyAmbassadorContext(req);
-    if (affiliate && community.affiliate_id === affiliate.id) return { community, isOwner: true };
+    if (affiliate && community.affiliate_id === affiliate.id) return { community, isOwner: true, membership: null };
     const membership = req.appUser.organization_id
       ? await db.getCommunityMembershipByOrgId(req.appUser.organization_id)
       : null;
-    if (membership && membership.community_id === community.id) return { community, isOwner: false };
+    if (membership && membership.community_id === community.id) return { community, isOwner: false, membership };
     return null;
   }
 
@@ -1946,10 +1976,39 @@ function createApp() {
     if (photoUrl && photoUrl.length > MAX_COMMUNITY_IMAGE_LENGTH) {
       return res.status(400).json({ error: "Imagem muito grande." });
     }
+    const bannerUrl = typeof req.body?.bannerUrl === "string" && req.body.bannerUrl.startsWith("data:image/") ? req.body.bannerUrl : null;
+    if (bannerUrl && bannerUrl.length > MAX_COMMUNITY_IMAGE_LENGTH) {
+      return res.status(400).json({ error: "Imagem muito grande." });
+    }
+    // Lista fechada de cores (tem que bater com ACCENT_COLORS no
+    // frontend) — não aceita hex arbitrário porque as classes Tailwind
+    // pra cada cor são fixas no código, um valor fora da lista não
+    // pintaria nada.
+    const ACCENT_COLORS = new Set(["blue", "violet", "rose", "orange", "green", "slate"]);
+    const accentColor = ACCENT_COLORS.has(req.body?.accentColor) ? req.body.accentColor : null;
+    const tags = typeof req.body?.tags === "string" ? req.body.tags.trim().slice(0, 200) || null : null;
+    // Se a pessoa digitar sem "http(s)://" (ex: "instagram.com/samuel"),
+    // completa com "https://" em vez de descartar o link silenciosamente —
+    // antes disso o campo salvava null sem avisar ninguém que o link não
+    // tinha sido aceito.
+    const cleanUrl = (v) => {
+      if (typeof v !== "string" || !v.trim()) return null;
+      const withProtocol = /^https?:\/\//i.test(v.trim()) ? v.trim() : `https://${v.trim()}`;
+      return /^https?:\/\/.+\..+/i.test(withProtocol) ? withProtocol : null;
+    };
+    const instagramUrl = cleanUrl(req.body?.instagramUrl);
+    const youtubeUrl = cleanUrl(req.body?.youtubeUrl);
+    const websiteUrl = cleanUrl(req.body?.websiteUrl);
     const updated = await db.updateCommunityDetails(allowed.community.id, {
       name,
       description: description === undefined ? allowed.community.description : description,
       photoUrl,
+      bannerUrl,
+      accentColor,
+      tags,
+      instagramUrl,
+      youtubeUrl,
+      websiteUrl,
     });
     res.json(updated);
   });
@@ -1990,11 +2049,22 @@ function createApp() {
     const sort = req.query.sort === "likes" ? "likes" : "recent";
     const posts = await db.listCommunityPostsByChannel(activeChannel.id, req.appUser.id, sort);
     const comments = await db.listCommunityCommentsForCommunity(allowed.community.id);
+    const pollOptionRows = await db.getPollOptionsForChannel(activeChannel.id, req.appUser.id);
     const activeMemberCount = await db.countActiveCommunityMembers(allowed.community.id);
+    // Nível calculado com o tamanho TOTAL da comunidade (ver comentário em
+    // /api/community/status) — só o cálculo de comissão em si (cakto.js)
+    // restringe a quem foi referido.
+    const tier = tierForActiveMembers(activeMemberCount);
+    const contentStats = await db.getCommunityContentStats(allowed.community.id);
     const commentsByPost = new Map();
     for (const c of comments) {
       if (!commentsByPost.has(c.post_id)) commentsByPost.set(c.post_id, []);
       commentsByPost.get(c.post_id).push(c);
+    }
+    const pollByPost = new Map();
+    for (const row of pollOptionRows) {
+      if (!pollByPost.has(row.post_id)) pollByPost.set(row.post_id, []);
+      pollByPost.get(row.post_id).push(row);
     }
     res.json({
       community: allowed.community,
@@ -2002,8 +2072,268 @@ function createApp() {
       channels,
       activeChannelId: activeChannel.id,
       activeMemberCount,
-      posts: posts.map((p) => ({ ...p, comments: commentsByPost.get(p.id) || [] })),
+      contentStats,
+      ambassadorTier: { name: tier.name, label: tier.label, percentage: tier.percentage },
+      posts: posts.map((p) => {
+        const options = pollByPost.get(p.id);
+        const poll = options
+          ? {
+              options: options.map((o) => ({ id: o.id, label: o.label, voteCount: o.vote_count })),
+              totalVotes: options.reduce((sum, o) => sum + o.vote_count, 0),
+              myOptionId: options.find((o) => o.voted_by_me)?.id || null,
+            }
+          : null;
+        return { ...p, comments: commentsByPost.get(p.id) || [], poll };
+      }),
     });
+  });
+
+  // Publicações agendadas (só o embaixador) — seção 8 do briefing.
+  app.get("/api/community/:id/scheduled", async (req, res) => {
+    const allowed = await communityIfAllowed(req, Number(req.params.id));
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode ver isso." });
+    const scheduled = await db.listScheduledCommunityPosts(allowed.community.id);
+    res.json(scheduled);
+  });
+
+  app.post("/api/community/posts/:postId/publish-now", async (req, res) => {
+    const postId = Number(req.params.postId);
+    const postRow = await db.getCommunityPostById(postId);
+    if (!postRow) return res.status(404).json({ error: "Post não encontrado." });
+    const allowed = await communityIfAllowed(req, postRow.community_id);
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode publicar." });
+    const updated = await db.publishCommunityPostNow(postId);
+    db.notifyCommunityMembers(allowed.community.id, {
+      type: "new_post",
+      message: `${req.appUser.name} publicou um novo post.`,
+      postId,
+    }).catch((e) => console.error("notificar publicação agendada:", e));
+    res.json(updated);
+  });
+
+  app.post("/api/community/posts/:postId/vote", async (req, res) => {
+    const postId = Number(req.params.postId);
+    const optionId = Number(req.body?.optionId);
+    const postRow = await db.getCommunityPostById(postId);
+    if (!postRow) return res.status(404).json({ error: "Post não encontrado." });
+    const allowed = await communityIfAllowed(req, postRow.community_id);
+    if (!allowed) return res.status(403).json({ error: "Você não tem acesso a essa comunidade." });
+    if (allowed.membership?.muted) return res.status(403).json({ error: "Você não pode votar nessa comunidade no momento." });
+    if (!optionId) return res.status(400).json({ error: "Escolha uma opção." });
+    // XP só no PRIMEIRO voto (trocar de opção depois não gera XP de novo).
+    const existingVote = await db.getCommunityPollVote(postId, req.appUser.id);
+    await db.upsertCommunityPollVote(postId, req.appUser.id, optionId);
+    if (!existingVote && !allowed.isOwner) {
+      db.recordXpEvent(allowed.community.id, req.appUser.id, "poll_vote").catch((e) => console.error("XP voto:", e));
+    }
+    res.status(204).end();
+  });
+
+  // Home do assinante (e do embaixador também): resumo com últimos posts
+  // de qualquer canal, avisos (posts fixados), e progresso pessoal em
+  // conteúdo educacional (em andamento / ainda não visto).
+  app.get("/api/community/:id/home", async (req, res) => {
+    const allowed = await communityIfAllowed(req, Number(req.params.id));
+    if (!allowed) return res.status(403).json({ error: "Você não tem acesso a essa comunidade." });
+    const [recentPosts, announcements, resourcesWithProgress] = await Promise.all([
+      db.listCommunityRecentPosts(allowed.community.id, 5),
+      db.listCommunityAnnouncements(allowed.community.id, 5),
+      db.listCommunityResourcesWithProgress(allowed.community.id, req.appUser.id),
+    ]);
+    const inProgress = resourcesWithProgress
+      .filter((r) => r.progress_updated_at && !r.completed_at)
+      .sort((a, b) => new Date(b.progress_updated_at) - new Date(a.progress_updated_at))
+      .slice(0, 3);
+    const notStarted = resourcesWithProgress.filter((r) => !r.progress_updated_at).slice(0, 4);
+    // Só existe pra quem é MEMBRO (a organização da pessoa está em
+    // community_members) — o embaixador não é membro da própria comunidade,
+    // então memberSince fica null pra ele e o frontend não mostra o selo de
+    // antiguidade na Home dele.
+    const membership = req.appUser.organization_id ? await db.getCommunityMembershipByOrgId(req.appUser.organization_id) : null;
+    const memberSince = membership && membership.community_id === allowed.community.id ? membership.joined_at : null;
+    res.json({ recentPosts, announcements, inProgress, notStarted, userName: req.appUser.name, memberSince });
+  });
+
+  app.post("/api/community/resources/:resourceId/progress", async (req, res) => {
+    const resource = await db.getCommunityResourceById(Number(req.params.resourceId));
+    if (!resource) return res.status(404).json({ error: "Conteúdo não encontrado." });
+    const allowed = await communityIfAllowed(req, resource.community_id);
+    if (!allowed) return res.status(403).json({ error: "Você não tem acesso a essa comunidade." });
+    const completed = req.body?.completed === true;
+    const before = await db.getCommunityResourceProgress(resource.id, req.appUser.id);
+    const progress = await db.upsertCommunityResourceProgress(resource.id, req.appUser.id, completed);
+    // XP só na transição pra concluído (marcar de novo depois de já ter
+    // concluído, ou desmarcar, não gera nem tira XP).
+    if (completed && !before?.completed_at && !allowed.isOwner) {
+      db.recordXpEvent(allowed.community.id, req.appUser.id, "resource_completed").catch((e) => console.error("XP conclusão:", e));
+    }
+    res.json(progress);
+  });
+
+  app.get("/api/community/:id/notifications", async (req, res) => {
+    const allowed = await communityIfAllowed(req, Number(req.params.id));
+    if (!allowed) return res.status(403).json({ error: "Você não tem acesso a essa comunidade." });
+    const [notifications, unreadCount] = await Promise.all([
+      db.listNotificationsForUser(allowed.community.id, req.appUser.id, 30),
+      db.countUnreadNotifications(allowed.community.id, req.appUser.id),
+    ]);
+    res.json({ notifications, unreadCount });
+  });
+
+  app.post("/api/community/notifications/:notificationId/read", async (req, res) => {
+    await db.markNotificationRead(Number(req.params.notificationId), req.appUser.id);
+    res.status(204).end();
+  });
+
+  app.post("/api/community/:id/notifications/read-all", async (req, res) => {
+    const allowed = await communityIfAllowed(req, Number(req.params.id));
+    if (!allowed) return res.status(403).json({ error: "Você não tem acesso a essa comunidade." });
+    await db.markAllNotificationsRead(allowed.community.id, req.appUser.id);
+    res.status(204).end();
+  });
+
+  // Lista de pessoas (não organizações) pra aba "Membros" + ranking de
+  // quem mais comenta/curte na comunidade — visível pra dono E membro
+  // (mesma regra de acesso do feed).
+  app.get("/api/community/:id/members", async (req, res) => {
+    const allowed = await communityIfAllowed(req, Number(req.params.id));
+    if (!allowed) return res.status(403).json({ error: "Você não tem acesso a essa comunidade." });
+    let members = await db.listCommunityMembersDetailed(allowed.community.id);
+    // "muted" é ferramenta de moderação do embaixador — não expõe pros
+    // outros membros quem está silenciado (a pessoa só nota se tentar
+    // interagir e não conseguir, ver rotas de comentar/curtir/votar).
+    if (!allowed.isOwner) members = members.map(({ muted, organization_id, ...m }) => m);
+    const topContributors = await db.listCommunityTopContributors(allowed.community.id, 10);
+    const xpLeaderboard = await db.listCommunityXpLeaderboard(allowed.community.id, 10);
+    // Ganhos são dado financeiro do embaixador — só ele vê, nunca um membro
+    // (mesmo se o membro inspecionar a chamada, o backend nem calcula).
+    const earnings = allowed.isOwner ? await db.getCommunityEarningsSummary(allowed.community.id) : null;
+    res.json({ members, topContributors, xpLeaderboard, earnings });
+  });
+
+  // Moderação (pedido do Samuel, 2026-09-18): silenciar tira a capacidade de
+  // comentar/curtir/votar sem avisar a pessoa (ver checks nas rotas de
+  // comentário/curtida/voto); expulsar apaga a membership de vez. Nenhuma
+  // das duas mexe na assinatura ScoutX da pessoa nem manda notificação —
+  // ela só percebe (silenciar) ou só sai da comunidade e pode entrar em
+  // outra pelo diretório (expulsar), sem nenhum aviso explicando o motivo.
+  app.post("/api/community/:id/members/:organizationId/mute", async (req, res) => {
+    const allowed = await communityIfAllowed(req, Number(req.params.id));
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode silenciar membros." });
+    const updated = await db.setCommunityMemberMuted(allowed.community.id, Number(req.params.organizationId), req.body?.muted !== false);
+    if (!updated) return res.status(404).json({ error: "Essa organização não é membro dessa comunidade." });
+    res.json(updated);
+  });
+
+  app.delete("/api/community/:id/members/:organizationId", async (req, res) => {
+    const allowed = await communityIfAllowed(req, Number(req.params.id));
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode remover membros." });
+    const removed = await db.removeCommunityMember(allowed.community.id, Number(req.params.organizationId));
+    if (!removed) return res.status(404).json({ error: "Essa organização não é membro dessa comunidade." });
+    res.status(204).end();
+  });
+
+  // Analytics completo (seção 18) — só o embaixador. Tudo dado real: posts
+  // mais engajados (curtidas+comentários), conteúdos mais concluídos, e uma
+  // taxa de engajamento aproximada (interações totais / membros ativos ×
+  // posts). Sem "visualizações": o app não rastreia abertura de post/vídeo,
+  // então esse número seria inventado — decisão consciente de não incluir.
+  app.get("/api/community/:id/analytics", async (req, res) => {
+    const allowed = await communityIfAllowed(req, Number(req.params.id));
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode ver isso." });
+    const [topPosts, topResources, contentStats, activeMemberCount] = await Promise.all([
+      db.listTopEngagedPosts(allowed.community.id, 5),
+      db.listTopCompletedResources(allowed.community.id, 5),
+      db.getCommunityContentStats(allowed.community.id),
+      db.countActiveCommunityMembers(allowed.community.id),
+    ]);
+    const totalInteractions = contentStats.likeCount + contentStats.commentCount;
+    const engagementRate =
+      activeMemberCount > 0 && contentStats.postCount > 0
+        ? Math.min(100, Math.round((totalInteractions / (activeMemberCount * contentStats.postCount)) * 100))
+        : null;
+    res.json({ topPosts, topResources, engagementRate, contentStats, activeMemberCount });
+  });
+
+  // Ganhos do embaixador como AFILIADO (assinantes trazidos direto pelo
+  // link/rastreio da Cakto, ver web/cakto.js resolveAffiliateForOrder) —
+  // sistema PARALELO ao de comissão por membro ativo da comunidade acima:
+  // aqui a comissão é por venda individual atribuída a ele, lá é um % sobre
+  // TODOS os membros ativos da comunidade dele. Antes só existia visão
+  // admin (GET /api/admin/affiliate-commissions, todas juntas); esta é a
+  // primeira vez que o próprio embaixador vê os PRÓPRIOS números.
+  app.get("/api/community/:id/affiliate-earnings", async (req, res) => {
+    const allowed = await communityIfAllowed(req, Number(req.params.id));
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode ver isso." });
+    const affiliate = await db.getAffiliateById(allowed.community.affiliate_id);
+    if (!affiliate) return res.status(404).json({ error: "Afiliado não encontrado." });
+    const [summary, recentCommissions, trialReferrals, trialSummary] = await Promise.all([
+      db.getAffiliateEarningsSummary(affiliate.id),
+      db.listAffiliateCommissionsForAffiliate(affiliate.id, 10),
+      db.listAffiliateTrialReferrals(affiliate.id),
+      db.getAffiliateTrialSummary(affiliate.id),
+    ]);
+    res.json({
+      firstSalePercentage: Number(affiliate.first_sale_percentage),
+      recurringPercentage: Number(affiliate.recurring_percentage),
+      ...summary,
+      recentCommissions,
+      trialReferrals,
+      ...trialSummary,
+    });
+  });
+
+  // Central de Conteúdo Educacional: lista é visível pra qualquer um com
+  // acesso, criar/editar/apagar é só do embaixador dono.
+  app.get("/api/community/:id/resources", async (req, res) => {
+    const allowed = await communityIfAllowed(req, Number(req.params.id));
+    if (!allowed) return res.status(403).json({ error: "Você não tem acesso a essa comunidade." });
+    const resources = await db.listCommunityResourcesWithProgress(allowed.community.id, req.appUser.id);
+    res.json(resources);
+  });
+
+  const RESOURCE_KINDS = new Set(["video", "article", "course", "link"]);
+
+  app.post("/api/community/:id/resources", async (req, res) => {
+    const allowed = await communityIfAllowed(req, Number(req.params.id));
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode adicionar conteúdo." });
+    const title = String(req.body?.title || "").trim();
+    if (!title) return res.status(400).json({ error: "Escreva um título." });
+    const kind = RESOURCE_KINDS.has(req.body?.kind) ? req.body.kind : "article";
+    const body = typeof req.body?.body === "string" ? req.body.body.trim() || null : null;
+    const url = typeof req.body?.url === "string" ? req.body.url.trim() || null : null;
+    const durationLabel = typeof req.body?.durationLabel === "string" ? req.body.durationLabel.trim() || null : null;
+    const resource = await db.createCommunityResource({ communityId: allowed.community.id, kind, title, body, url, durationLabel });
+    db.notifyCommunityMembers(allowed.community.id, {
+      type: "new_resource",
+      message: `${req.appUser.name} adicionou um novo conteúdo: "${title}"`,
+      resourceId: resource.id,
+    }).catch((e) => console.error("notificar novo conteúdo:", e));
+    res.status(201).json(resource);
+  });
+
+  app.patch("/api/community/resources/:resourceId", async (req, res) => {
+    const resource = await db.getCommunityResourceById(Number(req.params.resourceId));
+    if (!resource) return res.status(404).json({ error: "Conteúdo não encontrado." });
+    const allowed = await communityIfAllowed(req, resource.community_id);
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode editar conteúdo." });
+    const title = String(req.body?.title || "").trim();
+    if (!title) return res.status(400).json({ error: "Escreva um título." });
+    const kind = RESOURCE_KINDS.has(req.body?.kind) ? req.body.kind : resource.kind;
+    const body = typeof req.body?.body === "string" ? req.body.body.trim() || null : null;
+    const url = typeof req.body?.url === "string" ? req.body.url.trim() || null : null;
+    const durationLabel = typeof req.body?.durationLabel === "string" ? req.body.durationLabel.trim() || null : null;
+    const updated = await db.updateCommunityResource(resource.id, { kind, title, body, url, durationLabel });
+    res.json(updated);
+  });
+
+  app.delete("/api/community/resources/:resourceId", async (req, res) => {
+    const resource = await db.getCommunityResourceById(Number(req.params.resourceId));
+    if (!resource) return res.status(404).json({ error: "Conteúdo não encontrado." });
+    const allowed = await communityIfAllowed(req, resource.community_id);
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode apagar conteúdo." });
+    await db.deleteCommunityResource(resource.id);
+    res.status(204).end();
   });
 
   app.post("/api/community/:id/posts", async (req, res) => {
@@ -2019,7 +2349,36 @@ function createApp() {
     if (!channel || channel.community_id !== allowed.community.id) {
       return res.status(400).json({ error: "Canal inválido." });
     }
-    const post = await db.createCommunityPost({ communityId: allowed.community.id, channelId: channel.id, body: bodyText, imageUrl });
+    // Agendamento: só aceita data VÁLIDA E FUTURA — uma data no passado
+    // seria a mesma coisa que "publicar agora" mas escondendo o post do
+    // feed até alguém abrir a área de agendados e publicar manualmente,
+    // então é melhor recusar do que confundir o embaixador.
+    let scheduledAt = null;
+    if (typeof req.body?.scheduledAt === "string" && req.body.scheduledAt.trim()) {
+      const parsed = new Date(req.body.scheduledAt);
+      if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= Date.now()) {
+        return res.status(400).json({ error: "Escolha uma data e horário no futuro pra agendar." });
+      }
+      scheduledAt = parsed;
+    }
+    // Enquete: 2 a 6 opções de texto não vazio (poll é opcional — post sem
+    // pollOptions continua um post normal).
+    let pollOptions = null;
+    if (Array.isArray(req.body?.pollOptions)) {
+      pollOptions = req.body.pollOptions.map((o) => String(o || "").trim()).filter(Boolean);
+      if (pollOptions.length < 2 || pollOptions.length > 6) {
+        return res.status(400).json({ error: "Uma enquete precisa de 2 a 6 opções." });
+      }
+    }
+    const post = await db.createCommunityPost({ communityId: allowed.community.id, channelId: channel.id, body: bodyText, imageUrl, scheduledAt });
+    if (pollOptions) await db.createPollOptions(post.id, pollOptions);
+    if (!scheduledAt) {
+      db.notifyCommunityMembers(allowed.community.id, {
+        type: "new_post",
+        message: `${req.appUser.name} publicou um novo post.`,
+        postId: post.id,
+      }).catch((e) => console.error("notificar novo post:", e));
+    }
     res.status(201).json({ ...post, like_count: 0, liked_by_me: false, comments: [] });
   });
 
@@ -2035,7 +2394,23 @@ function createApp() {
     if (imageUrl && imageUrl.length > MAX_COMMUNITY_IMAGE_LENGTH) {
       return res.status(400).json({ error: "Imagem muito grande." });
     }
-    const updated = await db.updateCommunityPost(postId, { body: bodyText, imageUrl });
+    // scheduledAt só muda se vier explicitamente no corpo (reagendar) —
+    // sem isso, editar só o texto de um post agendado ia zerar o
+    // agendamento sem querer (updateCommunityPost sempre grava o valor
+    // passado, não faz COALESCE com o que já tinha).
+    let scheduledAt = postRow.scheduled_at;
+    if ("scheduledAt" in (req.body || {})) {
+      if (req.body.scheduledAt === null) {
+        scheduledAt = null;
+      } else {
+        const parsed = new Date(req.body.scheduledAt);
+        if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= Date.now()) {
+          return res.status(400).json({ error: "Escolha uma data e horário no futuro pra agendar." });
+        }
+        scheduledAt = parsed;
+      }
+    }
+    const updated = await db.updateCommunityPost(postId, { body: bodyText, imageUrl, scheduledAt });
     res.json(updated);
   });
 
@@ -2067,6 +2442,7 @@ function createApp() {
     if (!postRow) return res.status(404).json({ error: "Post não encontrado." });
     const allowed = await communityIfAllowed(req, postRow.community_id);
     if (!allowed) return res.status(403).json({ error: "Você não tem acesso a essa comunidade." });
+    if (allowed.membership?.muted) return res.status(403).json({ error: "Você não pode comentar nessa comunidade no momento." });
     const comment = await db.createCommunityComment({
       postId,
       authorUserId: req.appUser.id,
@@ -2074,6 +2450,24 @@ function createApp() {
       isAmbassador: allowed.isOwner,
       body: bodyText,
     });
+    // Só notifica o embaixador quando é OUTRA pessoa comentando no post dele
+    // — ele não precisa de aviso dos próprios comentários.
+    if (!allowed.isOwner) {
+      const affiliate = await db.getAffiliateById(allowed.community.affiliate_id);
+      const ambassadorUser = affiliate ? await db.findUserByEmail(affiliate.cakto_email) : null;
+      if (ambassadorUser) {
+        db.createNotification({
+          communityId: allowed.community.id,
+          recipientUserId: ambassadorUser.id,
+          type: "new_comment",
+          message: `${req.appUser.name} comentou no seu post: "${bodyText.slice(0, 80)}"`,
+          postId,
+        }).catch((e) => console.error("notificar comentário:", e));
+      }
+      // XP só pra quem é MEMBRO comentando (o embaixador não "participa"
+      // da própria comunidade pra ganhar XP, ver seção 15 do briefing).
+      db.recordXpEvent(allowed.community.id, req.appUser.id, "comment").catch((e) => console.error("XP comentário:", e));
+    }
     res.status(201).json(comment);
   });
 
@@ -2083,8 +2477,26 @@ function createApp() {
     if (!postRow) return res.status(404).json({ error: "Post não encontrado." });
     const allowed = await communityIfAllowed(req, postRow.community_id);
     if (!allowed) return res.status(403).json({ error: "Você não tem acesso a essa comunidade." });
+    if (allowed.membership?.muted) return res.status(403).json({ error: "Você não pode curtir nessa comunidade no momento." });
     const result = await db.toggleCommunityPostLike(postId, req.appUser.id);
     res.json(result);
+  });
+
+  app.post("/api/community/posts/:postId/save", async (req, res) => {
+    const postId = Number(req.params.postId);
+    const postRow = await db.getCommunityPostById(postId);
+    if (!postRow) return res.status(404).json({ error: "Post não encontrado." });
+    const allowed = await communityIfAllowed(req, postRow.community_id);
+    if (!allowed) return res.status(403).json({ error: "Você não tem acesso a essa comunidade." });
+    const result = await db.toggleCommunityPostSave(postId, req.appUser.id);
+    res.json(result);
+  });
+
+  app.get("/api/community/:id/activity", async (req, res) => {
+    const allowed = await communityIfAllowed(req, Number(req.params.id));
+    if (!allowed) return res.status(403).json({ error: "Você não tem acesso a essa comunidade." });
+    const activity = await db.listCommunityRecentActivity(allowed.community.id, 8);
+    res.json(activity);
   });
 
   // ---------- Comunidade (admin only) ----------
@@ -2122,7 +2534,6 @@ function createApp() {
     if (!updated) return res.status(404).json({ error: "Comissão não encontrada." });
     res.json(updated);
   });
-  } // fim do if (false) — Comunidade de Embaixadores desativada, ver comentário acima
 
   app.get("/api/admin/users", requireAdmin, async (req, res) => {
     const users = await db.listUsersWithCounts();

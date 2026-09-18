@@ -162,8 +162,12 @@ async function recordManualAffiliateCommissionIfAny(data, order) {
 
   const customerEmail = email || String(org.cakto_customer_email || "").trim().toLowerCase();
   const prior = await db.countAffiliateCommissionsForCustomer(affiliate.id, customerEmail);
-  const commissionType = prior === 0 ? "first_sale" : "recurring";
-  const percentage = commissionType === "first_sale" ? affiliate.first_sale_percentage : affiliate.recurring_percentage;
+  // Recorrência NÃO é mais paga aqui (2026-09-19, pedido do Samuel): quem
+  // paga renovação é a comissão da COMUNIDADE (recordCommunityCommissionIfAny).
+  // Só a primeira cobrança paga do cliente gera comissão de afiliado.
+  if (prior > 0) return;
+  const commissionType = "first_sale";
+  const percentage = affiliate.first_sale_percentage;
   const commissionValue = Math.round(saleAmount * (Number(percentage) / 100) * 100) / 100;
   const inserted = await db.createAffiliateCommission({
     affiliateId: affiliate.id,
@@ -195,8 +199,21 @@ async function recordAffiliateCommissionIfAny(data, commissionType, resolved) {
       await recordManualAffiliateCommissionIfAny(data, order);
       return;
     }
-    const percentage =
-      commissionType === "first_sale" ? affiliate.first_sale_percentage : affiliate.recurring_percentage;
+    // Recorrência NÃO é mais paga como comissão de afiliado (2026-09-19,
+    // pedido do Samuel): toda renovação é responsabilidade da comissão da
+    // COMUNIDADE (recordCommunityCommissionIfAny). Mas a 1ª cobrança de quem
+    // veio de teste grátis chega como "renovação" — então, se esse afiliado
+    // ainda não tem nenhuma comissão desse cliente, essa cobrança conta como
+    // PRIMEIRA VENDA; se já tem, é recorrência de verdade e não paga aqui.
+    const customerEmail = String(data.customer?.email || "").trim().toLowerCase();
+    let effectiveType = commissionType;
+    if (effectiveType === "recurring") {
+      const prior = await db.countAffiliateCommissionsForCustomer(affiliate.id, customerEmail);
+      if (prior > 0) return;
+      effectiveType = "first_sale";
+    }
+    commissionType = effectiveType;
+    const percentage = affiliate.first_sale_percentage;
     const { saleAmount, commissionValue } = affiliateCommissionFromOrder(
       { ...order, amount: order.amount ?? data.amount },
       percentage
@@ -302,14 +319,11 @@ async function recordReferralCommissionIfAny(data) {
 // automaticamente nela. Só roda no ramo de organização NOVA (a pessoa só
 // entra numa comunidade na primeira compra, nunca de novo depois).
 async function autoJoinCommunityIfAny(affiliate, org) {
-  // DESATIVADO URGENTE (2026-09-17) — ver aviso em recordReferralCommissionIfAny.
-  return;
-  // eslint-disable-next-line no-unreachable
   if (!affiliate) return;
   try {
     const community = await db.getCommunityByAffiliateId(affiliate.id);
     if (!community) return; // esse afiliado ainda não virou embaixador (sem comunidade criada)
-    await db.joinCommunity(community.id, org.id);
+    await db.joinCommunity(community.id, org.id, "affiliate");
     console.log(`Webhook Cakto: organização "${org.name}" entrou automaticamente na comunidade "${community.name}" (afiliado ${affiliate.name}).`);
   } catch (err) {
     console.error(`Webhook Cakto: falha ao entrar automaticamente na comunidade pra organização "${org.name}":`, err.message);
@@ -317,21 +331,38 @@ async function autoJoinCommunityIfAny(affiliate, org) {
 }
 
 // Comissão de comunidade — diferente das duas acima: dispara em TODA
-// renovação de QUALQUER membro ativo (não só na primeira compra), porque é
-// isso que "recorrência" quer dizer aqui (decisão do usuário). Sem job
-// agendado: o nível/percentual é calculado NA HORA, contando quantos
-// membros ativos a comunidade tem NESSE INSTANTE — se a comunidade
-// cresceu/encolheu desde a última renovação, a % já reflete isso
-// automaticamente, sem precisar recalcular nada em lote depois.
+// renovação de membro ativo QUE O EMBAIXADOR REALMENTE TROUXE (não só na
+// primeira compra), porque é isso que "recorrência" quer dizer aqui
+// (decisão do usuário). Sem job agendado: o percentual é calculado NA HORA
+// pelo NÍVEL da comunidade nesse instante — se a comunidade cresceu/
+// encolheu desde a última renovação, a % já reflete isso automaticamente,
+// sem precisar recalcular nada em lote depois.
+//
+// AJUSTE (2026-09-18/19, pedido do Samuel): o NÍVEL (Gold/Platinum/Diamond)
+// continua crescendo com o TAMANHO TOTAL da comunidade — todo mundo conta,
+// referido ou não, porque uma comunidade maior é mérito do embaixador
+// mesmo que parte tenha achado o ScoutX sozinha. Só o PAGAMENTO em si é
+// restrito: só gera comissão quando quem renovou tem
+// community_members.source = 'affiliate' (foi trazido pelo link dele de
+// verdade, ver autoJoinCommunityIfAny acima) — cobrar comissão sobre a
+// recorrência de alguém que a própria plataforma trouxe organicamente
+// (achou sozinho, entrou pelo diretório) seria a PLATAFORMA perdendo
+// dinheiro à toa, sem o embaixador ter feito nada pra merecer aquela venda
+// específica.
 async function recordCommunityCommissionIfAny(data, org) {
-  // DESATIVADO URGENTE (2026-09-17) — ver aviso em recordReferralCommissionIfAny.
-  return;
-  // eslint-disable-next-line no-unreachable
   try {
     const membership = await db.getCommunityMembershipByOrgId(org.id);
     if (!membership) return; // organização não está em nenhuma comunidade
+    if (membership.source !== "affiliate") {
+      console.log(
+        `Webhook Cakto: organização "${org.name}" renovou mas entrou na comunidade pelo diretório (não foi trazida pelo embaixador) — sem comissão de comunidade pro pedido ${data.id}, de propósito.`
+      );
+      return;
+    }
     const community = await db.getCommunityById(membership.community_id);
     if (!community) return;
+    // Nível calculado com o tamanho TOTAL (todo mundo), não só referidos —
+    // ver comentário acima.
     const activeCount = await db.countActiveCommunityMembers(community.id);
     const tier = tierForActiveMembers(activeCount);
     const saleAmount = Number(data.offer?.price ?? data.amount ?? 0);
@@ -355,6 +386,94 @@ async function recordCommunityCommissionIfAny(data, org) {
     }
   } catch (err) {
     console.error(`Webhook Cakto: falha ao conferir comissão de comunidade pro pedido ${data.id}:`, err.message);
+  }
+}
+
+// Período de teste do afiliado (pedido do Samuel, 2026-09-18): registra uma
+// PROJEÇÃO de comissão ("previsto a receber") quando um cliente trazido por
+// um afiliado entra em teste grátis, sem cobrar nada ainda de verdade —
+// vira comissão real (affiliate_commissions) só quando o teste converter em
+// cobrança (ver o `deleteAffiliateTrialReferral` chamado a partir de
+// handlePurchaseApproved/handleSubscriptionRenewed abaixo).
+//
+// AVISO (mesmo espírito do aviso em handleSubscriptionRenewed acima): a doc
+// oficial da Cakto (docs.cakto.com.br/api-reference/subscriptions/retrieve)
+// confirma os campos `status` ("trial" = em período de teste), `trial_days`
+// e `next_payment_date` no objeto de Assinatura, e o guia de webhooks
+// confirma que um objeto `subscription` vem embutido no payload de eventos
+// de assinatura — mas NINGUÉM aqui testou ainda um payload REAL de
+// "subscription_created" (não tem produto em teste ativo pra disparar um).
+// Por segurança, a extração abaixo tenta os nomes de campo documentados e
+// não quebra o webhook se algum vier ausente/diferente — só não registra a
+// projeção. Antes de confiar 100% nisso em produção, dispare um "Evento de
+// Teste" desse evento no painel da Cakto (Integrações → Webhooks → testar)
+// e confira no log se a linha foi criada certinho.
+// (Renomeada de handleSubscriptionCreated ao mesclar com o handler de TESTE
+// GRÁTIS de produção — ver handleSubscriptionCreated mais abaixo, que
+// chama esta no começo. As duas rodam no MESMO evento subscription_created:
+// esta registra a projeção de comissão do afiliado, a de baixo cria a
+// organização do teste.)
+async function recordAffiliateTrialProjection(data) {
+  const sub = data.subscription;
+  if (!sub) return; // produto sem assinatura (compra única) — não se aplica
+
+  const status = String(sub.status || "").toLowerCase();
+  if (status !== "trial") return; // assinatura já nasceu paga, sem teste — handlePurchaseApproved já cobre
+
+  const affiliateEmail = String(data.affiliate || "").trim().toLowerCase();
+  if (!affiliateEmail) return; // sem afiliado rastreado nesse pedido, nada a projetar
+
+  try {
+    const affiliate = await db.findAffiliateByCaktoEmail(affiliateEmail);
+    if (!affiliate) {
+      console.warn(
+        `Webhook Cakto: assinatura em teste (pedido ${data.id}) tem afiliado (${affiliateEmail}) que não está cadastrado no nosso painel — projeção NÃO registrada.`
+      );
+      return;
+    }
+
+    const subscriptionId = String(sub.id || sub.subscription_id || data.id);
+    const amount = Number(sub.amount ?? data.amount ?? data.offer?.price ?? 0);
+    if (!amount) return; // sem valor nenhum pra projetar, melhor omitir que inventar
+
+    const percentage = Number(affiliate.first_sale_percentage); // teste ainda não converteu = seria a 1ª venda
+    const projectedCommissionValue = Math.round(amount * (percentage / 100) * 100) / 100;
+    const trialEndsAtRaw = sub.next_payment_date || sub.nextPaymentDate || null;
+    const trialEndsAt = trialEndsAtRaw ? new Date(trialEndsAtRaw) : null;
+
+    await db.upsertAffiliateTrialReferral({
+      affiliateId: affiliate.id,
+      caktoSubscriptionId: subscriptionId,
+      customerEmail: String(data.customer?.email || "").trim().toLowerCase() || null,
+      customerName: data.customer?.name || null,
+      subscriptionAmount: amount,
+      commissionPercentage: percentage,
+      projectedCommissionValue,
+      trialEndsAt,
+    });
+    console.log(
+      `Webhook Cakto: assinatura ${subscriptionId} em teste registrada como projeção de ${projectedCommissionValue} pra ${affiliate.name} (pedido ${data.id}).`
+    );
+  } catch (err) {
+    console.error(`Webhook Cakto: falha ao registrar período de teste do pedido ${data.id}:`, err.message);
+  }
+}
+
+// Some com a projeção de teste (se existir) assim que a assinatura vira
+// cobrança de verdade — best-effort, nunca derruba o fluxo principal que já
+// rodou (organização renovada/comissão real criada) se isso aqui falhar.
+// Devolve a linha removida (ou null) pra quem chamar saber se existia —
+// handleCancellationEvent usa isso pra diferenciar "cancelamento de teste
+// que nunca chegou a cobrar" (sem organização, não é erro) de "cancelamento
+// de verdade sem organização encontrada" (aí sim precisa avisar).
+async function clearTrialReferralIfAny(data) {
+  const subscriptionId = data.subscription?.id || data.subscription?.subscription_id;
+  if (!subscriptionId) return null;
+  try {
+    return await db.deleteAffiliateTrialReferral(String(subscriptionId));
+  } catch (err) {
+    console.error(`Webhook Cakto: falha ao limpar projeção de teste do pedido ${data.id}:`, err.message);
+    return null;
   }
 }
 
@@ -398,6 +517,7 @@ async function handlePurchaseApproved(data) {
       console.log(`Webhook Cakto: organização "${org.name}" renovada (${planLabel}/${mapping.billingCycle}) a partir da compra ${data.id}.`);
       await recordAffiliateCommissionIfAny(data, "recurring");
       await recordCommunityCommissionIfAny(data, org);
+      await clearTrialReferralIfAny(data);
       return;
     }
     throw new Error(
@@ -444,6 +564,7 @@ async function handlePurchaseApproved(data) {
   await recordAffiliateCommissionIfAny(data, "first_sale", resolvedAffiliate);
   await recordReferralCommissionIfAny(data);
   await autoJoinCommunityIfAny(resolvedAffiliate?.affiliate, org);
+  await clearTrialReferralIfAny(data); // cobre o caso de um teste ter acabado de virar essa 1ª cobrança
 }
 
 // Teste grátis de 7 dias (2026-09-17) — "subscription_created" dispara
@@ -459,6 +580,14 @@ async function handlePurchaseApproved(data) {
 // primeira cobrança, como sempre foi. Isso evita criar a organização DUAS
 // vezes (uma aqui, outra em purchase_approved) pra quem não está em teste.
 async function handleSubscriptionCreated(data) {
+  // Projeção de comissão do afiliado (Comunidade/Afiliados) — best-effort,
+  // não pode impedir a criação da organização de teste logo abaixo.
+  try {
+    await recordAffiliateTrialProjection(data);
+  } catch (err) {
+    console.error(`Webhook Cakto: falha na projeção de comissão do teste (pedido ${data.id}):`, err.message);
+  }
+
   const offerId = data.offer?.id;
   const mapping = offerId ? CAKTO_OFFER_PLAN_MAP[offerId] : null;
   if (!mapping?.isTrial) {
@@ -549,6 +678,17 @@ async function handleCancellationEvent(data, eventName) {
   let org = data.id ? await db.findOrganizationByCaktoPurchaseId(data.id) : null;
   if (!org && email) org = await db.findOrganizationByCaktoEmail(email);
   if (!org) {
+    // Sem organização, mas pode ser cancelamento de uma assinatura AINDA em
+    // teste — nunca chegou a gerar organização (essa só nasce em
+    // handlePurchaseApproved, na primeira cobrança de verdade). Não é erro
+    // nesse caso, só limpa a projeção e encerra.
+    const clearedTrial = await clearTrialReferralIfAny(data);
+    if (clearedTrial) {
+      console.log(
+        `Webhook Cakto: assinatura ${clearedTrial.cakto_subscription_id} em teste cancelada antes de cobrar (evento "${eventName}", pedido ${data.id}) — projeção removida.`
+      );
+      return;
+    }
     throw new Error(
       `evento "${eventName}" (compra ${data.id}, email ${email || "?"}) não achou nenhuma organização Cakto pra suspender — revise manualmente`
     );
@@ -563,6 +703,10 @@ async function handleCancellationEvent(data, eventName) {
     `Acesso suspenso automaticamente (evento Cakto "${eventName}", compra ${data.id})`
   );
   console.log(`Webhook Cakto: organização "${org.name}" suspensa (evento "${eventName}", compra ${data.id}).`);
+  // Teste grátis cancelado antes de cobrar: some com o "previsto a receber"
+  // do afiliado (nessa versão a organização de teste JÁ existe, então o
+  // caminho de cima, sem organização, não cobre esse caso).
+  await clearTrialReferralIfAny(data);
 
   // Pedido do usuário (2026-08-31): comissão de afiliado nunca pode ficar "a
   // pagar" pra uma venda que se desfez (reembolso/chargeback/cancelamento).
@@ -638,6 +782,7 @@ async function handleSubscriptionRenewed(data) {
   console.log(`Webhook Cakto: organização "${org.name}" renovada (evento subscription_renewed, compra ${data.id}).`);
   await recordAffiliateCommissionIfAny(data, "recurring");
   await recordCommunityCommissionIfAny(data, org);
+  await clearTrialReferralIfAny(data);
 }
 
 // Handler principal, chamado pela rota POST /api/webhooks/cakto em

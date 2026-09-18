@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, Image as ImageIcon, Trash2, Users } from 'lucide-react'
 import { rawApi } from '../api/rawClient.js'
 import EmptyState from '../components/EmptyState.jsx'
 import RefreshButton from '../components/RefreshButton.jsx'
 import { formatDateTime } from '../utils/date.js'
+import { resizeImageToDataUrl } from '../utils/avatar.js'
 
 const inputClass =
   'rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none'
@@ -18,19 +19,91 @@ function money(value) {
 // a tela precisa mostrar de cara: quantos clientes distintos, quanto falta
 // pagar, quanto já foi pago. Feito no front porque a lista inteira já vem
 // numa chamada só (base pequena, não compensa 1 endpoint por afiliado).
-function summarize(affiliates, commissions) {
+function summarize(affiliates, commissions, communities, trialReferrals) {
   return (affiliates || []).map((a) => {
     const own = (commissions || []).filter((c) => c.affiliate_id === a.id)
     const clientCount = new Set(own.map((c) => c.customer_email)).size
     const pending = own.filter((c) => !c.paid).reduce((sum, c) => sum + Number(c.commission_value), 0)
     const paid = own.filter((c) => c.paid).reduce((sum, c) => sum + Number(c.commission_value), 0)
-    return { ...a, commissions: own, clientCount, pending, paid }
+    const community = (communities || []).find((c) => c.affiliate_id === a.id) || null
+    const trials = (trialReferrals || []).filter((t) => t.affiliate_id === a.id)
+    const projectedTrialTotal = trials.reduce((sum, t) => sum + Number(t.projected_commission_value), 0)
+    return { ...a, commissions: own, clientCount, pending, paid, community, trials, projectedTrialTotal }
   })
+}
+
+// Formulário de criar comunidade embutido na própria linha do afiliado
+// (pedido do usuário: antes só dava pra criar comunidade numa tela admin
+// separada, /admin/comunidades — juntar aqui evita ter que trocar de tela
+// no meio do cadastro de um afiliado novo).
+function CreateCommunityInline({ affiliateId, onCreated }) {
+  const [name, setName] = useState('')
+  const [photoUrl, setPhotoUrl] = useState(null)
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      setPhotoUrl(await resizeImageToDataUrl(file, 400, 0.85))
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function submit(e) {
+    e.preventDefault()
+    if (!name.trim()) return
+    setCreating(true)
+    setError(null)
+    try {
+      await rawApi.createCommunityForAffiliate(affiliateId, name.trim(), photoUrl)
+      setName('')
+      setPhotoUrl(null)
+      onCreated()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="mt-3 rounded-xl border border-dashed border-[var(--border)] bg-[var(--bg-surface-2)] p-3">
+      <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-[var(--text-muted)]">
+        <Users size={13} /> Esse afiliado ainda não tem comunidade
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-faint)] hover:border-brand-500" title="Foto (opcional)">
+          {photoUrl ? <img src={photoUrl} alt="" className="h-full w-full object-cover" /> : <ImageIcon size={14} />}
+          <input type="file" accept="image/*" onChange={handleFile} className="hidden" />
+        </label>
+        <input
+          required
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Nome da comunidade"
+          className="min-w-[180px] flex-1 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
+        />
+        <button
+          type="submit"
+          disabled={creating || !name.trim()}
+          className="rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+        >
+          {creating ? 'Criando…' : 'Criar comunidade'}
+        </button>
+      </div>
+      {error && <p className="mt-1.5 text-xs text-red-400">{error}</p>}
+    </form>
+  )
 }
 
 export default function Afiliados() {
   const [affiliates, setAffiliates] = useState(null)
   const [commissions, setCommissions] = useState(null)
+  const [communities, setCommunities] = useState(null)
+  const [trialReferrals, setTrialReferrals] = useState(null)
   const [error, setError] = useState(null)
   const [form, setForm] = useState(emptyForm)
   const [creating, setCreating] = useState(false)
@@ -44,6 +117,8 @@ export default function Afiliados() {
     return Promise.all([
       rawApi.listAffiliates().then(setAffiliates).catch((e) => setError(e.message)),
       rawApi.listAffiliateCommissions().then(setCommissions).catch((e) => setError(e.message)),
+      rawApi.listAdminCommunities().then(setCommunities).catch((e) => setError(e.message)),
+      rawApi.listAffiliateTrialReferrals().then(setTrialReferrals).catch((e) => setError(e.message)),
     ])
   }
 
@@ -51,17 +126,24 @@ export default function Afiliados() {
     load()
   }, [])
 
-  const summaries = useMemo(() => summarize(affiliates, commissions), [affiliates, commissions])
+  const summaries = useMemo(
+    () => summarize(affiliates, commissions, communities, trialReferrals),
+    [affiliates, commissions, communities, trialReferrals]
+  )
 
   async function handleCreate(e) {
     e.preventDefault()
     setCreating(true)
     setFormMsg(null)
     try {
-      await rawApi.createAffiliate(form)
+      const created = await rawApi.createAffiliate(form)
       setForm(emptyForm)
       setShowForm(false)
-      load()
+      await load()
+      // Abre a linha do afiliado recém-criado já mostrando o formulário de
+      // criar comunidade — o pedido era exatamente não ter que sair dessa
+      // tela pra fazer isso.
+      if (created?.id) setExpandedId(created.id)
     } catch (err) {
       setFormMsg({ type: 'error', text: err.message || 'Erro' })
     } finally {
@@ -106,9 +188,9 @@ export default function Afiliados() {
         <div>
           <h2 className="text-xl font-semibold">Afiliados</h2>
           <p className="text-sm text-[var(--text-muted)]">
-            Comissão calculada pela nossa própria taxa (a Cakto só rastreia o link/clique). Uma venda só vira
-            "a pagar" depois que o pagamento é confirmado de verdade — se o cliente cancelar ou pedir reembolso, a
-            comissão pendente some sozinha.
+            A Cakto só identifica quem clicou no link; o cálculo da comissão usa a taxa configurada aqui embaixo, pra
+            cada afiliado. Uma venda entra como "a receber" assim que o pagamento é confirmado, e some sozinha da
+            lista se o cliente cancelar ou pedir reembolso depois.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -213,7 +295,16 @@ export default function Afiliados() {
                 <div className="flex items-center gap-3">
                   {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                   <div>
-                    <p className="font-semibold text-[var(--text-primary)]">{a.name}</p>
+                    <p className="flex flex-wrap items-center gap-2 font-semibold text-[var(--text-primary)]">
+                      {a.name}
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          a.community ? 'bg-emerald-500/15 text-emerald-500' : 'bg-[var(--bg-surface-2)] text-[var(--text-faint)]'
+                        }`}
+                      >
+                        {a.community ? `Comunidade: ${a.community.community_name}` : 'Sem comunidade'}
+                      </span>
+                    </p>
                     <p className="text-xs text-[var(--text-muted)]">{a.cakto_email}</p>
                   </div>
                 </div>
@@ -277,6 +368,14 @@ export default function Afiliados() {
                       <span className="text-xs text-[var(--text-muted)]">{backfill.text}</span>
                     )}
                   </div>
+
+                  {a.community ? (
+                    <p className="mb-3 flex items-center gap-1.5 text-xs text-emerald-500">
+                      <Users size={13} /> Comunidade "{a.community.community_name}" já criada — o próprio embaixador gerencia o resto (banner, canais, posts) logado na conta dele.
+                    </p>
+                  ) : (
+                    <CreateCommunityInline affiliateId={a.id} onCreated={load} />
+                  )}
                   {a.commissions.length === 0 ? (
                     <p className="text-sm text-[var(--text-muted)]">Nenhuma venda dela ainda.</p>
                   ) : (
@@ -326,6 +425,30 @@ export default function Afiliados() {
                           ))}
                         </tbody>
                       </table>
+                    </div>
+                  )}
+
+                  {a.trials.length > 0 && (
+                    <div className="mt-4 rounded-xl border border-dashed border-amber-500/30 bg-amber-500/5 p-3">
+                      <p className="mb-2 flex items-center justify-between text-xs font-semibold text-amber-500">
+                        <span>Em período de teste (ainda não cobrado)</span>
+                        <span>Previsto: {money(a.projectedTrialTotal)}</span>
+                      </p>
+                      <div className="space-y-1.5">
+                        {a.trials.map((t) => (
+                          <div key={t.id} className="flex items-center justify-between text-xs text-[var(--text-muted)]">
+                            <span>{t.customer_name || t.customer_email || 'Cliente sem nome'}</span>
+                            <span className="tabular-nums">
+                              {money(t.projected_commission_value)}
+                              {t.trial_ends_at ? ` · teste até ${formatDateTime(t.trial_ends_at)}` : ''}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-[11px] text-[var(--text-faint)]">
+                        Só vira comissão de verdade se o teste converter em cobrança — se cancelar antes, some sozinho
+                        daqui.
+                      </p>
                     </div>
                   )}
                 </div>

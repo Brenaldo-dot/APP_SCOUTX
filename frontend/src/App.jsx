@@ -21,6 +21,8 @@ import Organizacoes from './pages/Organizacoes.jsx'
 import Afiliados from './pages/Afiliados.jsx'
 import Indicacao from './pages/Indicacao.jsx'
 import AdminIndicacoes from './pages/AdminIndicacoes.jsx'
+import Comunidade from './pages/Comunidade.jsx'
+import AdminComunidades from './pages/AdminComunidades.jsx'
 import Conta from './pages/Conta.jsx'
 import Suporte from './pages/Suporte.jsx'
 
@@ -77,12 +79,18 @@ export default function App() {
                 ainda), rotas dela removidas por completo do frontend. */}
             <Route path="/indicacao" element={<Indicacao />} />
 
+            {/* Comunidade de Embaixadores: qualquer usuário logado acessa; o
+                que cada um vê/pode fazer (embaixador, membro, quem ainda não
+                entrou) é decidido dentro da própria tela, não por RouteGuard. */}
+            <Route path="/comunidade" element={<Comunidade />} />
+
             <Route element={<RouteGuard allow={(me) => me.isAdmin} />}>
               <Route path="/ferramentas/historico" element={<Historico />} />
               <Route path="/usuarios" element={<Usuarios />} />
               <Route path="/organizacoes" element={<Organizacoes />} />
               <Route path="/afiliados" element={<Afiliados />} />
               <Route path="/admin/indicacoes" element={<AdminIndicacoes />} />
+              <Route path="/admin/comunidades" element={<AdminComunidades />} />
             </Route>
           </Route>
         </Routes>

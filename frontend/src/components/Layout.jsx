@@ -467,9 +467,29 @@ export default function Layout() {
               </NavLink>
             )}
 
-            {/* Indicação: qualquer usuário logado pode pedir o cupom, mesma
-                lógica de Suporte/Minha Conta abaixo. Comunidade continua
-                desativada (não pedida ainda). */}
+            {me?.isAdmin && (
+              <NavLink to="/admin/comunidades" title={effectiveCollapsed ? t('nav.adminComunidades') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
+                {({ isActive }) => (
+                  <>
+                    <NavIcon Icon={Users} active={isActive} />
+                    {!effectiveCollapsed && t('nav.adminComunidades')}
+                  </>
+                )}
+              </NavLink>
+            )}
+
+            {/* Comunidade e Indicação: qualquer usuário logado acessa, mesma
+                lógica de Suporte/Minha Conta abaixo. */}
+            {me && (
+              <NavLink to="/comunidade" title={effectiveCollapsed ? t('nav.comunidade') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
+                {({ isActive }) => (
+                  <>
+                    <NavIcon Icon={Users} active={isActive} />
+                    {!effectiveCollapsed && t('nav.comunidade')}
+                  </>
+                )}
+              </NavLink>
+            )}
             {me && (
               <NavLink to="/indicacao" title={effectiveCollapsed ? t('nav.indicacao') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
                 {({ isActive }) => (

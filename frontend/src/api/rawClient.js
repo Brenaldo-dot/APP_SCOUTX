@@ -61,6 +61,7 @@ export const rawApi = {
   deleteAffiliate: (id) => request(`/api/admin/affiliates/${id}`, { method: 'DELETE' }),
   backfillAffiliate: (id) => request(`/api/admin/affiliates/${id}/backfill`, { method: 'POST' }),
   listAffiliateCommissions: () => request('/api/admin/affiliate-commissions'),
+  listAffiliateTrialReferrals: () => request('/api/admin/affiliate-trial-referrals'),
   markAffiliateCommissionPaid: (id, paid) =>
     request(`/api/admin/affiliate-commissions/${id}`, {
       method: 'PATCH',
@@ -102,20 +103,61 @@ export const rawApi = {
   joinCommunity: (communityId) =>
     request('/api/community/join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ communityId }) }),
   getCommunity: (id, { channelId, sort } = {}) => request(`/api/community/${id}?${qs({ channelId, sort })}`),
-  updateCommunity: (id, { name, description, photoUrl }) =>
-    request(`/api/community/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, description, photoUrl }) }),
+  updateCommunity: (id, { name, description, photoUrl, bannerUrl, accentColor, instagramUrl, youtubeUrl, websiteUrl }) =>
+    request(`/api/community/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, description, photoUrl, bannerUrl, accentColor, instagramUrl, youtubeUrl, websiteUrl }),
+    }),
   createCommunityChannel: (id, name, groupName) =>
     request(`/api/community/${id}/channels`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, groupName }) }),
   deleteCommunityChannel: (channelId) => request(`/api/community/channels/${channelId}`, { method: 'DELETE' }),
-  createCommunityPost: (id, channelId, body, imageUrl) =>
-    request(`/api/community/${id}/posts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channelId, body, imageUrl }) }),
-  updateCommunityPost: (postId, body, imageUrl) =>
-    request(`/api/community/posts/${postId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body, imageUrl }) }),
+  createCommunityPost: (id, channelId, body, imageUrl, { scheduledAt, pollOptions } = {}) =>
+    request(`/api/community/${id}/posts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channelId, body, imageUrl, scheduledAt, pollOptions }),
+    }),
+  updateCommunityPost: (postId, body, imageUrl, scheduledAt) =>
+    request(`/api/community/posts/${postId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body, imageUrl, scheduledAt }) }),
   deleteCommunityPost: (postId) => request(`/api/community/posts/${postId}`, { method: 'DELETE' }),
   toggleCommunityPostPin: (postId) => request(`/api/community/posts/${postId}/pin`, { method: 'POST' }),
+  getScheduledCommunityPosts: (id) => request(`/api/community/${id}/scheduled`),
+  publishCommunityPostNow: (postId) => request(`/api/community/posts/${postId}/publish-now`, { method: 'POST' }),
+  voteOnCommunityPoll: (postId, optionId) =>
+    request(`/api/community/posts/${postId}/vote`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ optionId }) }),
   createCommunityComment: (postId, body) =>
     request(`/api/community/posts/${postId}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) }),
   toggleCommunityPostLike: (postId) => request(`/api/community/posts/${postId}/like`, { method: 'POST' }),
+  toggleCommunityPostSave: (postId) => request(`/api/community/posts/${postId}/save`, { method: 'POST' }),
+  getCommunityActivity: (id) => request(`/api/community/${id}/activity`),
+  getCommunityMembers: (id) => request(`/api/community/${id}/members`),
+  muteCommunityMember: (communityId, organizationId, muted) =>
+    request(`/api/community/${communityId}/members/${organizationId}/mute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ muted }),
+    }),
+  removeCommunityMember: (communityId, organizationId) =>
+    request(`/api/community/${communityId}/members/${organizationId}`, { method: 'DELETE' }),
+  getCommunityAffiliateEarnings: (id) => request(`/api/community/${id}/affiliate-earnings`),
+  getCommunityAnalytics: (id) => request(`/api/community/${id}/analytics`),
+  getCommunityHome: (id) => request(`/api/community/${id}/home`),
+  setResourceProgress: (resourceId, completed) =>
+    request(`/api/community/resources/${resourceId}/progress`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ completed }),
+    }),
+  getCommunityNotifications: (id) => request(`/api/community/${id}/notifications`),
+  markNotificationRead: (notificationId) => request(`/api/community/notifications/${notificationId}/read`, { method: 'POST' }),
+  markAllNotificationsRead: (id) => request(`/api/community/${id}/notifications/read-all`, { method: 'POST' }),
+  listCommunityResources: (id) => request(`/api/community/${id}/resources`),
+  createCommunityResource: (id, data) =>
+    request(`/api/community/${id}/resources`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  updateCommunityResource: (resourceId, data) =>
+    request(`/api/community/resources/${resourceId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  deleteCommunityResource: (resourceId) => request(`/api/community/resources/${resourceId}`, { method: 'DELETE' }),
 
   listAdminCommunities: () => request('/api/admin/communities'),
   createCommunityForAffiliate: (affiliateId, name, photoUrl) =>
