@@ -505,6 +505,27 @@ const ASSINAR_PAGE_SCRIPT = `
 var caktoSdk = new Cakto.CaktoSDK({ client_id: document.body.dataset.caktoClientId });
 caktoSdk.initAntifraud().catch(function (err) { console.error("Antifraude Cakto:", err); });
 
+// customer.fingerprint (achado ao vivo, 2026-09-18: "Este campo não pode
+// ser em branco" ao tirar o 3DS) — a doc só pede "um identificador estável
+// do dispositivo/sessão", sem exigir vir de nenhuma função específica do
+// SDK. Gera um UUID uma vez e guarda no localStorage: mesmo navegador
+// sempre manda o mesmo valor, satisfazendo a exigência sem precisar do
+// fluxo de 3DS.
+function getDeviceFingerprint() {
+  try {
+    var key = "scoutx_fp";
+    var existing = window.localStorage.getItem(key);
+    if (existing) return existing;
+    var fresh = (window.crypto && window.crypto.randomUUID)
+      ? window.crypto.randomUUID()
+      : "fp-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+    window.localStorage.setItem(key, fresh);
+    return fresh;
+  } catch (e) {
+    return "fp-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+  }
+}
+
 var step1 = document.getElementById("step-1");
 var step2 = document.getElementById("step-2");
 var errorBox = document.getElementById("form-error");
@@ -654,6 +675,7 @@ submitBtn.addEventListener("click", function () {
           docNumber: docNumber,
           cardToken: result.cardToken,
           antifraudReference: caktoSdk.getAntifraudReference(),
+          fingerprint: getDeviceFingerprint(),
         }),
       });
     })
@@ -1203,16 +1225,17 @@ function createApp() {
   // Passo 2 — plano, CPF e cartão. Busca nome/senha/telefone do lead salvo
   // no passo 1 (não pede de novo) — só funciona se o passo 1 já rodou.
   app.post("/api/assinar", async (req, res) => {
-    const { email, planKey, docNumber, cardToken, antifraudReference } = req.body || {};
+    const { email, planKey, docNumber, cardToken, antifraudReference, fingerprint } = req.body || {};
 
     const offer = ASSINAR_OFFERS[planKey === "pro" ? "pro" : "standard"];
     const cleanEmail = String(email || "").trim().toLowerCase();
     const cleanDoc = String(docNumber || "").replace(/\D/g, "");
+    const cleanFingerprint = String(fingerprint || "").trim();
 
     if (!cleanEmail || !cleanDoc) {
       return res.status(400).json({ error: "Preencha todos os campos obrigatórios." });
     }
-    if (!cardToken || !antifraudReference) {
+    if (!cardToken || !antifraudReference || !cleanFingerprint) {
       return res.status(400).json({ error: "Não foi possível validar o cartão, revise os dados e tente de novo." });
     }
 
@@ -1238,13 +1261,18 @@ function createApp() {
           phone: `55${lead.phone}`,
           docType: cleanDoc.length > 11 ? "cnpj" : "cpf",
           docNumber: cleanDoc,
+          fingerprint: cleanFingerprint,
         },
         cardToken,
         antifraudReference,
         idempotencyKey: `assinar-${cleanEmail}-${offer.offerId}`,
       });
     } catch (err) {
-      console.error(`Assinar: pagamento recusado pra ${cleanEmail} (oferta ${offer.offerId}):`, err.message);
+      console.error(
+        `Assinar: pagamento recusado pra ${cleanEmail} (oferta ${offer.offerId}):`,
+        err.message,
+        err.caktoDetail ? JSON.stringify(err.caktoDetail) : ""
+      );
       return res.status(402).json({ error: "Não foi possível validar o cartão. Confira os dados e tente novamente, ou use outro cartão." });
     }
 
