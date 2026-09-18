@@ -553,7 +553,7 @@ cardExpiryEl.addEventListener("input", function () {
 
 var cardCvvEl = document.getElementById("cardCvv");
 cardCvvEl.addEventListener("input", function () {
-  cardCvvEl.value = cardCvvEl.value.replace(/\\D/g, "").slice(0, 4);
+  cardCvvEl.value = cardCvvEl.value.replace(/\\D/g, "").slice(0, 3);
 });
 
 // ---------- Seleção de plano (passo 2) ----------
@@ -1123,7 +1123,7 @@ function createApp() {
         <div>
           <label for="cardCvv">CVV</label>
           <div class="cvv-wrap">
-            <input type="text" id="cardCvv" inputmode="numeric" maxlength="4" placeholder="•••">
+            <input type="text" id="cardCvv" inputmode="numeric" maxlength="3" placeholder="•••">
             <span class="cvv-icon" aria-hidden="true">
               <svg width="24" height="17" viewBox="0 0 24 17" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <rect x="0.5" y="0.5" width="23" height="16" rx="2" fill="#1f2430" stroke="#4b5563"/>
