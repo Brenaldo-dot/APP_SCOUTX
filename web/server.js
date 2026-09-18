@@ -991,13 +991,13 @@ function createApp() {
     padding: 34px; border-radius: 20px; width: 460px; max-width: calc(100vw - 32px);
     box-shadow: 0 24px 70px rgba(0,0,0,0.55);
   }
-  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+  .brand { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 20px; }
   .brand img { width: 36px; height: 36px; border-radius: 10px; object-fit: cover; }
   .brand span { font-weight: 700; font-size: 16px; }
   .trial-badge {
-    display: inline-flex; align-items: center; gap: 6px; background: rgba(16,185,129,0.15);
+    display: flex; width: fit-content; align-items: center; gap: 6px; background: rgba(16,185,129,0.15);
     border: 1px solid rgba(16,185,129,0.35); color: #34d399; font-size: 12px; font-weight: 700;
-    padding: 6px 12px; border-radius: 999px; margin-bottom: 14px;
+    padding: 6px 12px; border-radius: 999px; margin: 0 auto 14px;
   }
   h1 { font-size: 21px; margin: 0 0 6px; text-align: center; }
   p.subtitle { color: #9ca3af; font-size: 13px; margin: 0 0 20px; line-height: 1.5; }
