@@ -1015,15 +1015,15 @@ function createApp() {
     padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; display: ${error ? "block" : "none"};
   }
   .fineprint { color: #6b7280; font-size: 11px; text-align: center; margin-top: 14px; line-height: 1.5; }
-  .trust-note { color: #9ca3af; font-size: 12.5px; text-align: center; margin: 4px 0 20px; line-height: 1.7; }
+  .trust-note { color: #9ca3af; font-size: 12.5px; text-align: left; margin: 4px 0 20px; line-height: 1.7; }
   .trust-note strong {
     color: #eff6ff; font-weight: 700; background: rgba(59,130,246,0.35);
     padding: 1px 6px; border-radius: 4px; box-decoration-break: clone; -webkit-box-decoration-break: clone;
   }
   .powered-by { color: #6b7280; font-size: 11px; margin: 18px 0 0; text-align: center; }
   .powered-by strong { color: #9ca3af; }
-  .card-number-wrap, .cvv-wrap { position: relative; display: flex; align-items: center; }
-  .card-number-wrap input { padding-right: 76px; }
+  .card-number-wrap, .cvv-wrap { position: relative; display: flex; align-items: center; margin-bottom: 14px; }
+  .card-number-wrap input, .cvv-wrap input { margin-bottom: 0; padding-right: 76px; }
   .cvv-wrap input { padding-right: 36px; }
   .card-brands, .cvv-icon {
     position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
