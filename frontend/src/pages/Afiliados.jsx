@@ -38,6 +38,7 @@ export default function Afiliados() {
   const [showForm, setShowForm] = useState(false)
   const [expandedId, setExpandedId] = useState(null)
   const [backfill, setBackfill] = useState({ id: null, loading: false, text: null })
+  const [copiedRef, setCopiedRef] = useState(null)
 
   function load() {
     return Promise.all([
@@ -248,6 +249,22 @@ export default function Afiliados() {
                     {Number(a.first_sale_percentage)}% na primeira venda · {Number(a.recurring_percentage)}% nas
                     renovações{a.pix_key ? ` · PIX: ${a.pix_key}` : ''}
                   </p>
+                  {a.ref_code && (
+                    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2">
+                      <span className="text-xs text-[var(--text-muted)]">Link de teste grátis desse afiliado:</span>
+                      <code className="text-xs text-[var(--text-primary)]">{`${window.location.origin}/free-trial?ref=${a.ref_code}`}</code>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard?.writeText(`${window.location.origin}/free-trial?ref=${a.ref_code}`)
+                          setCopiedRef(a.id)
+                          setTimeout(() => setCopiedRef(null), 2000)
+                        }}
+                        className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--hover-surface)]"
+                      >
+                        {copiedRef === a.id ? 'Copiado!' : 'Copiar link'}
+                      </button>
+                    </div>
+                  )}
                   <div className="mb-3 flex flex-wrap items-center gap-3">
                     <button
                       onClick={() => handleBackfill(a.id)}

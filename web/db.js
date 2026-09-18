@@ -1,4 +1,21 @@
 const { Pool, Client } = require("pg");
+const nodeCrypto = require("crypto");
+
+// Código do link de indicação de um afiliado: nome sem acento/símbolos + 4
+// caracteres aleatórios ("jhonatas-k3x9"). O sufixo aleatório evita que
+// alguém adivinhe/forje o link de outro afiliado só sabendo o nome dele.
+function generateAffiliateRefCode(name) {
+  const slug =
+    String(name || "afiliado")
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 20) || "afiliado";
+  const suffix = nodeCrypto.randomBytes(3).toString("hex").slice(0, 4);
+  return `${slug}-${suffix}`;
+}
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -323,6 +340,17 @@ async function migrate() {
       organization_id INTEGER REFERENCES organizations(id)
     );
   `);
+  // Código do link de indicação (/free-trial?ref=CODIGO) que trouxe esse lead.
+  await pool.query(`ALTER TABLE assinar_leads ADD COLUMN IF NOT EXISTS ref_code TEXT;`);
+
+  // Cada afiliado tem um código único e automático pro link de indicação
+  // dele. Afiliados que já existiam ganham um código aqui mesmo (backfill).
+  await pool.query(`ALTER TABLE affiliates ADD COLUMN IF NOT EXISTS ref_code TEXT;`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_affiliates_ref_code ON affiliates(ref_code) WHERE ref_code IS NOT NULL;`);
+  const withoutRef = await pool.query(`SELECT id, name FROM affiliates WHERE ref_code IS NULL`);
+  for (const row of withoutRef.rows) {
+    await pool.query(`UPDATE affiliates SET ref_code = $1 WHERE id = $2`, [generateAffiliateRefCode(row.name), row.id]);
+  }
 
   // Idempotência do webhook: a Cakto pode reenviar o mesmo evento (timeout,
   // retry automático dela) — sem isso, um reenvio de "purchase_approved"
@@ -796,11 +824,18 @@ async function findAffiliateByCaktoEmail(email) {
 
 async function createAffiliate({ name, caktoEmail, pixKey, firstSalePercentage, recurringPercentage }) {
   const res = await pool.query(
-    `INSERT INTO affiliates (name, cakto_email, pix_key, first_sale_percentage, recurring_percentage)
-     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [name, caktoEmail.toLowerCase().trim(), pixKey || null, firstSalePercentage, recurringPercentage]
+    `INSERT INTO affiliates (name, cakto_email, pix_key, first_sale_percentage, recurring_percentage, ref_code)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+    [name, caktoEmail.toLowerCase().trim(), pixKey || null, firstSalePercentage, recurringPercentage, generateAffiliateRefCode(name)]
   );
   return res.rows[0];
+}
+
+async function findAffiliateByRefCode(refCode) {
+  const code = String(refCode || "").trim().toLowerCase();
+  if (!code) return null;
+  const res = await pool.query("SELECT * FROM affiliates WHERE ref_code = $1", [code]);
+  return res.rows[0] || null;
 }
 
 async function deleteAffiliate(id) {
@@ -1396,15 +1431,16 @@ async function createOrganizationFromCakto({
 // completado o passo 2 (completed_at IS NULL). Se já completou, o UPDATE
 // simplesmente não roda (WHERE barra) e quem chamou trata como "já existe
 // conta" do mesmo jeito que já faz pra email repetido em app_users.
-async function upsertAssinarLead({ name, email, passwordHash, phone }) {
+async function upsertAssinarLead({ name, email, passwordHash, phone, refCode }) {
   const res = await pool.query(
-    `INSERT INTO assinar_leads (name, email, password_hash, phone)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO assinar_leads (name, email, password_hash, phone, ref_code)
+     VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (email) DO UPDATE
-       SET name = EXCLUDED.name, password_hash = EXCLUDED.password_hash, phone = EXCLUDED.phone, updated_at = now()
+       SET name = EXCLUDED.name, password_hash = EXCLUDED.password_hash, phone = EXCLUDED.phone,
+           ref_code = COALESCE(EXCLUDED.ref_code, assinar_leads.ref_code), updated_at = now()
        WHERE assinar_leads.completed_at IS NULL
      RETURNING *`,
-    [name, email.toLowerCase().trim(), passwordHash, phone]
+    [name, email.toLowerCase().trim(), passwordHash, phone, refCode || null]
   );
   return res.rows[0] || null; // null = email já tinha lead COMPLETO (WHERE do ON CONFLICT barrou)
 }
@@ -1617,6 +1653,7 @@ module.exports = {
   listPaidCaktoOrganizations,
   correctUnpaidAffiliateCommission,
   setOrganizationAffiliate,
+  findAffiliateByRefCode,
   getAffiliateById,
   countAffiliateCommissionsForCustomer,
   listAffiliateCommissions,

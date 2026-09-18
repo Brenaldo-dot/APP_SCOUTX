@@ -612,7 +612,7 @@ step1Btn.addEventListener("click", function () {
   fetch("/api/assinar/lead", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: name, email: email, password: password, phone: phone }),
+    body: JSON.stringify({ name: name, email: email, password: password, phone: phone, refCode: document.body.dataset.refCode || "" }),
   })
     .then(function (resp) { return resp.json().then(function (data) { return { ok: resp.ok, data: data }; }); })
     .then(function (r) {
@@ -944,7 +944,7 @@ function createApp() {
     pro: { offerId: "vzdzujz", plan: CAKTO_OFFER_PLAN_MAP.vzdzujz.plan, label: "Pro", priceLabel: "187" },
   };
 
-  function assinarPage({ planKey, error, values }) {
+  function assinarPage({ planKey, error, values, refCode }) {
     const offer = ASSINAR_OFFERS[planKey] || ASSINAR_OFFERS.standard;
     const v = values || {};
     const esc = (s) => escapeHtml(s || "");
@@ -1076,7 +1076,7 @@ function createApp() {
   .plan-card li { font-size: 12.5px; color: #9ca3af; margin-bottom: 4px; padding-left: 18px; position: relative; }
   .plan-card li::before { content: "✓"; position: absolute; left: 0; color: #34d399; font-weight: 700; }
 </style></head>
-<body data-cakto-client-id="${esc(process.env.CAKTO_API_CLIENT_ID || "")}">
+<body data-cakto-client-id="${esc(process.env.CAKTO_API_CLIENT_ID || "")}" data-ref-code="${esc(refCode || "")}">
 <div class="card">
   <button type="button" class="back-link" id="back-btn">‹ Voltar</button>
   <div class="brand"><img src="${SCOUTX_LOGO_DATA_URI}" alt="ScoutX"><span>ScoutX</span></div>
@@ -1172,7 +1172,8 @@ function createApp() {
 
   app.get("/free-trial", (req, res) => {
     const planKey = req.query.plano === "pro" ? "pro" : "standard";
-    res.send(assinarPage({ planKey }));
+    const refCode = typeof req.query.ref === "string" ? req.query.ref.trim().slice(0, 60) : "";
+    res.send(assinarPage({ planKey, refCode }));
   });
 
   app.get("/free-trial.js", (req, res) => {
@@ -1192,10 +1193,11 @@ function createApp() {
   // lead, ANTES de pedir cartão/CPF — quem abandona depois disso ainda vira
   // um contato que o suporte pode alcançar (ver db.js:upsertAssinarLead).
   app.post("/api/assinar/lead", async (req, res) => {
-    const { name, email, password, phone } = req.body || {};
+    const { name, email, password, phone, refCode } = req.body || {};
     const cleanEmail = String(email || "").trim().toLowerCase();
     const cleanName = String(name || "").trim();
     const cleanPhone = String(phone || "").replace(/\D/g, "");
+    const cleanRefCode = String(refCode || "").trim().toLowerCase().slice(0, 60);
 
     if (!cleanEmail || !cleanName || !password || !cleanPhone) {
       return res.status(400).json({ error: "Preencha todos os campos obrigatórios." });
@@ -1213,7 +1215,7 @@ function createApp() {
     }
 
     const passwordHash = await bcrypt.hash(String(password), 10);
-    const lead = await db.upsertAssinarLead({ name: cleanName, email: cleanEmail, passwordHash, phone: cleanPhone });
+    const lead = await db.upsertAssinarLead({ name: cleanName, email: cleanEmail, passwordHash, phone: cleanPhone, refCode: cleanRefCode });
     if (!lead) {
       // upsertAssinarLead devolve null só quando o email já tem um lead
       // COMPLETO (virou conta de verdade) — mesmo aviso de email duplicado.
@@ -1297,6 +1299,21 @@ function createApp() {
         needsPasswordSetup: false,
       });
       await db.markAssinarLeadCompleted(cleanEmail, org.id, planKey === "pro" ? "pro" : "standard");
+      // Veio por um link de indicação de afiliado (/free-trial?ref=...):
+      // atribui a organização a ele, pra comissão cair quando a cobrança
+      // de verdade chegar (ver cakto.js:recordManualAffiliateCommissionIfAny).
+      // Falha aqui nunca pode derrubar a criação da conta, que já foi paga.
+      if (lead.ref_code) {
+        try {
+          const refAffiliate = await db.findAffiliateByRefCode(lead.ref_code);
+          if (refAffiliate) {
+            await db.setOrganizationAffiliate(org.id, refAffiliate.id);
+            console.log(`Assinar: ${cleanEmail} atribuído ao afiliado ${refAffiliate.name} pelo link de indicação.`);
+          }
+        } catch (refErr) {
+          console.error("Assinar: falha ao atribuir afiliado pelo link de indicação:", refErr.message);
+        }
+      }
       await db.logAdminAction(
         null,
         "Assinar (auto-atendimento)",
