@@ -987,10 +987,19 @@ function createApp() {
 <style>
   * { box-sizing: border-box; }
   body {
-    font-family: system-ui, sans-serif; background: #05070d; color: #f3f4f6;
+    font-family: system-ui, sans-serif; background: #05070d;
     display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0;
     position: relative; overflow-x: hidden; padding: 32px 16px;
   }
+  /* A cor de texto fica só no .card, de propósito (2026-09-18, teste real
+     travando no desafio 3DS): o SDK da Cakto pode inserir o widget do banco
+     como conteúdo normal da página (não um iframe isolado). Se herdasse a
+     cor quase-branca do body, um widget que não define a própria cor de
+     texto ficaria com texto branco sobre fundo branco, invisível mas
+     tecnicamente lá. Escopando pro .card, qualquer coisa que a Cakto
+     insira como irmã do card (fora dele) usa a cor padrão do navegador em
+     vez de herdar a nossa. */
+  .card { color: #f3f4f6; }
   body::before {
     content: ""; position: absolute; inset: 0; pointer-events: none;
     background-image:
@@ -1195,7 +1204,7 @@ function createApp() {
       </div>
       <div class="row">
         <div><label for="city">Cidade</label><input type="text" id="city" maxlength="255"></div>
-        <div style="flex: 0 0 70px;"><label for="state">UF</label><input type="text" id="state" maxlength="2" placeholder="SP" style="text-transform:uppercase"></div>
+        <div style="flex: 0 0 90px;"><label for="state">Estado</label><input type="text" id="state" maxlength="2" placeholder="SP" style="text-transform:uppercase"></div>
       </div>
     </fieldset>
 
