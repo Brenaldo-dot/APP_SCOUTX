@@ -961,9 +961,12 @@ async function getReferralCouponByUserId(userId) {
 }
 
 async function findReferralCouponByCode(code) {
-  const res = await pool.query("SELECT * FROM referral_coupons WHERE coupon_code = $1 AND status = 'active'", [
-    String(code).trim(),
-  ]);
+  // lower() dos dois lados: o cupom criado na Cakto pode ser minúsculo
+  // ("luanoff") e o webhook trazer maiúsculo ("LUANOFF") ou o contrário.
+  const res = await pool.query(
+    "SELECT * FROM referral_coupons WHERE lower(coupon_code) = lower($1) AND status = 'active'",
+    [String(code).trim()]
+  );
   return res.rows[0] || null;
 }
 
