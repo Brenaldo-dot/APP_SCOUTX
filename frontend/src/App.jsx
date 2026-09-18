@@ -19,6 +19,8 @@ import Historico from './pages/Historico.jsx'
 import Usuarios from './pages/Usuarios.jsx'
 import Organizacoes from './pages/Organizacoes.jsx'
 import Afiliados from './pages/Afiliados.jsx'
+import Indicacao from './pages/Indicacao.jsx'
+import AdminIndicacoes from './pages/AdminIndicacoes.jsx'
 import Conta from './pages/Conta.jsx'
 import Suporte from './pages/Suporte.jsx'
 
@@ -69,17 +71,18 @@ export default function App() {
                 conseguir pedir ajuda. */}
             <Route path="/suporte" element={<Suporte />} />
 
-            {/* Indicação e Comunidade DESATIVADAS URGENTE (2026-09-17) — foram
-                ao ar sem querer nesse deploy (feature nunca publicada de uma
-                sessão anterior). Rotas removidas por completo (server.js
-                também não registra mais os endpoints delas) até a limpeza
-                de verdade do código. */}
+            {/* Indicação: cliente indica cliente, self-service — qualquer
+                usuário logado acessa, mesma lógica de Suporte/Minha Conta.
+                Comunidade de Embaixadores continua desativada (não pedida
+                ainda), rotas dela removidas por completo do frontend. */}
+            <Route path="/indicacao" element={<Indicacao />} />
 
             <Route element={<RouteGuard allow={(me) => me.isAdmin} />}>
               <Route path="/ferramentas/historico" element={<Historico />} />
               <Route path="/usuarios" element={<Usuarios />} />
               <Route path="/organizacoes" element={<Organizacoes />} />
               <Route path="/afiliados" element={<Afiliados />} />
+              <Route path="/admin/indicacoes" element={<AdminIndicacoes />} />
             </Route>
           </Route>
         </Routes>

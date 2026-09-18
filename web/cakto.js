@@ -169,11 +169,6 @@ async function recordAffiliateCommissionIfAny(data, commissionType, resolved) {
 const REFERRAL_COMMISSION_PERCENTAGE = 50;
 
 async function recordReferralCommissionIfAny(data) {
-  // DESATIVADO URGENTE (2026-09-17): Indicação foi ao ar sem querer nesse
-  // deploy (feature nunca publicada de uma sessão anterior). No-op até a
-  // limpeza de verdade — ver o mesmo aviso em server.js.
-  return;
-  // eslint-disable-next-line no-unreachable
   const couponCode = String(data.couponCode || "").trim();
   if (!couponCode) return;
   try {

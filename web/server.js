@@ -1733,15 +1733,10 @@ function createApp() {
     res.json(updated);
   });
 
-  // DESATIVADO URGENTE (2026-09-17, pedido do usuário): Indicação e
-  // Comunidade de Embaixadores foram ao ar sem querer nesse mesmo deploy
-  // (feature "construída e testada localmente, nunca publicada" de uma
-  // sessão anterior, arrastada junto sem ninguém perceber). Envolvendo o
-  // bloco inteiro num `if (false)` em vez de apagar linha por linha —
-  // nenhuma dessas rotas fica registrada no Express (qualquer chamada cai
-  // no 404 padrão), reversível na hora removendo só este if/}. Limpeza de
-  // verdade (apagar o código) fica pra depois, sem pressa.
-  if (false) {
+  // Indicação religada de propósito (2026-09-18, primeira atualização depois
+  // do desligamento de emergência de 2026-09-17). Comunidade de Embaixadores
+  // continua desligada abaixo (`if (false)`) — só a Indicação foi pedida
+  // agora.
   // ---------- Indicação (cliente indica cliente) ----------
   // Diferente do programa de afiliados acima (cadastro manual pelo admin):
   // aqui é o próprio cliente logado que pede o cupom pela aba "Indicação" —
@@ -1814,6 +1809,12 @@ function createApp() {
     res.json(updated);
   });
 
+  // DESATIVADO URGENTE (2026-09-17, pedido do usuário): Comunidade de
+  // Embaixadores foi ao ar sem querer no mesmo deploy da Indicação (que já
+  // foi religada acima em 2026-09-18). Continua envolvida num `if (false)`
+  // até ser pedida de verdade — nenhuma dessas rotas fica registrada no
+  // Express, reversível na hora removendo só este if/}.
+  if (false) {
   // ---------- Comunidade de embaixadores ----------
   // Extensão do programa de afiliados: quem já é afiliado (identificado
   // comparando o email da sessão com affiliates.cakto_email, mesmo truque
@@ -2093,7 +2094,7 @@ function createApp() {
     if (!updated) return res.status(404).json({ error: "Comissão não encontrada." });
     res.json(updated);
   });
-  } // fim do if (false) — Indicação/Comunidade desativadas, ver comentário acima
+  } // fim do if (false) — Comunidade de Embaixadores desativada, ver comentário acima
 
   app.get("/api/admin/users", requireAdmin, async (req, res) => {
     const users = await db.listUsersWithCounts();

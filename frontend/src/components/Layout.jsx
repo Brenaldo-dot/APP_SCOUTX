@@ -456,8 +456,30 @@ export default function Layout() {
               </NavLink>
             )}
 
-            {/* Indicação e Comunidade DESATIVADAS URGENTE (2026-09-17) — ver
-                aviso em App.jsx. */}
+            {me?.isAdmin && (
+              <NavLink to="/admin/indicacoes" title={effectiveCollapsed ? t('nav.adminIndicacoes') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
+                {({ isActive }) => (
+                  <>
+                    <NavIcon Icon={Gift} active={isActive} />
+                    {!effectiveCollapsed && t('nav.adminIndicacoes')}
+                  </>
+                )}
+              </NavLink>
+            )}
+
+            {/* Indicação: qualquer usuário logado pode pedir o cupom, mesma
+                lógica de Suporte/Minha Conta abaixo. Comunidade continua
+                desativada (não pedida ainda). */}
+            {me && (
+              <NavLink to="/indicacao" title={effectiveCollapsed ? t('nav.indicacao') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
+                {({ isActive }) => (
+                  <>
+                    <NavIcon Icon={Gift} active={isActive} />
+                    {!effectiveCollapsed && t('nav.indicacao')}
+                  </>
+                )}
+              </NavLink>
+            )}
 
             {me && (
               <NavLink to="/suporte" title={effectiveCollapsed ? t('nav.suporte') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
