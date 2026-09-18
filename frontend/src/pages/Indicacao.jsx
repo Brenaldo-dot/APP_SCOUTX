@@ -8,12 +8,86 @@ function money(value) {
   return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
 
-export default function Indicacao() {
-  const [data, setData] = useState(null)
-  const [error, setError] = useState(null)
+function RequestCouponModal({ onClose, onSubmit }) {
   const [pixKey, setPixKey] = useState('')
   const [whatsapp, setWhatsapp] = useState('')
   const [requesting, setRequesting] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    setRequesting(true)
+    setError(null)
+    try {
+      await onSubmit(pixKey.trim(), whatsapp.trim())
+    } catch (err) {
+      setError(err.message)
+      setRequesting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-2xl bg-[var(--bg-surface)] p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-white shadow-lg shadow-brand-600/30">
+            <Gift size={18} />
+          </span>
+          <div>
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Solicitar cupom de desconto</h3>
+            <p className="text-xs text-[var(--text-muted)]">Nome e e-mail já são os da sua conta.</p>
+          </div>
+        </div>
+        <form onSubmit={handleSubmit} className="mt-5 space-y-3">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-[var(--text-muted)]">WhatsApp</label>
+            <input
+              required
+              autoFocus
+              value={whatsapp}
+              onChange={(e) => setWhatsapp(e.target.value)}
+              placeholder="(11) 91234-5678"
+              className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-[var(--text-muted)]">Chave PIX</label>
+            <input
+              required
+              value={pixKey}
+              onChange={(e) => setPixKey(e.target.value)}
+              placeholder="CPF, email, telefone ou chave aleatória"
+              className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
+            />
+          </div>
+          {error && <p className="text-xs text-red-400">{error}</p>}
+          <div className="mt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg px-4 py-2 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={requesting}
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+            >
+              <Gift size={14} />
+              {requesting ? 'Solicitando…' : 'Solicitar agora'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+export default function Indicacao() {
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(null)
+  const [showModal, setShowModal] = useState(false)
   const [copied, setCopied] = useState(false)
 
   function load() {
@@ -27,18 +101,10 @@ export default function Indicacao() {
     load()
   }, [])
 
-  async function handleRequest(e) {
-    e.preventDefault()
-    setRequesting(true)
-    setError(null)
-    try {
-      await rawApi.requestReferralCoupon(pixKey.trim() || null, whatsapp.trim())
-      await load()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setRequesting(false)
-    }
+  async function handleRequest(pixKey, whatsapp) {
+    await rawApi.requestReferralCoupon(pixKey || null, whatsapp)
+    await load()
+    setShowModal(false)
   }
 
   function copyCoupon(code) {
@@ -53,7 +119,7 @@ export default function Indicacao() {
   const paidTotal = commissions.filter((c) => c.paid).reduce((s, c) => s + Number(c.commission_value), 0)
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold">Indicação</h2>
         <p className="text-sm text-[var(--text-muted)]">Indique o ScoutX e ganhe comissão em dobro por cada amigo que assinar.</p>
@@ -78,48 +144,25 @@ export default function Indicacao() {
       {error && <EmptyState title="Não deu pra carregar" subtitle={error} />}
 
       {!coupon && data && (
-        <div className="overflow-hidden rounded-2xl border border-brand-500/25 bg-[var(--bg-surface)]">
-          <div className="flex items-center gap-3 border-b border-[var(--border)] bg-brand-500/5 px-6 py-4">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-white shadow-lg shadow-brand-600/30">
-              <Gift size={18} />
-            </span>
-            <div>
-              <h3 className="text-sm font-semibold text-[var(--text-primary)]">Solicitar meu cupom de desconto</h3>
-              <p className="text-xs text-[var(--text-muted)]">Nome e e-mail já são os da sua conta, é só completar abaixo.</p>
-            </div>
+        <div className="flex items-center gap-3 rounded-2xl border border-brand-500/25 bg-[var(--bg-surface)] px-6 py-5">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-white shadow-lg shadow-brand-600/30">
+            <Gift size={18} />
+          </span>
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Ainda não tem seu cupom</h3>
+            <p className="text-xs text-[var(--text-muted)]">Solicite agora e comece a indicar pra quem quiser.</p>
           </div>
-          <form onSubmit={handleRequest} className="flex flex-wrap items-end gap-3 px-6 py-5">
-            <div className="flex flex-1 flex-col gap-1">
-              <label className="text-xs font-medium text-[var(--text-muted)]">WhatsApp</label>
-              <input
-                required
-                value={whatsapp}
-                onChange={(e) => setWhatsapp(e.target.value)}
-                placeholder="(11) 91234-5678"
-                className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
-              />
-            </div>
-            <div className="flex flex-1 flex-col gap-1">
-              <label className="text-xs font-medium text-[var(--text-muted)]">Chave PIX</label>
-              <input
-                required
-                value={pixKey}
-                onChange={(e) => setPixKey(e.target.value)}
-                placeholder="CPF, email, telefone ou chave aleatória"
-                className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={requesting}
-              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
-            >
-              <Gift size={16} />
-              {requesting ? 'Solicitando…' : 'Solicite o seu cupom de desconto'}
-            </button>
-          </form>
+          <button
+            onClick={() => setShowModal(true)}
+            className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700"
+          >
+            <Gift size={16} />
+            Solicitar cupom de desconto
+          </button>
         </div>
       )}
+
+      {showModal && <RequestCouponModal onClose={() => setShowModal(false)} onSubmit={handleRequest} />}
 
       {coupon && coupon.status === 'requested' && (
         <div className="flex items-start gap-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 p-6">
@@ -127,10 +170,10 @@ export default function Indicacao() {
             <Check size={18} />
           </span>
           <div className="flex-1">
-            <h3 className="text-sm font-semibold text-amber-400">Solicitação enviada com sucesso</h3>
+            <h3 className="text-sm font-semibold text-amber-400">Sua solicitação foi enviada com sucesso</h3>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              Assim que seu cupom for aprovado, ele aparece automaticamente aqui nesta tela. Pode aguardar, a gente
-              te avisa.
+              Aguarde, logo mais nossa equipe retorna com uma resposta. Assim que seu cupom for aprovado, ele aparece
+              automaticamente aqui nesta tela.
             </p>
           </div>
         </div>

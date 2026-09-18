@@ -63,7 +63,7 @@ export default function BuscarBarcode() {
   }
 
   return (
-    <div className="max-w-xl space-y-6">
+    <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold">Buscar Fornecedor</h2>
         <p className="text-sm text-[var(--text-muted)]">Cole a URL de um produto concorrente pra achar o fornecedor dele.</p>
