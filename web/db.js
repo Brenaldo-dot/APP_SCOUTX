@@ -1487,7 +1487,10 @@ async function getOrgMemberIds(organizationId) {
 
 async function listOrganizationsWithCounts() {
   const res = await pool.query(`
-    SELECT o.*, COUNT(u.id)::int AS user_count
+    SELECT o.*, COUNT(u.id)::int AS user_count,
+      (SELECT a.name FROM affiliate_commissions c JOIN affiliates a ON a.id = c.affiliate_id
+        WHERE c.customer_email = o.cakto_customer_email
+        ORDER BY c.created_at ASC LIMIT 1) AS credited_affiliate_name
     FROM organizations o
     LEFT JOIN app_users u ON u.organization_id = o.id
     GROUP BY o.id

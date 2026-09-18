@@ -83,6 +83,12 @@ export default function Organizacoes() {
   function renderAffiliatePicker(org) {
     if (affiliates.length === 0) return null
     return (
+      <>
+        {org.creditedAffiliateName && (
+          <p className="mt-1.5 text-xs text-emerald-400">
+            Comissão já creditada a: {org.creditedAffiliateName}
+          </p>
+        )}
       <label className="mt-1.5 flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
         Afiliado responsável:
         <select
@@ -98,6 +104,7 @@ export default function Organizacoes() {
           ))}
         </select>
       </label>
+      </>
     )
   }
 

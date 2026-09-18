@@ -2393,6 +2393,7 @@ function createApp() {
       expired: new Date(o.expires_at) < new Date(),
       isTrial: o.is_trial,
       affiliateId: o.referred_by_affiliate_id ?? null,
+      creditedAffiliateName: o.credited_affiliate_name ?? null,
       notes: o.notes,
       userCount: o.user_count,
       maxUsers: Number.isFinite(limits.maxUsers) ? limits.maxUsers : null,
