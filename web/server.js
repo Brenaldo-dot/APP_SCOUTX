@@ -981,7 +981,7 @@ function createApp() {
     border: 1px solid rgba(16,185,129,0.35); color: #34d399; font-size: 12px; font-weight: 700;
     padding: 6px 12px; border-radius: 999px; margin-bottom: 14px;
   }
-  h1 { font-size: 21px; margin: 0 0 6px; }
+  h1 { font-size: 21px; margin: 0 0 6px; text-align: center; }
   p.subtitle { color: #9ca3af; font-size: 13px; margin: 0 0 20px; line-height: 1.5; }
   .plan-toggle { display: flex; gap: 8px; margin-bottom: 22px; }
   .plan-toggle a {
@@ -1015,9 +1015,9 @@ function createApp() {
     padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; display: ${error ? "block" : "none"};
   }
   .fineprint { color: #6b7280; font-size: 11px; text-align: center; margin-top: 14px; line-height: 1.5; }
-  .trust-note { color: #9ca3af; font-size: 12.5px; text-align: left; margin: 4px 0 20px; line-height: 1.7; }
+  .trust-note { color: #9ca3af; font-size: 12.5px; text-align: center; margin: 4px 0 20px; line-height: 1.7; }
   .trust-note strong {
-    color: #eff6ff; font-weight: 700; background: rgba(59,130,246,0.35);
+    color: #34d399; font-weight: 700; background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.35);
     padding: 1px 6px; border-radius: 4px; box-decoration-break: clone; -webkit-box-decoration-break: clone;
   }
   .powered-by { color: #6b7280; font-size: 11px; margin: 18px 0 0; text-align: center; }
