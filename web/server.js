@@ -991,11 +991,25 @@ function createApp() {
   }
   .fineprint { color: #6b7280; font-size: 11px; text-align: center; margin-top: 14px; line-height: 1.5; }
   .trust-note {
-    color: #a7f3d0; font-size: 12px; text-align: center; margin: 0 0 16px; padding: 8px 12px;
-    background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25); border-radius: 8px;
+    color: #9ca3af; font-size: 12.5px; text-align: left; margin: 0 0 20px; padding: 10px 14px;
+    background: rgba(59,130,246,0.06); border-left: 3px solid #3b82f6; border-radius: 4px; line-height: 1.5;
   }
-  .powered-by { color: #6b7280; font-size: 11px; margin: 10px 0 0; }
+  .trust-note strong { color: #dbeafe; font-weight: 600; }
+  .powered-by { color: #6b7280; font-size: 11px; margin: 18px 0 0; text-align: center; }
   .powered-by strong { color: #9ca3af; }
+  .fieldset-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .fieldset-head legend { margin: 0; }
+  .card-brands { display: flex; align-items: center; gap: 6px; }
+  .brand-badge {
+    display: inline-flex; align-items: center; justify-content: center; height: 20px; padding: 0 6px;
+    border-radius: 3px; background: #f3f4f6;
+  }
+  .brand-visa { color: #1a1f71; font-size: 10px; font-weight: 800; font-style: italic; letter-spacing: 0.3px; }
+  .brand-mc { width: 30px; position: relative; }
+  .mc-dot { position: absolute; top: 2px; width: 15px; height: 15px; border-radius: 50%; }
+  .mc-dot-r { left: 2px; background: #eb001b; }
+  .mc-dot-y { left: 11px; background: #f79e1b; mix-blend-mode: multiply; }
+  .brand-elo { color: #1a1a1a; font-size: 10px; font-weight: 800; font-style: italic; }
   .step { display: none; }
   .step.active { display: block; }
   .back-link { display: inline-block; background: none; border: none; color: #6b7280; font-size: 12px; cursor: pointer; margin-bottom: 14px; padding: 0; }
@@ -1032,14 +1046,14 @@ function createApp() {
       <label for="password">Senha</label>
       <input type="password" id="password" required minlength="8" autocomplete="new-password">
       <label for="phone">WhatsApp (com DDD)</label>
-      <input type="tel" id="phone" required placeholder="11999999999" maxlength="11" value="${esc(v.phone)}">
+      <input type="tel" id="phone" required placeholder="11987654321" maxlength="11" value="${esc(v.phone)}">
     </fieldset>
     <button type="button" id="step1-btn" class="btn-primary">Continuar</button>
   </div>
 
   <div class="step" id="step-2">
     <button type="button" class="back-link" id="back-btn">‹ Voltar</button>
-    <p class="trust-note">🔒 Só cobra depois dos 7 dias. Cancele quando quiser, direto pela plataforma.</p>
+    <p class="trust-note"><strong>Cobrança somente após os 7 dias.</strong> Cancelamento disponível a qualquer momento, diretamente pela plataforma.</p>
     <fieldset>
       <legend>Escolha seu plano</legend>
       <div class="plan-cards" id="plan-cards" data-initial-plan="${planKey === "pro" ? "pro" : "standard"}">
@@ -1065,14 +1079,20 @@ function createApp() {
     </fieldset>
 
     <fieldset>
-      <legend>🔒 Cartão de crédito</legend>
+      <div class="fieldset-head">
+        <legend>🔒 Cartão de crédito</legend>
+        <div class="card-brands" aria-hidden="true">
+          <span class="brand-badge brand-visa">VISA</span>
+          <span class="brand-badge brand-mc"><span class="mc-dot mc-dot-r"></span><span class="mc-dot mc-dot-y"></span></span>
+          <span class="brand-badge brand-elo">elo</span>
+        </div>
+      </div>
       <label for="cardNumber">Número do cartão</label>
       <input type="text" id="cardNumber" inputmode="numeric" maxlength="19" placeholder="•••• •••• •••• ••••">
       <div class="row">
         <div><label for="cardExpiry">Validade (MM/AA)</label><input type="text" id="cardExpiry" maxlength="5" placeholder="MM/AA"></div>
         <div><label for="cardCvv">CVV</label><input type="text" id="cardCvv" inputmode="numeric" maxlength="4" placeholder="•••"></div>
       </div>
-      <p class="powered-by">Pagamento processado com segurança <strong>by Cakto</strong></p>
     </fieldset>
 
     <fieldset>
@@ -1083,6 +1103,7 @@ function createApp() {
 
     <button type="button" id="submit-btn" class="btn-primary">Começar meus 7 dias grátis</button>
     <p class="fineprint" id="fineprint-2">Só é cobrado depois dos 7 dias. Cancele quando quiser antes disso, sem pagar nada.</p>
+    <p class="powered-by">Pagamento processado com segurança <strong>by Cakto</strong></p>
   </div>
 </div>
 <script src="https://cakto-sdk.pages.dev/cakto-sdk.min.js"></script>
