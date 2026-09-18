@@ -61,11 +61,44 @@ export default function Organizacoes() {
   const [expiryModal, setExpiryModal] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
 
+  const [affiliates, setAffiliates] = useState([])
+
   function load() {
     return Promise.all([
       rawApi.listOrganizations().then(setOrgs).catch((e) => setError(e.message)),
       rawApi.listUsers().then(setUsers).catch(() => setUsers([])),
+      rawApi.listAffiliates().then(setAffiliates).catch(() => setAffiliates([])),
     ])
+  }
+
+  async function handleSetAffiliate(orgId, value) {
+    try {
+      await rawApi.setOrganizationAffiliate(orgId, value === '' ? null : Number(value))
+      setOrgs((prev) => prev.map((o) => (o.id === orgId ? { ...o, affiliateId: value === '' ? null : Number(value) } : o)))
+    } catch (err) {
+      setError(err.message || 'Erro ao definir afiliado')
+    }
+  }
+
+  function renderAffiliatePicker(org) {
+    if (affiliates.length === 0) return null
+    return (
+      <label className="mt-1.5 flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+        Afiliado responsável:
+        <select
+          value={org.affiliateId ?? ''}
+          onChange={(e) => handleSetAffiliate(org.id, e.target.value)}
+          className="rounded-md border border-[var(--border)] bg-[var(--bg-surface-2)] px-1.5 py-0.5 text-xs text-[var(--text-primary)] focus:border-brand-500 focus:outline-none"
+        >
+          <option value="">Nenhum</option>
+          {affiliates.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+      </label>
+    )
   }
 
   useEffect(() => {
@@ -235,6 +268,7 @@ export default function Organizacoes() {
                   <div>
                     <p className="text-sm font-medium text-[var(--text-primary)]">{org.name}</p>
                     <p className="text-xs text-[var(--text-muted)]">{org.planLabel}</p>
+                    {renderAffiliatePicker(org)}
                   </div>
                   <div className="text-right text-xs">
                     <p className="text-violet-400">{org.expired ? 'Teste vencido' : `cobra em ${days} dia${days === 1 ? '' : 's'}`}</p>
@@ -305,6 +339,7 @@ export default function Organizacoes() {
                         {org.name}
                       </div>
                       {org.notes && <p className="mt-0.5 text-xs text-[var(--text-muted)]">{org.notes}</p>}
+                      {renderAffiliatePicker(org)}
                     </td>
                     <td className="px-4 py-3.5">
                       <span className="rounded-full bg-brand-500/15 px-2 py-0.5 text-xs font-semibold text-brand-500">

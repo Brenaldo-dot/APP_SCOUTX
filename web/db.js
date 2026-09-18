@@ -281,6 +281,13 @@ async function migrate() {
   // organização certa pra suspender. NULL pras organizações criadas
   // manualmente pelo admin (a maioria hoje).
   await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS cakto_purchase_id TEXT;`);
+  // Atribuição MANUAL de um cliente a um afiliado (cliente que veio "pelo
+  // fulano" mas se cadastrou sem passar pelo link rastreado da Cakto, ex.:
+  // teste grátis criado por /free-trial). Quando a Cakto não reporta
+  // afiliado no pedido, cakto.js cai nesse campo pra creditar a comissão.
+  await pool.query(
+    `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS referred_by_affiliate_id INTEGER REFERENCES affiliates(id) ON DELETE SET NULL;`
+  );
   await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS cakto_customer_email TEXT;`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_organizations_cakto_purchase ON organizations(cakto_purchase_id) WHERE cakto_purchase_id IS NOT NULL;`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_organizations_cakto_email ON organizations(cakto_customer_email) WHERE cakto_customer_email IS NOT NULL;`);
@@ -824,6 +831,30 @@ async function createAffiliateCommission({
     [affiliateId, caktoOrderId, customerEmail, customerName || null, saleAmount, commissionType, commissionPercentage, commissionValue]
   );
   return res.rows[0] || null;
+}
+
+async function setOrganizationAffiliate(orgId, affiliateId) {
+  const res = await pool.query(
+    "UPDATE organizations SET referred_by_affiliate_id = $2 WHERE id = $1 RETURNING *",
+    [orgId, affiliateId]
+  );
+  return res.rows[0] || null;
+}
+
+async function getAffiliateById(id) {
+  const res = await pool.query("SELECT * FROM affiliates WHERE id = $1", [id]);
+  return res.rows[0] || null;
+}
+
+// Quantas comissões desse afiliado já existem pra esse cliente — usado pra
+// decidir se a cobrança que acabou de chegar é a "primeira venda" (0) ou uma
+// renovação (>0) na atribuição manual.
+async function countAffiliateCommissionsForCustomer(affiliateId, customerEmail) {
+  const res = await pool.query(
+    "SELECT COUNT(*)::int AS n FROM affiliate_commissions WHERE affiliate_id = $1 AND customer_email = $2",
+    [affiliateId, customerEmail]
+  );
+  return res.rows[0].n;
 }
 
 // Corrige o valor de uma comissão que ainda NÃO foi paga (nunca mexe numa já
@@ -1582,6 +1613,9 @@ module.exports = {
   createAffiliateCommission,
   listPaidCaktoOrganizations,
   correctUnpaidAffiliateCommission,
+  setOrganizationAffiliate,
+  getAffiliateById,
+  countAffiliateCommissionsForCustomer,
   listAffiliateCommissions,
   markAffiliateCommissionPaid,
   voidAffiliateCommission,

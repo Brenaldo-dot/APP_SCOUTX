@@ -2392,6 +2392,7 @@ function createApp() {
       expiresAt: o.expires_at,
       expired: new Date(o.expires_at) < new Date(),
       isTrial: o.is_trial,
+      affiliateId: o.referred_by_affiliate_id ?? null,
       notes: o.notes,
       userCount: o.user_count,
       maxUsers: Number.isFinite(limits.maxUsers) ? limits.maxUsers : null,
@@ -2434,6 +2435,32 @@ function createApp() {
     const org = await db.createOrganization({ name: name.trim(), plan, billingCycle, notes });
     await db.logAdminAction(req.appUser.id, req.appUser.name, null, org.name, "org_created", `Plano ${db.planLimitsFor(plan).label} · ${billingCycle}`);
     res.status(201).json(serializeOrg({ ...org, user_count: 0 }));
+  });
+
+  // Atribui (ou remove) o afiliado responsável por um cliente — ver
+  // cakto.js:recordManualAffiliateCommissionIfAny.
+  app.patch("/api/admin/organizations/:id/affiliate", requireAdmin, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: "id inválido" });
+    const org = await db.getOrganizationById(id);
+    if (!org) return res.status(404).json({ error: "Organização não encontrada." });
+    const raw = req.body?.affiliateId;
+    const affiliateId = raw === null || raw === "" || raw === undefined ? null : Number(raw);
+    let affiliate = null;
+    if (affiliateId !== null) {
+      affiliate = Number.isInteger(affiliateId) ? await db.getAffiliateById(affiliateId) : null;
+      if (!affiliate) return res.status(404).json({ error: "Afiliado não encontrado." });
+    }
+    await db.setOrganizationAffiliate(id, affiliate ? affiliate.id : null);
+    await db.logAdminAction(
+      req.appUser.id,
+      req.appUser.name,
+      null,
+      org.name,
+      "org_updated",
+      affiliate ? `Afiliado responsável definido: ${affiliate.name}` : "Afiliado responsável removido"
+    );
+    res.json({ ok: true, affiliateId: affiliate ? affiliate.id : null });
   });
 
   app.patch("/api/admin/organizations/:id", requireAdmin, async (req, res) => {

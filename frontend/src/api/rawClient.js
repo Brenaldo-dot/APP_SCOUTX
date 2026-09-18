@@ -144,6 +144,12 @@ export const rawApi = {
 
   listOrganizations: () => request('/api/admin/organizations'),
   listAssinarLeads: () => request('/api/admin/assinar-leads'),
+  setOrganizationAffiliate: (id, affiliateId) =>
+    request(`/api/admin/organizations/${id}/affiliate`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ affiliateId }),
+    }),
   createOrganization: (data) => request('/api/admin/organizations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   updateOrganization: (id, data) => request(`/api/admin/organizations/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   deleteOrganization: (id) => request(`/api/admin/organizations/${id}`, { method: 'DELETE' }),

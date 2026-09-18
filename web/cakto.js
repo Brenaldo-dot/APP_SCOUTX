@@ -140,6 +140,48 @@ function affiliateCommissionFromOrder(order, fallbackPercentage) {
   return { saleAmount, commissionValue, percentage: fallbackPercentage };
 }
 
+// Fallback pra cliente que o admin atribuiu MANUALMENTE a um afiliado (campo
+// "Afiliado responsável" em Organizações) — caso típico: veio "pelo Fulano" e
+// fez o teste grátis por /free-trial, sem passar pelo link rastreado da Cakto,
+// então o pedido dele chega sem afiliado nenhum. A Cakto não vai repassar
+// nada pro afiliado nesse caso, então aqui não existe "valor real da Cakto":
+// vale a nossa % em cima do valor pago, e o pagamento ao afiliado é por fora
+// (PIX). 1ª cobrança paga = primeira venda; as seguintes = renovação.
+async function recordManualAffiliateCommissionIfAny(data, order) {
+  const email = String(data.customer?.email || "").trim().toLowerCase();
+  const org =
+    (data.id ? await db.findOrganizationByCaktoPurchaseId(data.id) : null) ||
+    (email ? await db.findOrganizationByCaktoEmail(email) : null);
+  if (!org?.referred_by_affiliate_id) return;
+  const affiliate = await db.getAffiliateById(org.referred_by_affiliate_id);
+  if (!affiliate) return;
+
+  const saleAmount = Number(order?.amount ?? data.amount ?? 0);
+  if (order?.status && order.status !== "paid") return;
+  if (!(saleAmount > 0)) return; // início de teste grátis (R$ 0) não gera comissão
+
+  const customerEmail = email || String(org.cakto_customer_email || "").trim().toLowerCase();
+  const prior = await db.countAffiliateCommissionsForCustomer(affiliate.id, customerEmail);
+  const commissionType = prior === 0 ? "first_sale" : "recurring";
+  const percentage = commissionType === "first_sale" ? affiliate.first_sale_percentage : affiliate.recurring_percentage;
+  const commissionValue = Math.round(saleAmount * (Number(percentage) / 100) * 100) / 100;
+  const inserted = await db.createAffiliateCommission({
+    affiliateId: affiliate.id,
+    caktoOrderId: data.id,
+    customerEmail,
+    customerName: data.customer?.name || org.name,
+    saleAmount,
+    commissionType,
+    commissionPercentage: percentage,
+    commissionValue,
+  });
+  if (inserted) {
+    console.log(
+      `Webhook Cakto: comissão MANUAL de ${commissionValue} registrada pra ${affiliate.name} (${commissionType}, cliente ${customerEmail}, pedido ${data.id}).`
+    );
+  }
+}
+
 async function recordAffiliateCommissionIfAny(data, commissionType, resolved) {
   try {
     const { affiliate, order, emailSeenButUnregistered } = resolved || (await resolveAffiliateForOrder(data));
@@ -148,7 +190,9 @@ async function recordAffiliateCommissionIfAny(data, commissionType, resolved) {
         console.warn(
           `Webhook Cakto: pedido ${data.id} tem afiliado (${emailSeenButUnregistered}) que não está cadastrado no nosso painel — comissão NÃO registrada, cadastre esse afiliado.`
         );
+        return;
       }
+      await recordManualAffiliateCommissionIfAny(data, order);
       return;
     }
     const percentage =
