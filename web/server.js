@@ -798,7 +798,15 @@ function createApp() {
         ...(isAssinarPage ? ["worker-src 'self' blob:"] : []),
         "frame-ancestors 'self'",
         "base-uri 'self'",
-        "form-action 'self'",
+        // form-action: achado ao vivo (2026-09-18, teste real travado num
+        // modal 3DS em branco) via console — o Cardinal Commerce/Cielo por
+        // trás do 3DS da Cakto usa <form> escondido pra mandar o
+        // fingerprint do dispositivo (geo.cardinalcommerce.com) e o
+        // desafio do banco (acs-challenge.apeta.io, mas o domínio real do
+        // ACS varia por banco emissor) via POST cross-origin — "form-action
+        // 'self'" bloqueava os dois silenciosamente, sem erro visível na
+        // tela, só no console. Mesmo racional de sempre: só nessa página.
+        `form-action 'self'${isAssinarPage ? " https:" : ""}`,
       ].join("; ")
     );
     next();
