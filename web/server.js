@@ -990,6 +990,12 @@ function createApp() {
     padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; display: ${error ? "block" : "none"};
   }
   .fineprint { color: #6b7280; font-size: 11px; text-align: center; margin-top: 14px; line-height: 1.5; }
+  .trust-note {
+    color: #a7f3d0; font-size: 12px; text-align: center; margin: 0 0 16px; padding: 8px 12px;
+    background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25); border-radius: 8px;
+  }
+  .powered-by { color: #6b7280; font-size: 11px; margin: 10px 0 0; }
+  .powered-by strong { color: #9ca3af; }
   .step { display: none; }
   .step.active { display: block; }
   .back-link { display: inline-block; background: none; border: none; color: #6b7280; font-size: 12px; cursor: pointer; margin-bottom: 14px; padding: 0; }
@@ -1033,6 +1039,7 @@ function createApp() {
 
   <div class="step" id="step-2">
     <button type="button" class="back-link" id="back-btn">‹ Voltar</button>
+    <p class="trust-note">🔒 Só cobra depois dos 7 dias. Cancele quando quiser, direto pela plataforma.</p>
     <fieldset>
       <legend>Escolha seu plano</legend>
       <div class="plan-cards" id="plan-cards" data-initial-plan="${planKey === "pro" ? "pro" : "standard"}">
@@ -1058,13 +1065,14 @@ function createApp() {
     </fieldset>
 
     <fieldset>
-      <legend>Cartão de crédito</legend>
+      <legend>🔒 Cartão de crédito</legend>
       <label for="cardNumber">Número do cartão</label>
-      <input type="text" id="cardNumber" inputmode="numeric" maxlength="19" placeholder="0000 0000 0000 0000">
+      <input type="text" id="cardNumber" inputmode="numeric" maxlength="19" placeholder="•••• •••• •••• ••••">
       <div class="row">
         <div><label for="cardExpiry">Validade (MM/AA)</label><input type="text" id="cardExpiry" maxlength="5" placeholder="MM/AA"></div>
-        <div><label for="cardCvv">CVV</label><input type="text" id="cardCvv" inputmode="numeric" maxlength="4"></div>
+        <div><label for="cardCvv">CVV</label><input type="text" id="cardCvv" inputmode="numeric" maxlength="4" placeholder="•••"></div>
       </div>
+      <p class="powered-by">Pagamento processado com segurança <strong>by Cakto</strong></p>
     </fieldset>
 
     <fieldset>
