@@ -40,7 +40,7 @@ async function getBearerToken() {
 // clique/retry do mesmo formulário não cria duas cobranças pro mesmo email
 // na mesma oferta (a Cakto devolve a MESMA resposta de antes por até 24h
 // pra chave repetida, em vez de cobrar duas vezes).
-async function createTrialPayment({ offerId, customer, address, cardToken, threeDSecure, antifraudReference, idempotencyKey }) {
+async function createTrialPayment({ offerId, customer, cardToken, antifraudReference, idempotencyKey }) {
   const token = await getBearerToken();
   const resp = await fetch(`${CAKTO_API_BASE}/public_api/payments/`, {
     method: "POST",
@@ -50,12 +50,15 @@ async function createTrialPayment({ offerId, customer, address, cardToken, three
       "X-Idempotency-Key": idempotencyKey,
     },
     body: JSON.stringify({
-      paymentMethod: "threeDs",
+      // "credit_card" em vez de "threeDs" de propósito (2026-09-18, decisão
+      // do dono do produto ciente do risco): sem o desafio 3DS o banco não
+      // autentica o portador do cartão, então a responsabilidade por
+      // fraude/chargeback passa a ser DESSA conta Cakto, não do emissor.
+      // Trade-off aceito pra tirar a etapa que assustava quem assinava.
+      paymentMethod: "credit_card",
       customer,
-      address,
       items: [{ offerId }],
       card: { token: cardToken },
-      threeDSecure,
       antifraud_profiling_attempt_reference: antifraudReference,
     }),
   });

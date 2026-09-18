@@ -496,18 +496,15 @@ if (form) {
 }
 `;
 
-// Orquestra o fluxo completo de cartão (tokenização + 3DS + antifraude,
-// tudo no navegador) seguindo à risca docs.cakto.com.br/sdk/3ds.md — o
-// PRÓPRIO backend não toca em número de cartão nenhum, só recebe o que o
-// SDK devolve aqui (cardToken, dados do 3DS, referência antifraude) e
-// repassa pra Cakto por fora do browser (ver caktoPayments.js).
-const ASSINAR_PRICE_CENTS = { standard: 12700, pro: 18700 };
-
+// Orquestra o fluxo de cartão (tokenização + antifraude, tudo no navegador)
+// seguindo docs.cakto.com.br/sdk — SEM 3DS de propósito (ver nota em
+// caktoPayments.js). O PRÓPRIO backend não toca em número de cartão nenhum,
+// só recebe o que o SDK devolve aqui (cardToken, referência antifraude) e
+// repassa pra Cakto por fora do browser.
 const ASSINAR_PAGE_SCRIPT = `
 var caktoSdk = new Cakto.CaktoSDK({ client_id: document.body.dataset.caktoClientId });
 caktoSdk.initAntifraud().catch(function (err) { console.error("Antifraude Cakto:", err); });
 
-var PRICE_CENTS = ${JSON.stringify(ASSINAR_PRICE_CENTS)};
 var step1 = document.getElementById("step-1");
 var step2 = document.getElementById("step-2");
 var errorBox = document.getElementById("form-error");
@@ -554,30 +551,6 @@ cardExpiryEl.addEventListener("input", function () {
 var cardCvvEl = document.getElementById("cardCvv");
 cardCvvEl.addEventListener("input", function () {
   cardCvvEl.value = cardCvvEl.value.replace(/\\D/g, "").slice(0, 3);
-});
-
-// CEP com máscara "00000-000" + autopreenchimento via ViaCEP (gratuito, sem
-// chave, mantido pela empresa que administra os Correios) — poupa a pessoa
-// de digitar rua/bairro/cidade/UF na mão, só número e complemento sobram.
-var zipcodeEl = document.getElementById("zipcode");
-zipcodeEl.addEventListener("input", function () {
-  var digits = zipcodeEl.value.replace(/\\D/g, "").slice(0, 8);
-  zipcodeEl.value = digits.length > 5 ? digits.slice(0, 5) + "-" + digits.slice(5) : digits;
-});
-zipcodeEl.addEventListener("blur", function () {
-  var digits = zipcodeEl.value.replace(/\\D/g, "");
-  if (digits.length !== 8) return;
-  fetch("https://viacep.com.br/ws/" + digits + "/json/")
-    .then(function (r) { return r.json(); })
-    .then(function (data) {
-      if (data.erro) return;
-      document.getElementById("street").value = data.logradouro || "";
-      document.getElementById("neighborhood").value = data.bairro || "";
-      document.getElementById("city").value = data.localidade || "";
-      document.getElementById("state").value = (data.uf || "").toUpperCase();
-      document.getElementById("number").focus();
-    })
-    .catch(function () {}); // autopreenchimento é conveniência, falha é silenciosa — a pessoa ainda pode digitar tudo na mão
 });
 
 // ---------- Seleção de plano (passo 2) ----------
@@ -648,23 +621,9 @@ submitBtn.addEventListener("click", function () {
   var cardExpiry = document.getElementById("cardExpiry").value.trim();
   var expMatch = cardExpiry.match(/^(\\d{2})\\/(\\d{2})$/);
 
-  var address = {
-    country: "BR",
-    zipcode: document.getElementById("zipcode").value.replace(/\\D/g, ""),
-    street: document.getElementById("street").value.trim(),
-    number: document.getElementById("number").value.trim(),
-    complement: document.getElementById("complement").value.trim(),
-    neighborhood: document.getElementById("neighborhood").value.trim(),
-    city: document.getElementById("city").value.trim(),
-    state: document.getElementById("state").value.trim().toUpperCase(),
-  };
-
   if (!docNumber) return showError("Preencha seu CPF ou CNPJ.");
   if (!luhnValid(cardNumber)) return showError("Número do cartão inválido, confira os dígitos.");
   if (!expMatch) return showError("Validade do cartão inválida, use o formato MM/AA.");
-  if (!address.zipcode || !address.street || !address.number || !address.city || !address.state) {
-    return showError("Preencha seu endereço de cobrança completo.");
-  }
 
   submitBtn.disabled = true;
   submitBtn.textContent = "Processando…";
@@ -677,28 +636,15 @@ submitBtn.addEventListener("click", function () {
     expYear: expMatch[2],
   };
 
+  // Sem 3DS de propósito (2026-09-18, decisão do dono do produto): tirou a
+  // etapa "autorize no app do banco" que assustava quem tava assinando o
+  // teste grátis, mas em troca a responsabilidade por fraude/chargeback
+  // passa a ser NOSSA em vez do banco emissor — ver caktoPayments.js.
   caktoSdk.createToken(card)
     .then(function (result) {
-      return caktoSdk.authenticate3DS({
-        card: card,
-        customer: {
-          amount: PRICE_CENTS[selectedPlan],
-          currency: "BRL",
-          email: leadData.email,
-          name: leadData.name,
-          phone: "55" + leadData.phone,
-          paymentMethod: "credit",
-          address: address,
-        },
-      }).then(function (authResult) { return { cardToken: result.cardToken, authResult: authResult }; });
+      return caktoSdk.completeAntifraudProfile().then(function () { return result; });
     })
-    .then(function (r) {
-      if (!r.authResult.success) {
-        throw new Error(r.authResult.error || "Não foi possível autenticar o cartão com o banco.");
-      }
-      return caktoSdk.completeAntifraudProfile().then(function () { return r; });
-    })
-    .then(function (r) {
+    .then(function (result) {
       return fetch("/api/assinar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -706,15 +652,7 @@ submitBtn.addEventListener("click", function () {
           email: leadData.email,
           planKey: selectedPlan,
           docNumber: docNumber,
-          address: address,
-          cardToken: r.cardToken,
-          threeDSecure: {
-            cavv: r.authResult.cavv,
-            eci: r.authResult.eci,
-            xid: r.authResult.xid,
-            referenceId: r.authResult.referenceId,
-            version: r.authResult.version,
-          },
+          cardToken: result.cardToken,
           antifraudReference: caktoSdk.getAntifraudReference(),
         }),
       });
@@ -1198,22 +1136,6 @@ function createApp() {
       <legend>Seus dados</legend>
       <label for="docNumber">CPF ou CNPJ</label>
       <input type="text" id="docNumber" placeholder="somente números" maxlength="14" value="${esc(v.docNumber)}">
-
-      <label for="zipcode">CEP</label>
-      <input type="text" id="zipcode" inputmode="numeric" maxlength="9" placeholder="00000-000">
-
-      <div class="row">
-        <div><label for="street">Rua</label><input type="text" id="street" maxlength="255"></div>
-        <div style="flex: 0 0 90px;"><label for="number">Número</label><input type="text" id="number" maxlength="20"></div>
-      </div>
-      <div class="row">
-        <div><label for="neighborhood">Bairro</label><input type="text" id="neighborhood" maxlength="255"></div>
-        <div><label for="complement">Complemento</label><input type="text" id="complement" maxlength="255" placeholder="opcional"></div>
-      </div>
-      <div class="row">
-        <div><label for="city">Cidade</label><input type="text" id="city" maxlength="255"></div>
-        <div style="flex: 0 0 90px;"><label for="state">Estado</label><input type="text" id="state" maxlength="2" placeholder="SP" style="text-transform:uppercase"></div>
-      </div>
     </fieldset>
 
     <button type="button" id="submit-btn" class="btn-primary">Começar meus 7 dias grátis</button>
@@ -1281,29 +1203,16 @@ function createApp() {
   // Passo 2 — plano, CPF e cartão. Busca nome/senha/telefone do lead salvo
   // no passo 1 (não pede de novo) — só funciona se o passo 1 já rodou.
   app.post("/api/assinar", async (req, res) => {
-    const { email, planKey, docNumber, address, cardToken, threeDSecure, antifraudReference } = req.body || {};
+    const { email, planKey, docNumber, cardToken, antifraudReference } = req.body || {};
 
     const offer = ASSINAR_OFFERS[planKey === "pro" ? "pro" : "standard"];
     const cleanEmail = String(email || "").trim().toLowerCase();
     const cleanDoc = String(docNumber || "").replace(/\D/g, "");
-    const cleanAddress = {
-      country: "BR",
-      zipcode: String(address?.zipcode || "").replace(/\D/g, ""),
-      street: String(address?.street || "").trim(),
-      number: String(address?.number || "").trim(),
-      complement: String(address?.complement || "").trim() || undefined,
-      neighborhood: String(address?.neighborhood || "").trim() || undefined,
-      city: String(address?.city || "").trim(),
-      state: String(address?.state || "").trim().toUpperCase(),
-    };
 
     if (!cleanEmail || !cleanDoc) {
       return res.status(400).json({ error: "Preencha todos os campos obrigatórios." });
     }
-    if (!cleanAddress.zipcode || !cleanAddress.street || !cleanAddress.number || !cleanAddress.city || !cleanAddress.state) {
-      return res.status(400).json({ error: "Preencha seu endereço de cobrança completo." });
-    }
-    if (!cardToken || !threeDSecure || !antifraudReference) {
+    if (!cardToken || !antifraudReference) {
       return res.status(400).json({ error: "Não foi possível validar o cartão, revise os dados e tente de novo." });
     }
 
@@ -1330,9 +1239,7 @@ function createApp() {
           docType: cleanDoc.length > 11 ? "cnpj" : "cpf",
           docNumber: cleanDoc,
         },
-        address: cleanAddress,
         cardToken,
-        threeDSecure,
         antifraudReference,
         idempotencyKey: `assinar-${cleanEmail}-${offer.offerId}`,
       });
