@@ -547,10 +547,12 @@ var initialPlan = document.getElementById("plan-cards").dataset.initialPlan || "
 var preselect = document.querySelector(".plan-card[data-plan=\\"" + initialPlan + "\\"]") || planCards[0];
 if (preselect) { selectedPlan = preselect.dataset.plan; preselect.classList.add("selected"); }
 
-document.getElementById("back-btn").addEventListener("click", function () {
+var backBtn = document.getElementById("back-btn");
+backBtn.addEventListener("click", function () {
   clearError();
   step2.classList.remove("active");
   step1.classList.add("active");
+  backBtn.classList.remove("visible");
 });
 
 // ---------- Passo 1: cria o lead (sem cartão nenhum ainda) ----------
@@ -579,6 +581,7 @@ step1Btn.addEventListener("click", function () {
       leadData = { name: name, email: email, phone: phone };
       step1.classList.remove("active");
       step2.classList.add("active");
+      backBtn.classList.add("visible");
     })
     .catch(function (err) {
       showError(err.message || "Algo deu errado, tente novamente.");
@@ -990,8 +993,8 @@ function createApp() {
     padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; display: ${error ? "block" : "none"};
   }
   .fineprint { color: #6b7280; font-size: 11px; text-align: center; margin-top: 14px; line-height: 1.5; }
-  .trust-note { color: #6b7280; font-size: 12px; text-align: center; margin: 0 0 18px; line-height: 1.5; }
-  .trust-note strong { color: #9ca3af; font-weight: 600; }
+  .trust-note { color: #93c5fd; font-size: 13px; font-weight: 600; text-align: center; margin: 4px 0 20px; line-height: 1.5; }
+  .trust-note strong { color: #60a5fa; font-weight: 700; }
   .powered-by { color: #6b7280; font-size: 11px; margin: 18px 0 0; text-align: center; }
   .powered-by strong { color: #9ca3af; }
   .card-number-wrap, .cvv-wrap { position: relative; display: flex; align-items: center; }
@@ -1013,7 +1016,8 @@ function createApp() {
   .cvv-icon { right: 8px; }
   .step { display: none; }
   .step.active { display: block; }
-  .back-link { display: inline-block; background: none; border: none; color: #6b7280; font-size: 12px; cursor: pointer; margin-bottom: 14px; padding: 0; }
+  .back-link { display: none; background: none; border: none; color: #6b7280; font-size: 12px; cursor: pointer; margin-bottom: 10px; padding: 0; }
+  .back-link.visible { display: inline-block; }
   .back-link:hover { color: #9ca3af; }
   .plan-cards { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
   .plan-card {
@@ -1033,7 +1037,8 @@ function createApp() {
 <div class="card">
   <div class="brand"><img src="${SCOUTX_LOGO_DATA_URI}" alt="ScoutX"><span>ScoutX</span></div>
   <div class="trial-badge">🎁 7 dias grátis</div>
-  <h1>Comece seu teste grátis</h1>
+  <button type="button" class="back-link" id="back-btn">‹ Voltar</button>
+  <h1>Comece seu teste grátis 🎁</h1>
 
   <div class="error" id="form-error">${esc(error)}</div>
 
@@ -1053,7 +1058,6 @@ function createApp() {
   </div>
 
   <div class="step" id="step-2">
-    <button type="button" class="back-link" id="back-btn">‹ Voltar</button>
     <p class="trust-note"><strong>Cobrança somente após os 7 dias.</strong> Cancelamento disponível a qualquer momento, diretamente pela plataforma.</p>
     <fieldset>
       <legend>Escolha seu plano</legend>
