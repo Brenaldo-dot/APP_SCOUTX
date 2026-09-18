@@ -703,7 +703,7 @@ function createApp() {
     res.setHeader("X-Frame-Options", "SAMEORIGIN");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-    // /assinar precisa de um CSP mais frouxo SÓ nessa rota: o SDK oficial da
+    // /free-trial precisa de um CSP mais frouxo SÓ nessa rota: o SDK oficial da
     // Cakto (tokenização de cartão + antifraude + 3DS, ver
     // docs.cakto.com.br/sdk/visao-geral) injeta um <script> INLINE por
     // conta própria (fora do nosso controle) E o módulo de antifraude carrega
@@ -716,7 +716,7 @@ function createApp() {
     // fica contido ao formulário de cadastro, que não mostra dado de outro
     // usuário nem processa HTML de terceiro (diferente da prévia de
     // produto, por exemplo, onde isso seria bem mais perigoso).
-    const isAssinarPage = req.path === "/assinar" || req.path === "/assinar.js";
+    const isAssinarPage = req.path === "/free-trial" || req.path === "/free-trial.js";
     res.setHeader(
       "Content-Security-Policy",
       [
@@ -1078,16 +1078,16 @@ function createApp() {
   </div>
 </div>
 <script src="https://cakto-sdk.pages.dev/cakto-sdk.min.js"></script>
-<script src="/assinar.js"></script>
+<script src="/free-trial.js"></script>
 </body></html>`;
   }
 
-  app.get("/assinar", (req, res) => {
+  app.get("/free-trial", (req, res) => {
     const planKey = req.query.plano === "pro" ? "pro" : "standard";
     res.send(assinarPage({ planKey }));
   });
 
-  app.get("/assinar.js", (req, res) => {
+  app.get("/free-trial.js", (req, res) => {
     res.type("application/javascript").send(ASSINAR_PAGE_SCRIPT);
   });
 
@@ -2242,7 +2242,7 @@ function createApp() {
     res.json(rows.map(serializeOrg));
   });
 
-  // Passo 1 de /assinar sem passo 2 — pra suporte entrar em contato com
+  // Passo 1 de /free-trial sem passo 2 — pra suporte entrar em contato com
   // quem começou mas não terminou (ver db.js:listAbandonedAssinarLeads).
   app.get("/api/admin/assinar-leads", requireAdmin, async (req, res) => {
     const rows = await db.listAbandonedAssinarLeads();
