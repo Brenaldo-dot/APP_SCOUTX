@@ -59,6 +59,7 @@ export const rawApi = {
   createAffiliate: (data) =>
     request('/api/admin/affiliates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   deleteAffiliate: (id) => request(`/api/admin/affiliates/${id}`, { method: 'DELETE' }),
+  backfillAffiliate: (id) => request(`/api/admin/affiliates/${id}/backfill`, { method: 'POST' }),
   listAffiliateCommissions: () => request('/api/admin/affiliate-commissions'),
   markAffiliateCommissionPaid: (id, paid) =>
     request(`/api/admin/affiliate-commissions/${id}`, {

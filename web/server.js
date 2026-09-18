@@ -6,7 +6,7 @@ const cheerio = require("cheerio");
 const { analyzeStore, UnsupportedStoreError } = require("./shopify-spy");
 const { sign, verify, parseCookies, serializeCookie } = require("./auth");
 const { createPinnedFetch } = require("./safe-fetch");
-const { handleCaktoWebhook, CAKTO_OFFER_PLAN_MAP } = require("./cakto");
+const { handleCaktoWebhook, CAKTO_OFFER_PLAN_MAP, backfillAffiliateCommissions } = require("./cakto");
 const { createTrialPayment, getOrder, cancelSubscription } = require("./caktoPayments");
 const caktoApi = require("./caktoApi");
 const db = require("./db");
@@ -1721,6 +1721,17 @@ function createApp() {
   app.delete("/api/admin/affiliates/:id", requireAdmin, async (req, res) => {
     await db.deleteAffiliate(Number(req.params.id));
     res.status(204).end();
+  });
+
+  app.post("/api/admin/affiliates/:id/backfill", requireAdmin, async (req, res) => {
+    const affiliate = (await db.listAffiliates()).find((a) => a.id === Number(req.params.id));
+    if (!affiliate) return res.status(404).json({ error: "Afiliado não encontrado." });
+    try {
+      res.json(await backfillAffiliateCommissions(affiliate));
+    } catch (err) {
+      console.error("Backfill de afiliado falhou:", err.message);
+      res.status(502).json({ error: "Não foi possível consultar a Cakto agora. Tente de novo em instantes." });
+    }
   });
 
   app.get("/api/admin/affiliate-commissions", requireAdmin, async (req, res) => {

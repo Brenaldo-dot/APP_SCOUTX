@@ -37,6 +37,7 @@ export default function Afiliados() {
   const [formMsg, setFormMsg] = useState(null)
   const [showForm, setShowForm] = useState(false)
   const [expandedId, setExpandedId] = useState(null)
+  const [backfill, setBackfill] = useState({ id: null, loading: false, text: null })
 
   function load() {
     return Promise.all([
@@ -76,6 +77,24 @@ export default function Afiliados() {
   async function togglePaid(commission) {
     await rawApi.markAffiliateCommissionPaid(commission.id, !commission.paid)
     load()
+  }
+
+  async function handleBackfill(id) {
+    setBackfill({ id, loading: true, text: null })
+    try {
+      const { checked, created } = await rawApi.backfillAffiliate(id)
+      setBackfill({
+        id,
+        loading: false,
+        text:
+          created > 0
+            ? `${created} venda(s) antiga(s) encontrada(s) e adicionada(s) (${checked} pedidos conferidos).`
+            : `Nenhuma venda antiga nova encontrada (${checked} pedidos conferidos).`,
+      })
+      load()
+    } catch (err) {
+      setBackfill({ id, loading: false, text: err.message || 'Erro' })
+    }
   }
 
   return (
@@ -227,6 +246,18 @@ export default function Afiliados() {
                     {Number(a.first_sale_percentage)}% na primeira venda · {Number(a.recurring_percentage)}% nas
                     renovações{a.pix_key ? ` · PIX: ${a.pix_key}` : ''}
                   </p>
+                  <div className="mb-3 flex flex-wrap items-center gap-3">
+                    <button
+                      onClick={() => handleBackfill(a.id)}
+                      disabled={backfill.loading && backfill.id === a.id}
+                      className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--hover-surface)] disabled:opacity-60"
+                    >
+                      {backfill.loading && backfill.id === a.id ? 'Buscando…' : 'Buscar vendas antigas'}
+                    </button>
+                    {backfill.id === a.id && backfill.text && (
+                      <span className="text-xs text-[var(--text-muted)]">{backfill.text}</span>
+                    )}
+                  </div>
                   {a.commissions.length === 0 ? (
                     <p className="text-sm text-[var(--text-muted)]">Nenhuma venda dela ainda.</p>
                   ) : (

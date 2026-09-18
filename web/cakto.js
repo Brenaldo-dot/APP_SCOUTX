@@ -159,6 +159,44 @@ async function recordAffiliateCommissionIfAny(data, commissionType, resolved) {
   }
 }
 
+// Recupera vendas antigas de um afiliado cadastrado DEPOIS da venda (o
+// webhook na hora só avisa "afiliado não cadastrado" e não registra nada).
+// Percorre as organizações criadas por compra paga, pergunta pra Cakto quem
+// era o afiliado de cada pedido e, se bater com esse afiliado, registra a
+// comissão de primeira venda. Idempotente (cakto_order_id é UNIQUE, ver
+// db.createAffiliateCommission) — rodar de novo não duplica nada. Só cobre a
+// PRIMEIRA venda de cada organização; renovações antigas não são refeitas.
+async function backfillAffiliateCommissions(affiliate) {
+  const orgs = await db.listPaidCaktoOrganizations();
+  let checked = 0;
+  let created = 0;
+  for (const org of orgs) {
+    checked += 1;
+    try {
+      const { affiliate: found, order } = await resolveAffiliateForOrder({ id: org.cakto_purchase_id });
+      if (!found || found.id !== affiliate.id) continue;
+      if (order.status && order.status !== "paid") continue;
+      const percentage = affiliate.first_sale_percentage;
+      const saleAmount = Number(order.amount ?? 0);
+      const commissionValue = Math.round(saleAmount * (Number(percentage) / 100) * 100) / 100;
+      const inserted = await db.createAffiliateCommission({
+        affiliateId: affiliate.id,
+        caktoOrderId: org.cakto_purchase_id,
+        customerEmail: String(order.customer?.email || org.cakto_customer_email || "").trim().toLowerCase(),
+        customerName: order.customer?.name || org.name,
+        saleAmount,
+        commissionType: "first_sale",
+        commissionPercentage: percentage,
+        commissionValue,
+      });
+      if (inserted) created += 1;
+    } catch (err) {
+      console.error(`Backfill afiliado ${affiliate.name}: falha no pedido ${org.cakto_purchase_id}:`, err.message);
+    }
+  }
+  return { checked, created };
+}
+
 // Indicação (cliente indica cliente, 2026-09-10) — diferente do programa de
 // afiliados acima: aqui quem indica é identificado pelo `couponCode` que
 // veio no próprio payload do webhook (confirmado na doc oficial da Cakto,
@@ -595,4 +633,4 @@ async function handleCaktoWebhook(body) {
   }
 }
 
-module.exports = { handleCaktoWebhook, CAKTO_OFFER_PLAN_MAP, CANCELLATION_EVENTS };
+module.exports = { handleCaktoWebhook, CAKTO_OFFER_PLAN_MAP, CANCELLATION_EVENTS, backfillAffiliateCommissions };

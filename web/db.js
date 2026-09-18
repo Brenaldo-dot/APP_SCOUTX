@@ -826,6 +826,19 @@ async function createAffiliateCommission({
   return res.rows[0] || null;
 }
 
+// Organizações criadas por uma compra real na Cakto (não teste grátis, não
+// criadas na mão) — base do "buscar vendas antigas" de um afiliado que só
+// foi cadastrado DEPOIS da venda acontecer.
+async function listPaidCaktoOrganizations() {
+  const res = await pool.query(
+    `SELECT id, name, cakto_purchase_id, cakto_customer_email
+     FROM organizations
+     WHERE cakto_purchase_id IS NOT NULL AND is_trial = false
+     ORDER BY created_at DESC`
+  );
+  return res.rows;
+}
+
 async function listAffiliateCommissions() {
   const res = await pool.query(`
     SELECT c.*, a.name AS affiliate_name, a.cakto_email AS affiliate_email, a.pix_key AS affiliate_pix_key
@@ -1552,6 +1565,7 @@ module.exports = {
   createAffiliate,
   deleteAffiliate,
   createAffiliateCommission,
+  listPaidCaktoOrganizations,
   listAffiliateCommissions,
   markAffiliateCommissionPaid,
   voidAffiliateCommission,
