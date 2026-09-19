@@ -2275,12 +2275,30 @@ function createApp() {
       db.listAffiliateTrialReferrals(affiliate.id),
       db.getAffiliateTrialSummary(affiliate.id),
     ]);
+    // Cupom de desconto pessoal do embaixador (programa Indicação): quem
+    // compra com o cupom dele gera comissão em referral_commissions, que ficava
+    // só na tela Indicação. Entra aqui também pro embaixador ver tudo junto.
+    const couponRows = await db.listReferralCommissionsByUserId(req.appUser.id);
+    const couponReceived = couponRows.filter((r) => r.paid).reduce((s, r) => s + Number(r.commission_value), 0);
+    const couponPending = couponRows.filter((r) => !r.paid).reduce((s, r) => s + Number(r.commission_value), 0);
+    const couponEmails = new Set(couponRows.map((r) => String(r.customer_email || "").toLowerCase()).filter(Boolean));
+    const affiliateEmails = new Set(recentCommissions.map((r) => String(r.customer_email || "").toLowerCase()));
+    const extraCustomers = [...couponEmails].filter((e) => !affiliateEmails.has(e)).length;
+    const mergedRecent = [
+      ...recentCommissions,
+      ...couponRows.map((r) => ({ ...r, id: `coupon-${r.id}`, commission_type: "coupon" })),
+    ]
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .slice(0, 10);
     res.json({
       firstSalePercentage: Number(affiliate.first_sale_percentage),
       recurringPercentage: Number(affiliate.recurring_percentage),
       refCode: affiliate.ref_code || null,
       ...summary,
-      recentCommissions,
+      totalReceived: Math.round((summary.totalReceived + couponReceived) * 100) / 100,
+      totalPending: Math.round((summary.totalPending + couponPending) * 100) / 100,
+      referredCustomers: summary.referredCustomers + extraCustomers,
+      recentCommissions: mergedRecent,
       trialReferrals,
       ...trialSummary,
     });

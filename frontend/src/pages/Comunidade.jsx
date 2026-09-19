@@ -2204,7 +2204,7 @@ function AffiliateEarningsCard({ communityId }) {
           {data.recentCommissions.slice(0, 5).map((c) => (
             <div key={c.id} className="flex items-center justify-between text-xs">
               <span className="text-[var(--text-muted)]">
-                {c.customer_name || c.customer_email} · {c.commission_type === 'first_sale' ? '1ª venda' : 'recorrência'}
+                {c.customer_name || c.customer_email} · {c.commission_type === 'first_sale' ? '1ª venda' : c.commission_type === 'coupon' ? 'cupom de indicação' : 'recorrência'}
               </span>
               <span className={`font-medium ${c.paid ? 'text-emerald-500' : 'text-amber-500'}`}>
                 {formatBRL(c.commission_value)} {c.paid ? '· pago' : '· pendente'}
