@@ -486,7 +486,7 @@ function PostCard({ post, community, ambassadorTier, isOwner, onComment, onToggl
         ) : (
           <>
             {post.body && <p className="whitespace-pre-wrap text-sm text-[var(--text-primary)]">{post.body}</p>}
-            {post.image_url && <img src={post.image_url} alt="" className="mt-3 max-h-96 w-full rounded-xl object-cover" />}
+            {post.image_url && <img src={post.image_url} alt="" className="mx-auto mt-3 h-auto max-h-[36rem] w-auto max-w-full rounded-xl" />}
             <PollDisplay post={post} onVote={onVotePoll} />
           </>
         )}
