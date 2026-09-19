@@ -1253,36 +1253,82 @@ async function deleteAffiliateTrialReferral(caktoSubscriptionId) {
 // "em teste até <data no passado>" pro embaixador pra sempre, parecendo
 // quebrado. A linha não é apagada (só escondida) pra não perder o registro
 // caso um webhook atrasado ainda chegue depois.
+// Preço mensal de cada plano, usado só pra PROJETAR a comissão de quem está
+// em teste e ainda não tem valor vindo da Cakto (teste atribuído por link de
+// indicação ou marcação manual). Mesmos valores das ofertas de teste.
+const TRIAL_PLAN_MONTHLY_PRICE = { solo: 127, pro: 187, agencia: 397 };
+
+// "Galera do teste grátis" de um afiliado (ou de todos, se affiliateId for
+// null). Junta DUAS fontes, sem contar a mesma pessoa duas vezes:
+//  1) affiliate_trial_referrals — projeção que o webhook cria quando o
+//     afiliado foi rastreado pelo link da Cakto (tem o valor real da assinatura);
+//  2) organizações em teste (is_trial) atribuídas ao afiliado por link de
+//     indicação (/free-trial?ref=) ou marcação manual — projeta pela % de 1ª
+//     venda dele em cima do preço do plano.
+// Teste vencido (data passou sem cobrança/cancelamento) fica escondido, igual
+// antes — a linha não é apagada.
+async function collectTrialReferrals(affiliateId) {
+  const params = affiliateId ? [affiliateId] : [];
+  const affFilter = affiliateId ? "AND a.id = $1" : "";
+  const table = await pool.query(
+    `SELECT t.*, a.name AS affiliate_name, a.cakto_email AS affiliate_email
+     FROM affiliate_trial_referrals t
+     JOIN affiliates a ON a.id = t.affiliate_id
+     WHERE (t.trial_ends_at IS NULL OR t.trial_ends_at >= now()) ${affFilter}`,
+    params
+  );
+  const orgs = await pool.query(
+    `SELECT o.id AS org_id, o.plan, o.expires_at, o.cakto_customer_email,
+            a.id AS affiliate_id, a.name AS affiliate_name, a.cakto_email AS affiliate_email, a.first_sale_percentage,
+            (SELECT u.name FROM app_users u WHERE u.organization_id = o.id ORDER BY u.id LIMIT 1) AS user_name,
+            (SELECT u.email FROM app_users u WHERE u.organization_id = o.id ORDER BY u.id LIMIT 1) AS user_email
+     FROM organizations o
+     JOIN affiliates a ON a.id = o.referred_by_affiliate_id
+     WHERE o.is_trial = true AND o.expires_at >= now() ${affFilter}`,
+    params
+  );
+  const rows = [...table.rows];
+  const seen = new Set(rows.map((r) => `${r.affiliate_id}|${String(r.customer_email || "").toLowerCase()}`));
+  for (const o of orgs.rows) {
+    const email = String(o.cakto_customer_email || o.user_email || "").toLowerCase();
+    if (email && seen.has(`${o.affiliate_id}|${email}`)) continue; // já veio pela projeção da Cakto
+    const price = TRIAL_PLAN_MONTHLY_PRICE[o.plan] || 0;
+    const pct = Number(o.first_sale_percentage);
+    rows.push({
+      id: `org-${o.org_id}`,
+      affiliate_id: o.affiliate_id,
+      affiliate_name: o.affiliate_name,
+      affiliate_email: o.affiliate_email,
+      customer_email: email || null,
+      customer_name: o.user_name || null,
+      subscription_amount: price,
+      commission_percentage: pct,
+      projected_commission_value: Math.round(price * (pct / 100) * 100) / 100,
+      trial_ends_at: o.expires_at,
+    });
+  }
+  rows.sort((a, b) => {
+    const ta = a.trial_ends_at ? new Date(a.trial_ends_at).getTime() : Infinity;
+    const tb = b.trial_ends_at ? new Date(b.trial_ends_at).getTime() : Infinity;
+    return ta - tb;
+  });
+  return rows;
+}
+
 async function listAllAffiliateTrialReferrals() {
-  const res = await pool.query(`
-    SELECT t.*, a.name AS affiliate_name, a.cakto_email AS affiliate_email
-    FROM affiliate_trial_referrals t
-    JOIN affiliates a ON a.id = t.affiliate_id
-    WHERE t.trial_ends_at IS NULL OR t.trial_ends_at >= now()
-    ORDER BY t.trial_ends_at NULLS LAST, t.created_at DESC
-  `);
-  return res.rows;
+  return collectTrialReferrals(null);
 }
 
 async function listAffiliateTrialReferrals(affiliateId) {
-  const res = await pool.query(
-    `SELECT * FROM affiliate_trial_referrals
-     WHERE affiliate_id = $1 AND (trial_ends_at IS NULL OR trial_ends_at >= now())
-     ORDER BY trial_ends_at NULLS LAST, created_at DESC`,
-    [affiliateId]
-  );
-  return res.rows;
+  return collectTrialReferrals(affiliateId);
 }
 
 async function getAffiliateTrialSummary(affiliateId) {
-  const res = await pool.query(
-    `SELECT COUNT(*)::int AS trial_count, COALESCE(SUM(projected_commission_value), 0)::numeric AS projected_total
-     FROM affiliate_trial_referrals
-     WHERE affiliate_id = $1 AND (trial_ends_at IS NULL OR trial_ends_at >= now())`,
-    [affiliateId]
-  );
-  const row = res.rows[0];
-  return { trialCount: row.trial_count, projectedTrialTotal: Number(row.projected_total) };
+  const rows = await collectTrialReferrals(affiliateId);
+  return {
+    trialCount: rows.length,
+    projectedTrialTotal: Math.round(rows.reduce((s, r) => s + Number(r.projected_commission_value || 0), 0) * 100) / 100,
+  };
 }
 
 // ---------- Indicação (cupom de cliente) ----------
@@ -1437,8 +1483,46 @@ async function createCommunity(affiliateId, name, photoUrl) {
   const community = res.rows[0] || (await getCommunityByAffiliateId(affiliateId));
   if (res.rows[0]) {
     await pool.query("INSERT INTO community_channels (community_id, name, position) VALUES ($1, 'Geral', 0)", [community.id]);
+    // Comunidade nova nasce já com os clientes que esse afiliado JÁ trouxe
+    // (ex.: quem comprou pelo link dele antes da comunidade existir).
+    await joinAffiliateReferredOrgsToCommunity(affiliateId, community.id);
   }
   return community;
+}
+
+// Coloca na comunidade (source='affiliate') toda organização que esse
+// afiliado trouxe: marcada como "afiliado responsável", ou dona de uma
+// venda já registrada em affiliate_commissions pra ele. Quem já está em
+// QUALQUER comunidade fica onde está (joinCommunity nunca troca alguém de
+// comunidade). Devolve quantas entraram agora.
+async function joinAffiliateReferredOrgsToCommunity(affiliateId, communityId) {
+  const res = await pool.query(
+    `SELECT DISTINCT o.id FROM organizations o
+     WHERE o.referred_by_affiliate_id = $1
+        OR o.cakto_purchase_id IN (SELECT cakto_order_id FROM affiliate_commissions WHERE affiliate_id = $1)
+        OR o.cakto_customer_email IN (SELECT customer_email FROM affiliate_commissions WHERE affiliate_id = $1)`,
+    [affiliateId]
+  );
+  let joined = 0;
+  for (const row of res.rows) {
+    if (await getCommunityMembershipByOrgId(row.id)) continue;
+    await joinCommunity(communityId, row.id, "affiliate");
+    joined += 1;
+  }
+  return joined;
+}
+
+// Atribui a organização a um afiliado e, se ele já tem comunidade, já coloca
+// a organização nela (source='affiliate'). Remover a atribuição (null) NÃO
+// tira ninguém da comunidade.
+async function attributeOrganizationToAffiliate(orgId, affiliateId) {
+  await setOrganizationAffiliate(orgId, affiliateId);
+  if (affiliateId) {
+    const community = await getCommunityByAffiliateId(affiliateId);
+    if (community && !(await getCommunityMembershipByOrgId(orgId))) {
+      await joinCommunity(community.id, orgId, "affiliate");
+    }
+  }
 }
 
 async function updateCommunityDetails(id, { name, description, photoUrl, bannerUrl, accentColor, tags, instagramUrl, youtubeUrl, websiteUrl }) {
@@ -2533,6 +2617,8 @@ module.exports = {
   listPaidCaktoOrganizations,
   correctUnpaidAffiliateCommission,
   setOrganizationAffiliate,
+  attributeOrganizationToAffiliate,
+  joinAffiliateReferredOrgsToCommunity,
   findAffiliateByRefCode,
   getAffiliateById,
   countAffiliateCommissionsForCustomer,

@@ -165,8 +165,9 @@ export default function Afiliados() {
   async function handleBackfill(id) {
     setBackfill({ id, loading: true, text: null })
     try {
-      const { checked, created, corrected } = await rawApi.backfillAffiliate(id)
+      const { checked, created, corrected, joined } = await rawApi.backfillAffiliate(id)
       const parts = []
+      if (joined > 0) parts.push(`${joined} cliente(s) adicionado(s) à comunidade`)
       if (created > 0) parts.push(`${created} venda(s) antiga(s) adicionada(s)`)
       if (corrected > 0) parts.push(`${corrected} comissão(ões) corrigida(s) pro valor real`)
       setBackfill({

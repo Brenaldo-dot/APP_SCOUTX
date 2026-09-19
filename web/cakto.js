@@ -277,7 +277,16 @@ async function backfillAffiliateCommissions(affiliate) {
       console.error(`Backfill afiliado ${affiliate.name}: falha no pedido ${org.cakto_purchase_id}:`, err.message);
     }
   }
-  return { checked, created, corrected };
+  // Se o afiliado já tem comunidade, puxa pra dentro dela os clientes que ele
+  // trouxe e ainda não estão em nenhuma (ex.: vendas antigas recém-achadas).
+  let joined = 0;
+  try {
+    const community = await db.getCommunityByAffiliateId(affiliate.id);
+    if (community) joined = await db.joinAffiliateReferredOrgsToCommunity(affiliate.id, community.id);
+  } catch (err) {
+    console.error(`Backfill afiliado ${affiliate.name}: falha ao sincronizar comunidade:`, err.message);
+  }
+  return { checked, created, corrected, joined };
 }
 
 // Indicação (cliente indica cliente, 2026-09-10) — diferente do programa de
@@ -671,6 +680,19 @@ async function handleSubscriptionCreated(data) {
   console.log(
     `Webhook Cakto: organização "${org.name}" e usuário ${email} criados em TESTE GRÁTIS (${planLabel}, até ${trialEndsAt.toISOString()}) a partir da compra ${data.id}.`
   );
+
+  // Se o teste veio de um afiliado rastreado pela Cakto, atribui a
+  // organização a ele (conta na "galera do teste grátis" dele e já entra na
+  // comunidade dele). Best-effort: nunca derruba a criação da conta.
+  const trialAffiliateEmail = String(data.affiliate || "").trim().toLowerCase();
+  if (trialAffiliateEmail) {
+    try {
+      const trialAffiliate = await db.findAffiliateByCaktoEmail(trialAffiliateEmail);
+      if (trialAffiliate) await db.attributeOrganizationToAffiliate(org.id, trialAffiliate.id);
+    } catch (err) {
+      console.error(`Webhook Cakto: falha ao atribuir teste ${data.id} ao afiliado ${trialAffiliateEmail}:`, err.message);
+    }
+  }
 }
 
 async function handleCancellationEvent(data, eventName) {

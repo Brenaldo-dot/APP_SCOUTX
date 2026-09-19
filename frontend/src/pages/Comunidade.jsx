@@ -2104,6 +2104,7 @@ function EarningsSummary({ earnings }) {
 function AffiliateEarningsCard({ communityId }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
+  const [copiedTrialLink, setCopiedTrialLink] = useState(false)
 
   useEffect(() => {
     rawApi.getCommunityAffiliateEarnings(communityId).then(setData).catch((e) => setError(e.message))
@@ -2157,12 +2158,36 @@ function AffiliateEarningsCard({ communityId }) {
           ))}
         </div>
       )}
-      {data.trialReferrals?.length > 0 && (
-        <div className="mt-4 rounded-xl border border-dashed border-amber-500/30 bg-amber-500/10 p-3">
-          <p className="mb-2 flex items-center justify-between text-xs font-semibold text-amber-500">
-            <span>Em período de teste ({data.trialCount})</span>
-            <span>Previsto a receber: {formatBRL(data.projectedTrialTotal)}</span>
+      <div className="mt-4 rounded-xl border border-dashed border-amber-500/30 bg-amber-500/10 p-3">
+        <p className="mb-2 flex items-center justify-between text-xs font-semibold text-amber-500">
+          <span>
+            Em teste grátis agora ({data.trialCount ?? 0} {data.trialCount === 1 ? 'pessoa' : 'pessoas'})
+          </span>
+          <span>Previsto a receber: {formatBRL(data.projectedTrialTotal ?? 0)}</span>
+        </p>
+        {data.refCode && (
+          <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg bg-[var(--bg-surface)] px-2.5 py-2">
+            <span className="text-[11px] text-[var(--text-muted)]">Seu link de teste grátis:</span>
+            <code className="break-all text-[11px] text-[var(--text-primary)]">{`${window.location.origin}/free-trial?ref=${data.refCode}`}</code>
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard?.writeText(`${window.location.origin}/free-trial?ref=${data.refCode}`)
+                setCopiedTrialLink(true)
+                setTimeout(() => setCopiedTrialLink(false), 2000)
+              }}
+              className="rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--hover-surface)]"
+            >
+              {copiedTrialLink ? 'Copiado!' : 'Copiar'}
+            </button>
+          </div>
+        )}
+        {!(data.trialReferrals?.length > 0) ? (
+          <p className="text-[11px] text-[var(--text-faint)]">
+            Ninguém trazido por você está em teste grátis no momento. Quem entrar pelo seu link de teste grátis
+            aparece aqui com o valor previsto.
           </p>
+        ) : (
           <div className="space-y-1.5">
             {data.trialReferrals.map((t) => (
               <div key={t.id} className="flex items-center justify-between text-xs text-[var(--text-faint)]">
@@ -2174,12 +2199,13 @@ function AffiliateEarningsCard({ communityId }) {
               </div>
             ))}
           </div>
-          <p className="mt-2 text-[11px] text-[var(--text-faint)]">
-            Ainda não foi cobrado nada — esse valor só vira "a receber" de verdade se a pessoa continuar assinante
-            depois que o teste acabar. Se cancelar antes, some sozinho daqui.
-          </p>
-        </div>
-      )}
+        )}
+        <p className="mt-2 text-[11px] text-[var(--text-faint)]">
+          Ainda não foi cobrado nada. O valor previsto usa a sua % de 1ª venda sobre o preço do plano e só vira "a
+          receber" de verdade se a pessoa continuar assinante quando o teste acabar (o valor final pode variar um
+          pouco por taxas). Se cancelar antes, some sozinho daqui.
+        </p>
+      </div>
       <p className="mt-3 text-[11px] text-[var(--text-faint)]">
         % configurada pelo admin no cadastro do afiliado. Pra mudar, peça pra equipe ajustar.
       </p>

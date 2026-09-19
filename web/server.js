@@ -1317,7 +1317,7 @@ function createApp() {
         try {
           const refAffiliate = await db.findAffiliateByRefCode(lead.ref_code);
           if (refAffiliate) {
-            await db.setOrganizationAffiliate(org.id, refAffiliate.id);
+            await db.attributeOrganizationToAffiliate(org.id, refAffiliate.id);
             console.log(`Assinar: ${cleanEmail} atribuído ao afiliado ${refAffiliate.name} pelo link de indicação.`);
           }
         } catch (refErr) {
@@ -2276,6 +2276,7 @@ function createApp() {
     res.json({
       firstSalePercentage: Number(affiliate.first_sale_percentage),
       recurringPercentage: Number(affiliate.recurring_percentage),
+      refCode: affiliate.ref_code || null,
       ...summary,
       recentCommissions,
       trialReferrals,
@@ -2880,7 +2881,7 @@ function createApp() {
       affiliate = Number.isInteger(affiliateId) ? await db.getAffiliateById(affiliateId) : null;
       if (!affiliate) return res.status(404).json({ error: "Afiliado não encontrado." });
     }
-    await db.setOrganizationAffiliate(id, affiliate ? affiliate.id : null);
+    await db.attributeOrganizationToAffiliate(id, affiliate ? affiliate.id : null);
     await db.logAdminAction(
       req.appUser.id,
       req.appUser.name,
