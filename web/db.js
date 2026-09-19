@@ -2390,6 +2390,7 @@ async function listCommunitiesAdminOverview() {
   const res = await pool.query(`
     SELECT c.id, c.affiliate_id, c.name AS community_name, c.photo_url, c.created_at,
       a.name AS ambassador_name, a.cakto_email AS ambassador_email, a.pix_key AS ambassador_pix_key,
+      a.first_sale_percentage,
       COALESCE(m.active_member_count, 0)::int AS active_member_count
     FROM communities c
     JOIN affiliates a ON a.id = c.affiliate_id
@@ -2401,7 +2402,28 @@ async function listCommunitiesAdminOverview() {
     ) m ON m.community_id = c.id
     ORDER BY active_member_count DESC
   `);
-  return res.rows;
+  // Membros de cada comunidade com origem, plano e vencimento: é a base pra
+  // o admin saber quem gera comissão (source = 'affiliate') e quando vence.
+  const members = await pool.query(`
+    SELECT cm.community_id, cm.source, cm.joined_at, o.id AS organization_id, o.name AS organization_name,
+           o.plan, o.is_trial, o.expires_at, o.billing_cycle,
+           (SELECT u.name FROM app_users u WHERE u.organization_id = o.id ORDER BY u.id LIMIT 1) AS user_name,
+           (SELECT u.email FROM app_users u WHERE u.organization_id = o.id ORDER BY u.id LIMIT 1) AS user_email
+    FROM community_members cm
+    JOIN organizations o ON o.id = cm.organization_id
+    ORDER BY cm.joined_at ASC
+  `);
+  const now = Date.now();
+  return res.rows.map((c) => {
+    const list = members.rows
+      .filter((m) => m.community_id === c.id)
+      .map((m) => ({ ...m, active: new Date(m.expires_at).getTime() > now }));
+    return {
+      ...c,
+      referred_active_member_count: list.filter((m) => m.active && m.source === "affiliate").length,
+      members: list,
+    };
+  });
 }
 
 function planLimitsFor(plan) {
