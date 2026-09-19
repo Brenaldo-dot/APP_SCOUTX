@@ -1018,7 +1018,7 @@ function CommunityEditPanel({ community, onSaved, onClose }) {
     <form onSubmit={submit} className="space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
       <div>
         <p className="mb-1.5 text-xs font-semibold text-[var(--text-muted)]">Banner</p>
-        <label className="relative flex h-32 w-full cursor-pointer items-center justify-center overflow-hidden rounded-xl border border-dashed border-[var(--border)] bg-[var(--bg-surface-2)] text-[var(--text-faint)] hover:border-brand-500">
+        <label className="relative flex aspect-[4/1] w-full cursor-pointer items-center justify-center overflow-hidden rounded-xl border border-dashed border-[var(--border)] bg-[var(--bg-surface-2)] text-[var(--text-faint)] hover:border-brand-500">
           {bannerUrl ? (
             <img src={bannerUrl} alt="" className="h-full w-full object-cover" />
           ) : (
@@ -1088,7 +1088,7 @@ function CommunityEditPanel({ community, onSaved, onClose }) {
       <div>
         <p className="mb-1.5 text-xs font-semibold text-[var(--text-muted)]">Preview (como os membros vão ver)</p>
         <div className="overflow-hidden rounded-2xl border border-[var(--border)]">
-          <div className={`relative h-16 w-full bg-gradient-to-br ${ACCENT_COLORS[accentColor].grad}`}>
+          <div className={`relative aspect-[4/1] w-full bg-gradient-to-br ${ACCENT_COLORS[accentColor].grad}`}>
             {bannerUrl && <img src={bannerUrl} alt="" className="h-full w-full object-cover" />}
           </div>
           <div className="flex items-center gap-2.5 bg-[var(--bg-surface-2)] px-3 py-2.5">
@@ -1165,7 +1165,7 @@ function CommunityHeader({ community, isOwner, activeMemberCount, contentStats, 
 
   return (
     <div className="rounded-3xl border border-[var(--border)] bg-[var(--bg-surface)] shadow-sm">
-      <div className={`relative h-40 w-full overflow-hidden rounded-t-3xl bg-gradient-to-br sm:h-56 ${accent.grad}`}>
+      <div className={`relative aspect-[4/1] w-full overflow-hidden rounded-t-3xl bg-gradient-to-br ${accent.grad}`}>
         {community.banner_url ? (
           <img src={community.banner_url} alt="" className="h-full w-full object-cover" />
         ) : (
