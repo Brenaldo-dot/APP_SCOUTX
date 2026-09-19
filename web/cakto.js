@@ -254,8 +254,13 @@ async function backfillAffiliateCommissions(affiliate) {
     checked += 1;
     try {
       const { affiliate: found, order } = await resolveAffiliateForOrder({ id: org.cakto_purchase_id });
-      if (!found || found.id !== affiliate.id) continue;
+      // Atribuição manual/por link (/free-trial?ref=): a Cakto não rastreou
+      // afiliado nenhum no pedido, mas a organização está ligada a ele aqui.
+      // Vale a nossa % em cima do valor pago (mesma regra do webhook).
+      const manual = !found && Number(org.referred_by_affiliate_id) === Number(affiliate.id);
+      if (!manual && (!found || found.id !== affiliate.id)) continue;
       if (order.status && order.status !== "paid") continue;
+      if (manual && !(Number(order.amount) > 0)) continue;
       const percentage = affiliate.first_sale_percentage;
       const { saleAmount, commissionValue } = affiliateCommissionFromOrder(order, percentage);
       const inserted = await db.createAffiliateCommission({
@@ -286,7 +291,18 @@ async function backfillAffiliateCommissions(affiliate) {
   } catch (err) {
     console.error(`Backfill afiliado ${affiliate.name}: falha ao sincronizar comunidade:`, err.message);
   }
-  return { checked, created, corrected, joined };
+  // Explica um backfill zerado: quem está atribuído a esse afiliado mas ainda
+  // não tem pagamento confirmado na Cakto (em teste grátis, sem pedido...).
+  let attributed = 0;
+  let awaitingPayment = 0;
+  try {
+    const mine = await db.listOrganizationsAttributedToAffiliate(affiliate.id);
+    attributed = mine.length;
+    awaitingPayment = mine.filter((o) => o.is_trial || !o.cakto_purchase_id).length;
+  } catch (err) {
+    console.error(`Backfill afiliado ${affiliate.name}: falha ao contar atribuídos:`, err.message);
+  }
+  return { checked, created, corrected, joined, attributed, awaitingPayment };
 }
 
 // Indicação (cliente indica cliente, 2026-09-10) — diferente do programa de

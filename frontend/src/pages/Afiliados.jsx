@@ -165,7 +165,7 @@ export default function Afiliados() {
   async function handleBackfill(id) {
     setBackfill({ id, loading: true, text: null })
     try {
-      const { checked, created, corrected, joined } = await rawApi.backfillAffiliate(id)
+      const { checked, created, corrected, joined, attributed, awaitingPayment } = await rawApi.backfillAffiliate(id)
       const parts = []
       if (joined > 0) parts.push(`${joined} cliente(s) adicionado(s) à comunidade`)
       if (created > 0) parts.push(`${created} venda(s) antiga(s) adicionada(s)`)
@@ -175,7 +175,7 @@ export default function Afiliados() {
         loading: false,
         text: parts.length
           ? `${parts.join(' e ')} (${checked} pedidos conferidos).`
-          : `Nada novo pra atualizar (${checked} pedidos conferidos).`,
+          : `Nada novo pra atualizar (${checked} pedidos conferidos). ${attributed} cliente(s) ligado(s) a esse afiliado${awaitingPayment > 0 ? `, ${awaitingPayment} ainda sem pagamento confirmado na Cakto (teste grátis ou sem pedido)` : ''}.`,
       })
       load()
     } catch (err) {

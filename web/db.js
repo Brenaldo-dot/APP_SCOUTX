@@ -1117,10 +1117,20 @@ async function correctUnpaidAffiliateCommission(caktoOrderId, saleAmount, commis
 // foi cadastrado DEPOIS da venda acontecer.
 async function listPaidCaktoOrganizations() {
   const res = await pool.query(
-    `SELECT id, name, cakto_purchase_id, cakto_customer_email
+    `SELECT id, name, cakto_purchase_id, cakto_customer_email, referred_by_affiliate_id
      FROM organizations
      WHERE cakto_purchase_id IS NOT NULL AND is_trial = false
      ORDER BY created_at DESC`
+  );
+  return res.rows;
+}
+
+// Organizações que o admin/link atribuiu a um afiliado, com o motivo de ainda
+// não poderem gerar comissão (usado só pra explicar um backfill que veio zerado).
+async function listOrganizationsAttributedToAffiliate(affiliateId) {
+  const res = await pool.query(
+    `SELECT id, name, is_trial, cakto_purchase_id, expires_at FROM organizations WHERE referred_by_affiliate_id = $1`,
+    [affiliateId]
   );
   return res.rows;
 }
@@ -2637,6 +2647,7 @@ module.exports = {
   deleteAffiliate,
   createAffiliateCommission,
   listPaidCaktoOrganizations,
+  listOrganizationsAttributedToAffiliate,
   correctUnpaidAffiliateCommission,
   setOrganizationAffiliate,
   attributeOrganizationToAffiliate,
