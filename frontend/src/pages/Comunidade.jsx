@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Activity,
   BadgeCheck,
+  Check,
+  Lock,
   BarChart3,
   Bell,
   Bookmark,
@@ -1262,7 +1264,7 @@ function CommunityHeader({ community, isOwner, activeMemberCount, contentStats, 
         </div>
 
         <div className="mt-5 flex flex-wrap gap-2.5">
-          <StatPill icon={Users} value={activeMemberCount} label={activeMemberCount === 1 ? 'Membro' : 'Membros'} color="blue" />
+          {isOwner && <StatPill icon={Users} value={activeMemberCount} label={activeMemberCount === 1 ? 'Membro' : 'Membros'} color="blue" />}
           <StatPill icon={Hash} value={contentStats.postCount} label={contentStats.postCount === 1 ? 'Post' : 'Posts na comunidade'} color="violet" />
           <StatPill icon={Heart} value={contentStats.likeCount} label="Curtidas" color="rose" />
           <StatPill icon={MessageCircle} value={contentStats.commentCount} label="Comentários" color="amber" />
@@ -1845,7 +1847,7 @@ function greetingForHour(hour) {
 }
 
 function MemberLevelCard({ joinedAt }) {
-  const { level, next, monthsToNext, progressPct } = getMemberLevel(joinedAt)
+  const { level, next, monthNumber, monthsToNext, progressPct } = getMemberLevel(joinedAt)
   const { Icon } = level
   return (
     <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
@@ -1870,6 +1872,59 @@ function MemberLevelCard({ joinedAt }) {
       ) : (
         <p className="mt-3 text-xs font-medium text-yellow-400">Nível máximo de antiguidade 🎉</p>
       )}
+      <MemberLevelPath monthNumber={monthNumber} currentLabel={level.label} />
+    </div>
+  )
+}
+
+// Trilha visual dos 9 níveis de antiguidade: o que já foi conquistado, onde
+// a pessoa está agora e o que ainda falta até o último nível.
+function MemberLevelPath({ monthNumber, currentLabel }) {
+  const currentIndex = MEMBER_LEVELS.findIndex((l) => l.label === currentLabel)
+  return (
+    <div className="mt-5 border-t border-[var(--border)] pt-4">
+      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--text-faint)]">Sua trilha até o topo</p>
+      <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-5 lg:grid-cols-9">
+        {MEMBER_LEVELS.map((l, i) => {
+          const done = i < currentIndex
+          const isCurrent = i === currentIndex
+          const startMonth = i === 0 ? 1 : MEMBER_LEVELS[i - 1].maxMonth + 1
+          const Icon = l.Icon
+          return (
+            <div
+              key={l.label}
+              className={`relative flex flex-col items-center rounded-xl border px-2 py-3 text-center transition-all ${
+                isCurrent
+                  ? `border-transparent ${l.bg15} ring-2 ring-offset-0 ring-current ${l.text}`
+                  : done
+                    ? 'border-[var(--border)] bg-[var(--bg-surface-2)]'
+                    : 'border-dashed border-[var(--border)] opacity-55'
+              }`}
+            >
+              <span
+                className={`relative flex h-10 w-10 items-center justify-center rounded-full ${
+                  done || isCurrent ? `text-white ${l.solid}` : 'bg-[var(--bg-surface-2)] text-[var(--text-faint)]'
+                }`}
+              >
+                <Icon size={18} strokeWidth={2.5} />
+                {done && (
+                  <span className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-white">
+                    <Check size={10} strokeWidth={3.5} />
+                  </span>
+                )}
+                {!done && !isCurrent && (
+                  <span className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--bg-surface)] text-[var(--text-faint)] ring-1 ring-[var(--border)]">
+                    <Lock size={9} />
+                  </span>
+                )}
+              </span>
+              <p className={`mt-2 text-xs font-semibold ${isCurrent ? '' : done ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}`}>{l.label}</p>
+              <p className="mt-0.5 text-[10px] text-[var(--text-faint)]">{startMonth === 1 ? 'Começo' : `A partir do mês ${startMonth}`}</p>
+              {isCurrent && <span className="mt-1.5 text-[9px] font-bold uppercase tracking-wide">Você está aqui</span>}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -2644,12 +2699,12 @@ function RecentActivitySidebarWidget({ communityId }) {
   )
 }
 
-function CommunityTabs({ tab, onChange, accent, showStats }) {
+function CommunityTabs({ tab, onChange, accent, showStats, showMembers }) {
   const tabs = [
     { value: 'inicio', label: 'Início', Icon: Home },
     { value: 'posts', label: 'Posts', Icon: Hash },
     { value: 'conteudo', label: 'Conteúdo', Icon: BookOpen },
-    { value: 'membros', label: 'Membros', Icon: Users },
+    ...(showMembers ? [{ value: 'membros', label: 'Membros', Icon: Users }] : []),
     { value: 'notificacoes', label: 'Notificações', Icon: Bell },
     ...(showStats ? [{ value: 'estatisticas', label: 'Estatísticas', Icon: Trophy }] : []),
   ]
@@ -2893,11 +2948,11 @@ function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommuni
         }}
       />
 
-      <CommunityTabs tab={tab} onChange={setTab} accent={getAccent(data.community.accent_color)} showStats={isOwner} />
+      <CommunityTabs tab={tab} onChange={setTab} accent={getAccent(data.community.accent_color)} showStats={isOwner} showMembers={isOwner} />
 
       {tab === 'inicio' && <HomePanel communityId={communityId} onNavigate={setTab} accent={getAccent(data.community.accent_color)} />}
       {tab === 'conteudo' && <ResourcesPanel communityId={communityId} isOwner={isOwner} communityName={data.community.name} />}
-      {tab === 'membros' && <MembersPanel communityId={communityId} isOwner={isOwner} />}
+      {tab === 'membros' && isOwner && <MembersPanel communityId={communityId} isOwner={isOwner} />}
       {tab === 'notificacoes' && <NotificationsPanel communityId={communityId} />}
       {tab === 'estatisticas' && isOwner && (
         <StatsPanel communityId={communityId} ambassadorStats={ambassadorStats} tiers={tiers} contentStats={data.contentStats} accent={getAccent(data.community.accent_color)} />
@@ -2921,9 +2976,11 @@ function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommuni
                 <h2 className="text-base font-semibold text-[var(--text-primary)]">{activeChannel?.name}</h2>
               </div>
               <div className="flex items-center gap-3">
-                <span className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
-                  <Users size={13} /> {data.activeMemberCount} membro{data.activeMemberCount === 1 ? '' : 's'}
-                </span>
+                {isOwner && (
+                  <span className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+                    <Users size={13} /> {data.activeMemberCount} membro{data.activeMemberCount === 1 ? '' : 's'}
+                  </span>
+                )}
                 <SortDropdown sort={sort} onChange={handleSortChange} />
               </div>
             </div>
@@ -2993,7 +3050,7 @@ function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommuni
 
           <div className="hidden w-72 shrink-0 space-y-4 lg:block">
             <ContentSidebarWidget communityId={communityId} onSeeAll={() => setTab('conteudo')} />
-            <TopContributorsSidebarWidget communityId={communityId} onSeeAll={() => setTab('membros')} />
+            <TopContributorsSidebarWidget communityId={communityId} onSeeAll={isOwner ? () => setTab('membros') : undefined} />
             <RecentActivitySidebarWidget communityId={communityId} />
           </div>
         </div>

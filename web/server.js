@@ -2071,7 +2071,7 @@ function createApp() {
       isOwner: allowed.isOwner,
       channels,
       activeChannelId: activeChannel.id,
-      activeMemberCount,
+      activeMemberCount: allowed.isOwner ? activeMemberCount : null,
       contentStats,
       ambassadorTier: { name: tier.name, label: tier.label, percentage: tier.percentage },
       posts: posts.map((p) => {
@@ -2202,7 +2202,9 @@ function createApp() {
     // "muted" é ferramenta de moderação do embaixador — não expõe pros
     // outros membros quem está silenciado (a pessoa só nota se tentar
     // interagir e não conseguir, ver rotas de comentar/curtir/votar).
-    if (!allowed.isOwner) members = members.map(({ muted, organization_id, ...m }) => m);
+    // Membro comum não vê a lista de pessoas nem quantas são (pedido do
+    // Samuel, 2026-09-19): só o embaixador enxerga a aba Membros.
+    if (!allowed.isOwner) members = [];
     const topContributors = await db.listCommunityTopContributors(allowed.community.id, 10);
     const xpLeaderboard = await db.listCommunityXpLeaderboard(allowed.community.id, 10);
     // Ganhos são dado financeiro do embaixador — só ele vê, nunca um membro
