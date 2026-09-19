@@ -1929,7 +1929,7 @@ function createApp() {
     const { affiliate, community } = await getMyAmbassadorContext(req);
     if (!affiliate) return res.status(403).json({ error: "Sua conta não está cadastrada como afiliado." });
     if (community) return res.status(409).json({ error: "Você já tem uma comunidade." });
-    const name = String(req.body?.name || "").trim();
+    const name = String(req.body?.name || "").trim().slice(0, 80);
     if (!name) return res.status(400).json({ error: "Nome da comunidade é obrigatório." });
     const photoUrl = typeof req.body?.photoUrl === "string" && req.body.photoUrl.startsWith("data:image/") ? req.body.photoUrl : null;
     if (photoUrl && photoUrl.length > MAX_COMMUNITY_IMAGE_LENGTH) {
@@ -1942,7 +1942,10 @@ function createApp() {
   // Lista de comunidades pra quem ainda não está em nenhuma escolher onde
   // participar.
   app.get("/api/community/directory", async (req, res) => {
-    res.json(await db.listCommunitiesDirectory());
+    // Sem contagem de membros: quem ainda não entrou (ou é membro) não vê
+    // o tamanho da comunidade.
+    const list = await db.listCommunitiesDirectory();
+    res.json(list.map(({ active_member_count, ...c }) => c));
   });
 
   app.post("/api/community/join", async (req, res) => {
@@ -1962,6 +1965,22 @@ function createApp() {
   // Confere se a pessoa logada pode VER a comunidade `id`: é a
   // embaixadora dona dela, ou a organização dela é membro. Devolve a
   // comunidade (pra checagem de dono nas rotas de post) ou null.
+  // Limitador simples em memória (por usuário e tipo de ação) contra spam de
+  // comentário/curtida. Reinicia junto com o servidor, o que basta pra esse uso.
+  const communityActionLog = new Map();
+  function communityActionThrottled(userId, action, max, windowMs) {
+    const key = `${userId}:${action}`;
+    const now = Date.now();
+    const recent = (communityActionLog.get(key) || []).filter((t) => now - t < windowMs);
+    if (recent.length >= max) {
+      communityActionLog.set(key, recent);
+      return true;
+    }
+    recent.push(now);
+    communityActionLog.set(key, recent);
+    return false;
+  }
+
   async function communityIfAllowed(req, communityId) {
     const community = await db.getCommunityById(communityId);
     if (!community) return null;
@@ -1984,8 +2003,8 @@ function createApp() {
   app.patch("/api/community/:id", async (req, res) => {
     const allowed = await communityIfAllowed(req, Number(req.params.id));
     if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode editar." });
-    const name = typeof req.body?.name === "string" && req.body.name.trim() ? req.body.name.trim() : null;
-    const description = typeof req.body?.description === "string" ? req.body.description.trim() || null : undefined;
+    const name = typeof req.body?.name === "string" && req.body.name.trim() ? req.body.name.trim().slice(0, 80) : null;
+    const description = typeof req.body?.description === "string" ? req.body.description.trim().slice(0, 1000) || null : undefined;
     const photoUrl = typeof req.body?.photoUrl === "string" && req.body.photoUrl.startsWith("data:image/") ? req.body.photoUrl : null;
     if (photoUrl && photoUrl.length > MAX_COMMUNITY_IMAGE_LENGTH) {
       return res.status(400).json({ error: "Imagem muito grande." });
@@ -2147,6 +2166,7 @@ function createApp() {
     if (!allowed) return res.status(403).json({ error: "Você não tem acesso a essa comunidade." });
     if (allowed.membership?.muted) return res.status(403).json({ error: "Você não pode votar nessa comunidade no momento." });
     if (!optionId) return res.status(400).json({ error: "Escolha uma opção." });
+    if (!(await db.communityPollOptionBelongsToPost(optionId, postId))) return res.status(400).json({ error: "Opção inválida pra essa enquete." });
     // XP só no PRIMEIRO voto (trocar de opção depois não gera XP de novo).
     const existingVote = await db.getCommunityPollVote(postId, req.appUser.id);
     await db.upsertCommunityPollVote(postId, req.appUser.id, optionId);
@@ -2191,7 +2211,7 @@ function createApp() {
     const progress = await db.upsertCommunityResourceProgress(resource.id, req.appUser.id, completed);
     // XP só na transição pra concluído (marcar de novo depois de já ter
     // concluído, ou desmarcar, não gera nem tira XP).
-    if (completed && !before?.completed_at && !allowed.isOwner) {
+    if (completed && !allowed.isOwner && (await db.claimResourceXp(resource.id, req.appUser.id))) {
       db.recordXpEvent(allowed.community.id, req.appUser.id, "resource_completed").catch((e) => console.error("XP conclusão:", e));
     }
     res.json(progress);
@@ -2352,6 +2372,7 @@ function createApp() {
     const kind = RESOURCE_KINDS.has(req.body?.kind) ? req.body.kind : "article";
     const body = typeof req.body?.body === "string" ? req.body.body.trim() || null : null;
     const url = typeof req.body?.url === "string" ? req.body.url.trim() || null : null;
+    if (url && !/^https?:\/\//i.test(url)) return res.status(400).json({ error: "O link precisa começar com http:// ou https://." });
     const durationLabel = typeof req.body?.durationLabel === "string" ? req.body.durationLabel.trim() || null : null;
     const resource = await db.createCommunityResource({ communityId: allowed.community.id, kind, title, body, url, durationLabel });
     db.notifyCommunityMembers(allowed.community.id, {
@@ -2372,6 +2393,7 @@ function createApp() {
     const kind = RESOURCE_KINDS.has(req.body?.kind) ? req.body.kind : resource.kind;
     const body = typeof req.body?.body === "string" ? req.body.body.trim() || null : null;
     const url = typeof req.body?.url === "string" ? req.body.url.trim() || null : null;
+    if (url && !/^https?:\/\//i.test(url)) return res.status(400).json({ error: "O link precisa começar com http:// ou https://." });
     const durationLabel = typeof req.body?.durationLabel === "string" ? req.body.durationLabel.trim() || null : null;
     const updated = await db.updateCommunityResource(resource.id, { kind, title, body, url, durationLabel });
     res.json(updated);
@@ -2389,7 +2411,7 @@ function createApp() {
   app.post("/api/community/:id/posts", async (req, res) => {
     const allowed = await communityIfAllowed(req, Number(req.params.id));
     if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode postar." });
-    const bodyText = String(req.body?.body || "").trim();
+    const bodyText = String(req.body?.body || "").trim().slice(0, 5000);
     const imageUrl = typeof req.body?.imageUrl === "string" && req.body.imageUrl.startsWith("data:image/") ? req.body.imageUrl : null;
     if (imageUrl && imageUrl.length > MAX_COMMUNITY_IMAGE_LENGTH) {
       return res.status(400).json({ error: "Imagem muito grande." });
@@ -2510,6 +2532,7 @@ function createApp() {
     if (allowed.membership?.muted) return res.status(403).json({ error: "Você não pode comentar nessa comunidade no momento." });
     const bodyText = String(req.body?.body || "").trim();
     if (!bodyText) return res.status(400).json({ error: "Escreva um comentário." });
+    if (bodyText.length > 2000) return res.status(400).json({ error: "Comentário muito longo (máximo 2000 caracteres)." });
     res.json(await db.updateCommunityCommentBody(comment.id, bodyText));
   });
 
@@ -2517,11 +2540,15 @@ function createApp() {
     const postId = Number(req.params.postId);
     const bodyText = String(req.body?.body || "").trim();
     if (!bodyText) return res.status(400).json({ error: "Escreva um comentário." });
+    if (bodyText.length > 2000) return res.status(400).json({ error: "Comentário muito longo (máximo 2000 caracteres)." });
     const postRow = await db.getCommunityPostById(postId);
     if (!postRow) return res.status(404).json({ error: "Post não encontrado." });
     const allowed = await communityIfAllowed(req, postRow.community_id);
     if (!allowed) return res.status(403).json({ error: "Você não tem acesso a essa comunidade." });
     if (allowed.membership?.muted) return res.status(403).json({ error: "Você não pode comentar nessa comunidade no momento." });
+    if (communityActionThrottled(req.appUser.id, "comment", 8, 60000)) {
+      return res.status(429).json({ error: "Calma, você está comentando rápido demais. Tente de novo em instantes." });
+    }
     const comment = await db.createCommunityComment({
       postId,
       authorUserId: req.appUser.id,
@@ -2545,7 +2572,10 @@ function createApp() {
       }
       // XP só pra quem é MEMBRO comentando (o embaixador não "participa"
       // da própria comunidade pra ganhar XP, ver seção 15 do briefing).
-      db.recordXpEvent(allowed.community.id, req.appUser.id, "comment").catch((e) => console.error("XP comentário:", e));
+      // Teto de XP por comentário: 10 por dia (spam de comentário não sobe ranking).
+      db.countRecentXpEvents(allowed.community.id, req.appUser.id, "comment", 24)
+        .then((n) => (n < 10 ? db.recordXpEvent(allowed.community.id, req.appUser.id, "comment") : null))
+        .catch((e) => console.error("XP comentário:", e));
     }
     res.status(201).json(comment);
   });
@@ -2557,6 +2587,7 @@ function createApp() {
     const allowed = await communityIfAllowed(req, postRow.community_id);
     if (!allowed) return res.status(403).json({ error: "Você não tem acesso a essa comunidade." });
     if (allowed.membership?.muted) return res.status(403).json({ error: "Você não pode curtir nessa comunidade no momento." });
+    if (communityActionThrottled(req.appUser.id, "like", 40, 60000)) return res.status(429).json({ error: "Muitas ações seguidas. Tente de novo em instantes." });
     const result = await db.toggleCommunityPostLike(postId, req.appUser.id);
     res.json(result);
   });

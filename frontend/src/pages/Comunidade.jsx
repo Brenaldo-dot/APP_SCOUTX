@@ -918,7 +918,7 @@ function Directory({ onJoined }) {
               <div>
                 <p className="font-semibold text-[var(--text-primary)]">{c.community_name}</p>
                 <p className="text-xs text-[var(--text-muted)]">
-                  por {c.ambassador_name} · {c.active_member_count} membro{c.active_member_count === 1 ? '' : 's'}
+                  por {c.ambassador_name}
                 </p>
                 {c.description && <p className="mt-0.5 text-xs text-[var(--text-faint)]">{c.description}</p>}
               </div>

@@ -147,6 +147,14 @@ function affiliateCommissionFromOrder(order, fallbackPercentage) {
 // nada pro afiliado nesse caso, então aqui não existe "valor real da Cakto":
 // vale a nossa % em cima do valor pago, e o pagamento ao afiliado é por fora
 // (PIX). 1ª cobrança paga = primeira venda; as seguintes = renovação.
+// Autocomissão: ninguém ganha comissão comprando pra si mesmo (ex.: afiliado
+// assinando pelo próprio link ou cliente usando o próprio cupom).
+function isSameEmail(a, b) {
+  const x = String(a || "").trim().toLowerCase();
+  const y = String(b || "").trim().toLowerCase();
+  return !!x && x === y;
+}
+
 async function recordManualAffiliateCommissionIfAny(data, order) {
   const email = String(data.customer?.email || "").trim().toLowerCase();
   const org =
@@ -161,6 +169,7 @@ async function recordManualAffiliateCommissionIfAny(data, order) {
   if (!(saleAmount > 0)) return; // início de teste grátis (R$ 0) não gera comissão
 
   const customerEmail = email || String(org.cakto_customer_email || "").trim().toLowerCase();
+  if (isSameEmail(customerEmail, affiliate.cakto_email)) return;
   const prior = await db.countAffiliateCommissionsForCustomer(affiliate.id, customerEmail);
   // Recorrência NÃO é mais paga aqui (2026-09-19, pedido do Samuel): quem
   // paga renovação é a comissão da COMUNIDADE (recordCommunityCommissionIfAny).
@@ -206,6 +215,7 @@ async function recordAffiliateCommissionIfAny(data, commissionType, resolved) {
     // ainda não tem nenhuma comissão desse cliente, essa cobrança conta como
     // PRIMEIRA VENDA; se já tem, é recorrência de verdade e não paga aqui.
     const customerEmail = String(data.customer?.email || "").trim().toLowerCase();
+    if (isSameEmail(customerEmail, affiliate.cakto_email)) return;
     let effectiveType = commissionType;
     if (effectiveType === "recurring") {
       const prior = await db.countAffiliateCommissionsForCustomer(affiliate.id, customerEmail);
@@ -260,6 +270,7 @@ async function backfillAffiliateCommissions(affiliate) {
       const manual = !found && Number(org.referred_by_affiliate_id) === Number(affiliate.id);
       if (!manual && (!found || found.id !== affiliate.id)) continue;
       if (order.status && order.status !== "paid") continue;
+      if (isSameEmail(order.customer?.email || org.cakto_customer_email, affiliate.cakto_email)) continue;
       if (manual && !(Number(order.amount) > 0)) continue;
       const percentage = affiliate.first_sale_percentage;
       const { saleAmount, commissionValue } = affiliateCommissionFromOrder(order, percentage);
@@ -320,6 +331,11 @@ async function recordReferralCommissionIfAny(data) {
   try {
     const coupon = await db.findReferralCouponByCode(couponCode);
     if (!coupon) return; // cupom usado não é de indicação (ou não está mais ativo)
+    const owner = await db.getAppUserById(coupon.user_id);
+    if (owner && isSameEmail(owner.email, data.customer?.email)) {
+      console.log(`Webhook Cakto: cupom ${couponCode} usado pelo próprio dono (pedido ${data.id}), sem comissão de indicação.`);
+      return;
+    }
     const saleAmount = Number(data.offer?.price ?? data.amount ?? 0);
     const commissionValue = Math.round(saleAmount * (REFERRAL_COMMISSION_PERCENTAGE / 100) * 100) / 100;
     const inserted = await db.createReferralCommission({
@@ -386,6 +402,8 @@ async function recordCommunityCommissionIfAny(data, org) {
     }
     const community = await db.getCommunityById(membership.community_id);
     if (!community) return;
+    const ownerAffiliate = await db.getAffiliateById(community.affiliate_id);
+    if (ownerAffiliate && isSameEmail(data.customer?.email, ownerAffiliate.cakto_email)) return;
     // Nível calculado com o tamanho TOTAL (todo mundo), não só referidos —
     // ver comentário acima.
     const activeCount = await db.countActiveCommunityMembers(community.id);

@@ -703,6 +703,10 @@ async function migrate() {
       UNIQUE (resource_id, user_id)
     );
   `);
+  // XP de conclusão só uma vez por conteúdo (antes dava pra desmarcar e
+  // marcar de novo pra ganhar +50 XP a cada vez).
+  await pool.query(`ALTER TABLE community_resource_progress ADD COLUMN IF NOT EXISTS xp_awarded BOOLEAN NOT NULL DEFAULT false;`);
+  await pool.query(`UPDATE community_resource_progress SET xp_awarded = true WHERE completed_at IS NOT NULL AND xp_awarded = false;`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_community_resource_progress_user ON community_resource_progress(user_id);`);
 
   // Notificações (seção 12 do briefing) — fan-out na escrita: quando um
@@ -1640,7 +1644,7 @@ async function countActiveCommunityMembers(communityId) {
     `SELECT COUNT(*)::int AS count
      FROM community_members cm
      JOIN organizations o ON o.id = cm.organization_id
-     WHERE cm.community_id = $1 AND o.expires_at > now()`,
+     WHERE cm.community_id = $1 AND o.expires_at > now() AND o.is_trial = false`,
     [communityId]
   );
   return res.rows[0].count;
@@ -1677,7 +1681,7 @@ async function listCommunitiesDirectory() {
     FROM communities c
     JOIN affiliates a ON a.id = c.affiliate_id
     LEFT JOIN (
-      SELECT cm.community_id, SUM(CASE WHEN o.expires_at > now() THEN 1 ELSE 0 END) AS active_member_count
+      SELECT cm.community_id, SUM(CASE WHEN o.expires_at > now() AND o.is_trial = false THEN 1 ELSE 0 END) AS active_member_count
       FROM community_members cm
       JOIN organizations o ON o.id = cm.organization_id
       GROUP BY cm.community_id
@@ -1840,7 +1844,7 @@ async function getCommunityEarningsSummary(communityId) {
     const total = await pool.query(
       `SELECT COUNT(*)::int AS count FROM community_members cm
        JOIN organizations o ON o.id = cm.organization_id
-       WHERE cm.community_id = $1 AND o.expires_at > now()`,
+       WHERE cm.community_id = $1 AND o.expires_at > now() AND o.is_trial = false`,
       [communityId]
     );
     const pct = tierForActiveMembers(total.rows[0].count).percentage;
@@ -2146,6 +2150,29 @@ async function publishCommunityPostNow(id) {
 
 const XP_AMOUNTS = { comment: 10, poll_vote: 20, resource_completed: 50 };
 
+// Marca atomicamente que o XP desse conteúdo já foi dado; devolve true só
+// na primeira vez (duas requisições simultâneas não ganham as duas).
+async function claimResourceXp(resourceId, userId) {
+  const res = await pool.query(
+    "UPDATE community_resource_progress SET xp_awarded = true WHERE resource_id = $1 AND user_id = $2 AND xp_awarded = false RETURNING id",
+    [resourceId, userId]
+  );
+  return res.rowCount > 0;
+}
+
+async function countRecentXpEvents(communityId, userId, type, hours) {
+  const res = await pool.query(
+    "SELECT COUNT(*)::int AS count FROM community_xp_events WHERE community_id = $1 AND user_id = $2 AND type = $3 AND created_at > now() - ($4 || ' hours')::interval",
+    [communityId, userId, type, String(hours)]
+  );
+  return res.rows[0].count;
+}
+
+async function communityPollOptionBelongsToPost(optionId, postId) {
+  const res = await pool.query("SELECT 1 FROM community_poll_options WHERE id = $1 AND post_id = $2", [optionId, postId]);
+  return res.rowCount > 0;
+}
+
 async function recordXpEvent(communityId, userId, type) {
   await pool.query(`INSERT INTO community_xp_events (community_id, user_id, type, amount) VALUES ($1, $2, $3, $4)`, [
     communityId,
@@ -2395,7 +2422,7 @@ async function listCommunitiesAdminOverview() {
     FROM communities c
     JOIN affiliates a ON a.id = c.affiliate_id
     LEFT JOIN (
-      SELECT cm.community_id, SUM(CASE WHEN o.expires_at > now() THEN 1 ELSE 0 END) AS active_member_count
+      SELECT cm.community_id, SUM(CASE WHEN o.expires_at > now() AND o.is_trial = false THEN 1 ELSE 0 END) AS active_member_count
       FROM community_members cm
       JOIN organizations o ON o.id = cm.organization_id
       GROUP BY cm.community_id
@@ -2778,6 +2805,9 @@ module.exports = {
   updateCommunityPost,
   deleteCommunityPost,
   getCommunityCommentById,
+  claimResourceXp,
+  countRecentXpEvents,
+  communityPollOptionBelongsToPost,
   deleteCommunityComment,
   updateCommunityCommentBody,
   toggleCommunityPostPin,
