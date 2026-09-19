@@ -69,7 +69,7 @@ function NewCommunityForm({ affiliates, onCreated }) {
         </div>
         <div className="flex flex-1 flex-col gap-1">
           <label className="text-xs font-medium text-[var(--text-muted)]">Nome da comunidade</label>
-          <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Comunidade Samuel Laviero" className={inputClass} />
+          <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Comunidade Rafael Monteiro" className={inputClass} />
         </div>
         <label className="flex h-[38px] w-[38px] shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg-surface-2)] text-[var(--text-faint)] hover:border-brand-500" title="Foto (opcional)">
           {photoUrl ? <img src={photoUrl} alt="" className="h-full w-full object-cover" /> : <ImageIcon size={15} />}

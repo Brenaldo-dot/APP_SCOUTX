@@ -778,7 +778,7 @@ function AmbassadorSetup({ onCreated }) {
             required
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Ex: Comunidade Samuel Laviero"
+            placeholder="Ex: Comunidade Rafael Monteiro"
             className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-brand-500 focus:outline-none"
           />
         </div>
