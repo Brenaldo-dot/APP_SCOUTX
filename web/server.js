@@ -1875,6 +1875,15 @@ function createApp() {
     return { affiliate, community };
   }
 
+  async function buildAmbassadorStats(community) {
+    const [activeMemberCount, referredActiveMemberCount] = await Promise.all([
+      db.countActiveCommunityMembers(community.id),
+      db.countActiveReferredCommunityMembers(community.id),
+    ]);
+    const tier = tierForActiveMembers(activeMemberCount);
+    return { activeMemberCount, referredActiveMemberCount, tier: tier.name, tierLabel: tier.label, tierPercentage: tier.percentage };
+  }
+
   // Devolve o "estado" da pessoa em relação à Comunidade: embaixadora (com
   // ou sem comunidade criada ainda), membro de uma comunidade, ou nenhum
   // dos dois (pode navegar o diretório pra participar de alguma).
@@ -1964,7 +1973,7 @@ function createApp() {
     if (membership && membership.community_id === community.id) return { community, isOwner: false, membership };
     // Admin da plataforma: observador silencioso de qualquer comunidade, só
     // leitura (GET). Não vira membro, não entra em contagem/lista/atividade.
-    if (req.appUser.role === "admin" && req.method === "GET") return { community, isOwner: false, isAdminObserver: true, membership: null };
+    if (req.appUser.role === "admin" && req.method === "GET") return { community, isOwner: true, isAdminObserver: true, membership: null };
     return null;
   }
 
@@ -2071,6 +2080,7 @@ function createApp() {
     // restringe a quem foi referido.
     const tier = tierForActiveMembers(activeMemberCount);
     const contentStats = await db.getCommunityContentStats(allowed.community.id);
+    const ambassadorStats = allowed.isOwner ? await buildAmbassadorStats(allowed.community) : null;
     const commentsByPost = new Map();
     for (const c of comments) {
       if (!commentsByPost.has(c.post_id)) commentsByPost.set(c.post_id, []);
@@ -2087,6 +2097,7 @@ function createApp() {
       channels,
       activeChannelId: activeChannel.id,
       activeMemberCount: allowed.isOwner ? activeMemberCount : null,
+      ambassadorStats,
       contentStats,
       ambassadorTier: { name: tier.name, label: tier.label, percentage: tier.percentage },
       posts: posts.map((p) => {
@@ -2294,7 +2305,9 @@ function createApp() {
     // Cupom de desconto pessoal do embaixador (programa Indicação): quem
     // compra com o cupom dele gera comissão em referral_commissions, que ficava
     // só na tela Indicação. Entra aqui também pro embaixador ver tudo junto.
-    const couponRows = await db.listReferralCommissionsByUserId(req.appUser.id);
+    // Usuário DONO da comunidade (não quem está olhando: o admin também vê).
+    const ownerUser = affiliate.cakto_email ? await db.findUserByEmail(affiliate.cakto_email) : null;
+    const couponRows = ownerUser ? await db.listReferralCommissionsByUserId(ownerUser.id) : [];
     const couponReceived = couponRows.filter((r) => r.paid).reduce((s, r) => s + Number(r.commission_value), 0);
     const couponPending = couponRows.filter((r) => !r.paid).reduce((s, r) => s + Number(r.commission_value), 0);
     const couponEmails = new Set(couponRows.map((r) => String(r.customer_email || "").toLowerCase()).filter(Boolean));

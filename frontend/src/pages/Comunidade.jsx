@@ -1218,7 +1218,7 @@ function StatPill({ icon: Icon, value, label, color = 'blue' }) {
 // nome) — agora é o cabeçalho único de toda a área de Comunidade, dono ou
 // membro, com os totais (posts/curtidas/comentários) que antes não
 // apareciam em lugar nenhum.
-function CommunityHeader({ community, isOwner, activeMemberCount, contentStats, ambassadorTier, onUpdated }) {
+function CommunityHeader({ community, isOwner, readOnly, activeMemberCount, contentStats, ambassadorTier, onUpdated }) {
   const [editing, setEditing] = useState(false)
 
   if (editing) {
@@ -1255,7 +1255,7 @@ function CommunityHeader({ community, isOwner, activeMemberCount, contentStats, 
             sem isso um banner claro ou muito "cheio" (foto de produto,
             texto grande) fazia o nome da comunidade sumir por cima dele. */}
         <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black/75 via-black/20 to-transparent" />
-        {isOwner && (
+        {isOwner && !readOnly && (
           <button
             onClick={() => setEditing(true)}
             className="absolute right-3 top-3 z-20 inline-flex items-center gap-1.5 rounded-full bg-black/50 px-3.5 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur transition-colors hover:bg-black/70"
@@ -2385,7 +2385,7 @@ function AffiliateEarningsCard({ communityId }) {
   )
 }
 
-function MembersPanel({ communityId, isOwner }) {
+function MembersPanel({ communityId, isOwner, readOnly = false }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const [memberToRemove, setMemberToRemove] = useState(null)
@@ -2491,7 +2491,7 @@ function MembersPanel({ communityId, isOwner }) {
                   {m.active ? 'Ativo' : 'Inativo'}
                 </span>
                 <span className="hidden shrink-0 text-xs text-[var(--text-faint)] sm:inline">desde {formatDateTime(m.joined_at)}</span>
-                {isOwner && (
+                {isOwner && !readOnly && (
                   <div className="flex shrink-0 items-center gap-1">
                     <button
                       onClick={() => toggleMute(m)}
@@ -2970,7 +2970,10 @@ function ScheduledPostsPanel({ communityId, refreshKey, onChanged }) {
   )
 }
 
-function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommunityRenamed, readOnly = false }) {
+function CommunityFeed({ communityId, isOwner, ambassadorStats: ambassadorStatsProp, tiers, onCommunityRenamed, readOnly = false }) {
+  // canManage: só o dono de verdade edita/posta/modera; o admin que está
+  // observando (readOnly) enxerga tudo do embaixador mas sem botões de ação.
+  const canManage = isOwner && !readOnly
   const [tab, setTab] = useState('inicio')
   const [data, setData] = useState(null)
   const [activeChannelId, setActiveChannelId] = useState(null)
@@ -3071,6 +3074,7 @@ function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommuni
       <CommunityHeader
         community={data.community}
         isOwner={isOwner}
+        readOnly={readOnly}
         activeMemberCount={data.activeMemberCount}
         contentStats={data.contentStats}
         ambassadorTier={data.ambassadorTier}
@@ -3083,11 +3087,11 @@ function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommuni
       <CommunityTabs tab={tab} onChange={setTab} accent={getAccent(data.community.accent_color)} showStats={isOwner} showMembers={isOwner} />
 
       {tab === 'inicio' && <HomePanel communityId={communityId} onNavigate={setTab} accent={getAccent(data.community.accent_color)} />}
-      {tab === 'conteudo' && <ResourcesPanel communityId={communityId} isOwner={isOwner} communityName={data.community.name} />}
-      {tab === 'membros' && isOwner && <MembersPanel communityId={communityId} isOwner={isOwner} />}
+      {tab === 'conteudo' && <ResourcesPanel communityId={communityId} isOwner={canManage} communityName={data.community.name} />}
+      {tab === 'membros' && isOwner && <MembersPanel communityId={communityId} isOwner={isOwner} readOnly={readOnly} />}
       {tab === 'notificacoes' && <NotificationsPanel communityId={communityId} />}
       {tab === 'estatisticas' && isOwner && (
-        <StatsPanel communityId={communityId} ambassadorStats={ambassadorStats} tiers={tiers} contentStats={data.contentStats} accent={getAccent(data.community.accent_color)} />
+        <StatsPanel communityId={communityId} ambassadorStats={data.ambassadorStats || ambassadorStatsProp} tiers={tiers} contentStats={data.contentStats} accent={getAccent(data.community.accent_color)} />
       )}
 
       {tab === 'posts' && (
@@ -3096,7 +3100,7 @@ function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommuni
             community={data.community}
             channels={data.channels}
             activeChannelId={activeChannelId}
-            isOwner={isOwner}
+            isOwner={canManage}
             onSelectChannel={handleSelectChannel}
             onChannelsChanged={(newChannelId) => load(newChannelId || activeChannelId)}
           />
@@ -3127,9 +3131,9 @@ function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommuni
               />
             </div>
 
-            {isOwner && <ScheduledPostsPanel communityId={communityId} refreshKey={scheduleRefresh} onChanged={() => load(activeChannelId)} />}
+            {canManage && <ScheduledPostsPanel communityId={communityId} refreshKey={scheduleRefresh} onChanged={() => load(activeChannelId)} />}
 
-            {isOwner &&
+            {canManage &&
               (composerOpen ? (
                 <Composer
                   communityId={communityId}
@@ -3166,7 +3170,7 @@ function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommuni
                     post={p}
                     community={data.community}
                     ambassadorTier={data.ambassadorTier}
-                    isOwner={isOwner}
+                    isOwner={canManage}
                     onComment={handleComment}
                     onDeleteComment={handleDeleteComment}
                     onEditComment={handleEditComment}
@@ -3219,12 +3223,12 @@ function AdminObserver({ tiers }) {
     return (
       <div className="space-y-3">
         <div className="flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-500">
-          <span>Visualizando como admin (só leitura, ninguém vê que você está aqui).</span>
+          <span>Visualizando como admin: você vê tudo do embaixador, só leitura, e ninguém vê que você está aqui.</span>
           <button onClick={() => setViewId(null)} className="rounded-lg bg-amber-500 px-3 py-1 font-semibold text-white hover:bg-amber-600">
             Sair da comunidade
           </button>
         </div>
-        <CommunityFeed communityId={viewId} isOwner={false} tiers={tiers} readOnly />
+        <CommunityFeed communityId={viewId} isOwner tiers={tiers} readOnly />
       </div>
     )
   }
