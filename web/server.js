@@ -2371,11 +2371,13 @@ function createApp() {
     const allowed = await communityIfAllowed(req, Number(req.params.id));
     if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode postar." });
     const bodyText = String(req.body?.body || "").trim();
-    if (!bodyText) return res.status(400).json({ error: "Escreva algo pra postar." });
     const imageUrl = typeof req.body?.imageUrl === "string" && req.body.imageUrl.startsWith("data:image/") ? req.body.imageUrl : null;
     if (imageUrl && imageUrl.length > MAX_COMMUNITY_IMAGE_LENGTH) {
       return res.status(400).json({ error: "Imagem muito grande." });
     }
+    // Só imagem também vale: o texto pode ficar vazio se houver imagem (a
+    // coluna body é NOT NULL, então grava string vazia).
+    if (!bodyText && !imageUrl) return res.status(400).json({ error: "Escreva algo ou escolha uma imagem pra postar." });
     const channel = await db.getCommunityChannelById(Number(req.body?.channelId));
     if (!channel || channel.community_id !== allowed.community.id) {
       return res.status(400).json({ error: "Canal inválido." });
@@ -2420,11 +2422,11 @@ function createApp() {
     const allowed = await communityIfAllowed(req, postRow.community_id);
     if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode editar o post." });
     const bodyText = String(req.body?.body || "").trim();
-    if (!bodyText) return res.status(400).json({ error: "Escreva algo pra postar." });
     const imageUrl = typeof req.body?.imageUrl === "string" && req.body.imageUrl.startsWith("data:image/") ? req.body.imageUrl : postRow.image_url;
     if (imageUrl && imageUrl.length > MAX_COMMUNITY_IMAGE_LENGTH) {
       return res.status(400).json({ error: "Imagem muito grande." });
     }
+    if (!bodyText && !imageUrl) return res.status(400).json({ error: "Escreva algo ou escolha uma imagem pra postar." });
     // scheduledAt só muda se vier explicitamente no corpo (reagendar) —
     // sem isso, editar só o texto de um post agendado ia zerar o
     // agendamento sem querer (updateCommunityPost sempre grava o valor

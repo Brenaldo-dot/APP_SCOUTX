@@ -485,7 +485,7 @@ function PostCard({ post, community, ambassadorTier, isOwner, onComment, onToggl
           <PostEditForm post={post} onSave={handleSaveEdit} onCancel={() => setEditing(false)} />
         ) : (
           <>
-            <p className="whitespace-pre-wrap text-sm text-[var(--text-primary)]">{post.body}</p>
+            {post.body && <p className="whitespace-pre-wrap text-sm text-[var(--text-primary)]">{post.body}</p>}
             {post.image_url && <img src={post.image_url} alt="" className="mt-3 max-h-96 w-full rounded-xl object-cover" />}
             <PollDisplay post={post} onVote={onVotePoll} />
           </>
@@ -574,7 +574,7 @@ function Composer({ communityId, channelId, onPosted, onCollapse }) {
 
   async function submit(e) {
     e.preventDefault()
-    if (!body.trim()) return
+    if (!body.trim() && !imageUrl) return
     const validPollOptions = pollEnabled ? pollOptions.map((o) => o.trim()).filter(Boolean) : null
     if (pollEnabled && validPollOptions.length < 2) {
       setError('A enquete precisa de pelo menos 2 opções preenchidas.')
@@ -711,7 +711,7 @@ function Composer({ communityId, channelId, onPosted, onCollapse }) {
           </button>
           <button
             type="submit"
-            disabled={posting || !body.trim()}
+            disabled={posting || (!body.trim() && !imageUrl)}
             className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
           >
             {posting ? 'Publicando…' : scheduleEnabled ? 'Agendar' : 'Publicar'}
@@ -2795,7 +2795,7 @@ function ScheduledPostRow({ post, onPublishNow, onReschedule, onDelete }) {
     <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-surface-2)] p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <p className="line-clamp-2 text-sm text-[var(--text-primary)]">{post.body}</p>
+          <p className="line-clamp-2 text-sm text-[var(--text-primary)]">{post.body || 'Post só com imagem'}</p>
           <p className="mt-1 text-xs text-[var(--text-faint)]">
             #{post.channel_name} · agendado pra {formatDateTime(post.scheduled_at)}
           </p>
