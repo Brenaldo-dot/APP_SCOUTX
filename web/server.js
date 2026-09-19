@@ -1906,6 +1906,7 @@ function createApp() {
       : null;
     res.json({
       isAmbassador: !!affiliate,
+      isAdmin: req.appUser.role === "admin",
       ambassadorCommunity: community,
       ambassadorStats,
       memberCommunityId: membership?.community_id || null,
@@ -1936,6 +1937,7 @@ function createApp() {
   });
 
   app.post("/api/community/join", async (req, res) => {
+    if (req.appUser.role === "admin") return res.status(403).json({ error: "Admin não entra como membro. Use a visualização de admin." });
     if (!req.appUser.organization_id) {
       return res.status(400).json({ error: "Sua conta não está vinculada a uma organização." });
     }
@@ -1960,6 +1962,9 @@ function createApp() {
       ? await db.getCommunityMembershipByOrgId(req.appUser.organization_id)
       : null;
     if (membership && membership.community_id === community.id) return { community, isOwner: false, membership };
+    // Admin da plataforma: observador silencioso de qualquer comunidade, só
+    // leitura (GET). Não vira membro, não entra em contagem/lista/atividade.
+    if (req.appUser.role === "admin" && req.method === "GET") return { community, isOwner: false, isAdminObserver: true, membership: null };
     return null;
   }
 

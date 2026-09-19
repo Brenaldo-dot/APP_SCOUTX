@@ -2970,7 +2970,7 @@ function ScheduledPostsPanel({ communityId, refreshKey, onChanged }) {
   )
 }
 
-function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommunityRenamed }) {
+function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommunityRenamed, readOnly = false }) {
   const [tab, setTab] = useState('inicio')
   const [data, setData] = useState(null)
   const [activeChannelId, setActiveChannelId] = useState(null)
@@ -3159,7 +3159,7 @@ function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommuni
                 subtitle={search.trim() ? 'Tente outro termo.' : isOwner ? 'Publique o primeiro post por aqui.' : 'O embaixador ainda não postou nada por aqui.'}
               />
             ) : (
-              <div className="space-y-3">
+              <div className={`space-y-3 ${readOnly ? 'pointer-events-none' : ''}`}>
                 {visiblePosts.map((p) => (
                   <PostCard
                     key={p.id}
@@ -3199,6 +3199,62 @@ function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommuni
           onConfirm={confirmDeletePost}
           onCancel={() => setPostToDelete(null)}
         />
+      )}
+    </div>
+  )
+}
+
+// Admin da plataforma entra em qualquer comunidade só pra olhar: não vira
+// membro, não aparece na lista nem nas contagens, e não interage (somente
+// leitura, o servidor também recusa qualquer escrita).
+function AdminObserver({ tiers }) {
+  const [list, setList] = useState(null)
+  const [viewId, setViewId] = useState(null)
+
+  useEffect(() => {
+    rawApi.listCommunityDirectory().then(setList).catch(() => setList([]))
+  }, [])
+
+  if (viewId) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-500">
+          <span>Visualizando como admin (só leitura, ninguém vê que você está aqui).</span>
+          <button onClick={() => setViewId(null)} className="rounded-lg bg-amber-500 px-3 py-1 font-semibold text-white hover:bg-amber-600">
+            Sair da comunidade
+          </button>
+        </div>
+        <CommunityFeed communityId={viewId} isOwner={false} tiers={tiers} readOnly />
+      </div>
+    )
+  }
+
+  if (!list) return null
+  return (
+    <div className="max-w-2xl space-y-4">
+      <div>
+        <h2 className="text-xl font-semibold">Comunidades</h2>
+        <p className="text-sm text-[var(--text-muted)]">Entre em qualquer comunidade só pra olhar. Você não aparece como membro.</p>
+      </div>
+      {list.length === 0 ? (
+        <EmptyState title="Nenhuma comunidade ainda" subtitle="Quando um embaixador criar a dele, ela aparece aqui." />
+      ) : (
+        <div className="space-y-2">
+          {list.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => setViewId(c.id)}
+              className="flex w-full items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-4 text-left hover:bg-[var(--hover-surface)]"
+            >
+              <Avatar src={c.photo_url} name={c.community_name} size={10} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{c.community_name}</p>
+                <p className="truncate text-xs text-[var(--text-faint)]">Embaixador: {c.ambassador_name}</p>
+              </div>
+              <span className="text-xs font-medium text-brand-500">Entrar</span>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   )
@@ -3245,6 +3301,10 @@ export default function Comunidade() {
 
   if (status.memberCommunityId) {
     return <CommunityFeed communityId={status.memberCommunityId} isOwner={false} tiers={status.tiers} />
+  }
+
+  if (status.isAdmin) {
+    return <AdminObserver tiers={status.tiers} />
   }
 
   return (
