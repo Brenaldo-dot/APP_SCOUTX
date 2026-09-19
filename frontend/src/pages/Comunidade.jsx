@@ -79,14 +79,14 @@ function getAccent(key) {
 // (inclusive) daquele nível — o "mês 1" é o primeiro mês inteiro de
 // comunidade, por isso getMemberLevel soma +1 ao número de meses completos.
 const MEMBER_LEVELS = [
-  { maxMonth: 3, label: 'Novato', Icon: Sprout, text: 'text-slate-400', solid: 'bg-slate-500', bg15: 'bg-slate-500/15' },
-  { maxMonth: 6, label: 'Bronze', Icon: Star, text: 'text-orange-400', solid: 'bg-orange-500', bg15: 'bg-orange-500/15' },
-  { maxMonth: 12, label: 'Prata', Icon: Shield, text: 'text-slate-300', solid: 'bg-slate-400', bg15: 'bg-slate-400/15' },
-  { maxMonth: 18, label: 'Ouro', Icon: Award, text: 'text-amber-400', solid: 'bg-amber-500', bg15: 'bg-amber-500/15' },
-  { maxMonth: 24, label: 'Platina', Icon: Medal, text: 'text-cyan-400', solid: 'bg-cyan-500', bg15: 'bg-cyan-500/15' },
-  { maxMonth: 36, label: 'Rubi', Icon: Gem, text: 'text-rose-400', solid: 'bg-rose-500', bg15: 'bg-rose-500/15' },
-  { maxMonth: 48, label: 'Safira', Icon: Gem, text: 'text-blue-400', solid: 'bg-blue-500', bg15: 'bg-blue-500/15' },
-  { maxMonth: 60, label: 'Esmeralda', Icon: Gem, text: 'text-emerald-400', solid: 'bg-emerald-500', bg15: 'bg-emerald-500/15' },
+  { maxMonth: 1, label: 'Novato', Icon: Sprout, text: 'text-slate-400', solid: 'bg-slate-500', bg15: 'bg-slate-500/15' },
+  { maxMonth: 2, label: 'Bronze', Icon: Star, text: 'text-orange-400', solid: 'bg-orange-500', bg15: 'bg-orange-500/15' },
+  { maxMonth: 3, label: 'Prata', Icon: Shield, text: 'text-slate-300', solid: 'bg-slate-400', bg15: 'bg-slate-400/15' },
+  { maxMonth: 4, label: 'Ouro', Icon: Award, text: 'text-amber-400', solid: 'bg-amber-500', bg15: 'bg-amber-500/15' },
+  { maxMonth: 5, label: 'Platina', Icon: Medal, text: 'text-cyan-400', solid: 'bg-cyan-500', bg15: 'bg-cyan-500/15' },
+  { maxMonth: 7, label: 'Rubi', Icon: Gem, text: 'text-rose-400', solid: 'bg-rose-500', bg15: 'bg-rose-500/15' },
+  { maxMonth: 9, label: 'Safira', Icon: Gem, text: 'text-blue-400', solid: 'bg-blue-500', bg15: 'bg-blue-500/15' },
+  { maxMonth: 11, label: 'Esmeralda', Icon: Gem, text: 'text-emerald-400', solid: 'bg-emerald-500', bg15: 'bg-emerald-500/15' },
   { maxMonth: Infinity, label: 'Lenda', Icon: Crown, text: 'text-yellow-300', solid: 'bg-gradient-to-br from-yellow-400 to-amber-600', bg15: 'bg-yellow-500/15' },
 ]
 
@@ -106,7 +106,7 @@ function getMemberLevel(joinedAt) {
   const next = MEMBER_LEVELS[levelIndex + 1]
   const prevMax = levelIndex === 0 ? 0 : MEMBER_LEVELS[levelIndex - 1].maxMonth
   const monthsToNext = next ? level.maxMonth + 1 - monthNumber : null
-  const progressPct = next ? Math.min(100, Math.max(0, ((monthNumber - prevMax) / (level.maxMonth - prevMax)) * 100)) : 100
+  const progressPct = next ? Math.min(100, Math.max(0, ((monthNumber - prevMax - 1) / (level.maxMonth - prevMax)) * 100)) : 100
   return { level, next, monthNumber, monthsToNext, progressPct }
 }
 
