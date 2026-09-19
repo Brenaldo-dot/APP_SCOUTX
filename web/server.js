@@ -165,6 +165,32 @@ function recordIpLoginFailure(ip) {
 // descobrir (pelas mensagens de erro diferentes) quais são clientes de
 // verdade da Cakto. Mais generoso que o de login (não é senha sendo
 // testada, é só "esse email existe"), mas ainda limita o volume.
+// Limitador genérico por chave (IP/email) pras rotas públicas de assinatura:
+// sem isso qualquer um usaria /api/assinar como "testador de cartão" (cada
+// tentativa valida um cartão de graça) ou encheria a base de leads falsos.
+const publicActionLog = new Map();
+function publicRateLimited(key, max, windowMs) {
+  const now = Date.now();
+  const recent = (publicActionLog.get(key) || []).filter((t) => now - t < windowMs);
+  if (recent.length >= max) {
+    publicActionLog.set(key, recent);
+    return true;
+  }
+  recent.push(now);
+  publicActionLog.set(key, recent);
+  return false;
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, list] of publicActionLog) {
+    const recent = list.filter((t) => now - t < 3600000);
+    if (recent.length === 0) publicActionLog.delete(k);
+    else publicActionLog.set(k, recent);
+  }
+  const regCutoff = now - REGISTER_WINDOW_MS;
+  for (const [ip, entry] of registerAttempts) if (entry.windowStart < regCutoff) registerAttempts.delete(ip);
+}, 15 * 60 * 1000).unref();
+
 const REGISTER_WINDOW_MS = 10 * 60 * 1000;
 const REGISTER_LIMIT = 20;
 const registerAttempts = new Map();
@@ -1203,6 +1229,9 @@ function createApp() {
   // lead, ANTES de pedir cartão/CPF — quem abandona depois disso ainda vira
   // um contato que o suporte pode alcançar (ver db.js:upsertAssinarLead).
   app.post("/api/assinar/lead", async (req, res) => {
+    if (publicRateLimited(`lead:${req.ip}`, 10, 10 * 60 * 1000)) {
+      return res.status(429).json({ error: "Muitas tentativas vindas daqui, tente de novo em alguns minutos." });
+    }
     const { name, email, password, phone, refCode } = req.body || {};
     const cleanEmail = String(email || "").trim().toLowerCase();
     const cleanName = String(name || "").trim();
@@ -1237,7 +1266,14 @@ function createApp() {
   // Passo 2 — plano, CPF e cartão. Busca nome/senha/telefone do lead salvo
   // no passo 1 (não pede de novo) — só funciona se o passo 1 já rodou.
   app.post("/api/assinar", async (req, res) => {
+    // Por IP (5/hora) e por email (3/hora): barra teste de cartões roubados.
+    if (publicRateLimited(`assinar-ip:${req.ip}`, 5, 60 * 60 * 1000)) {
+      return res.status(429).json({ error: "Muitas tentativas vindas daqui, tente de novo mais tarde." });
+    }
     const { email, planKey, docNumber, cardToken, antifraudReference, fingerprint } = req.body || {};
+    if (publicRateLimited(`assinar-email:${String(email || "").trim().toLowerCase()}`, 3, 60 * 60 * 1000)) {
+      return res.status(429).json({ error: "Muitas tentativas com esse email, tente de novo mais tarde." });
+    }
 
     const offer = ASSINAR_OFFERS[planKey === "pro" ? "pro" : "standard"];
     const cleanEmail = String(email || "").trim().toLowerCase();
@@ -1263,6 +1299,12 @@ function createApp() {
       return res.status(409).json({ error: "Já existe uma conta com esse email. Faça login, ou use outro email." });
     }
 
+    const docHash = crypto.createHmac("sha256", SESSION_SECRET).update(cleanDoc).digest("hex");
+    if (await db.isTrialDocUsed(docHash, cleanEmail)) {
+      return res.status(409).json({
+        error: "Esse CPF/CNPJ já usou o teste grátis. Para continuar no ScoutX, assine um plano pelo site.",
+      });
+    }
     let payment;
     try {
       payment = await createTrialPayment({
@@ -1309,6 +1351,7 @@ function createApp() {
         needsPasswordSetup: false,
       });
       await db.markAssinarLeadCompleted(cleanEmail, org.id, planKey === "pro" ? "pro" : "standard");
+      await db.saveLeadDocHash(cleanEmail, docHash).catch((e) => console.error("Assinar: falha ao salvar hash do documento:", e.message));
       // Veio por um link de indicação de afiliado (/free-trial?ref=...):
       // atribui a organização a ele, pra comissão cair quando a cobrança
       // de verdade chegar (ver cakto.js:recordManualAffiliateCommissionIfAny).

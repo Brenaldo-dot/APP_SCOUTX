@@ -372,6 +372,8 @@ async function migrate() {
   `);
   // Código do link de indicação (/free-trial?ref=CODIGO) que trouxe esse lead.
   await pool.query(`ALTER TABLE assinar_leads ADD COLUMN IF NOT EXISTS ref_code TEXT;`);
+  // Hash (HMAC) do CPF/CNPJ de quem já usou o teste grátis: 1 teste por documento.
+  await pool.query(`ALTER TABLE assinar_leads ADD COLUMN IF NOT EXISTS doc_hash TEXT;`);
 
   // Cada afiliado tem um código único e automático pro link de indicação
   // dele. Afiliados que já existiam ganham um código aqui mesmo (backfill).
@@ -2556,10 +2558,27 @@ async function findOrganizationByCaktoEmail(email) {
 // é visto — reenvios da Cakto (retry automático dela) batem no
 // ON CONFLICT DO NOTHING e voltam false, sinal pra quem chamou responder
 // 200 sem reprocessar (criar organização/usuário duplicado).
+// 1 teste grátis por CPF/CNPJ: true se OUTRO lead já completou o teste com esse documento.
+async function isTrialDocUsed(docHash, exceptEmail) {
+  const res = await pool.query(
+    "SELECT 1 FROM assinar_leads WHERE doc_hash = $1 AND completed_at IS NOT NULL AND email <> $2 LIMIT 1",
+    [docHash, exceptEmail]
+  );
+  return res.rowCount > 0;
+}
+
+async function saveLeadDocHash(email, docHash) {
+  await pool.query("UPDATE assinar_leads SET doc_hash = $1 WHERE email = $2", [docHash, email]);
+}
+
 async function recordCaktoEvent(purchaseId, event) {
   const res = await pool.query(
+    // Se o processamento anterior deste MESMO evento deu erro, a retentativa da
+    // Cakto precisa ser processada de novo (antes era descartada como
+    // "duplicada" e a compra ficava perdida). Só reabre quando status = 'error'.
     `INSERT INTO cakto_events (purchase_id, event) VALUES ($1, $2)
-     ON CONFLICT (purchase_id, event) DO NOTHING RETURNING purchase_id`,
+     ON CONFLICT (purchase_id, event) DO UPDATE SET status = 'retry', detail = NULL WHERE cakto_events.status = 'error'
+     RETURNING purchase_id`,
     [purchaseId, event]
   );
   return res.rows.length > 0;
@@ -2805,6 +2824,8 @@ module.exports = {
   updateCommunityPost,
   deleteCommunityPost,
   getCommunityCommentById,
+  isTrialDocUsed,
+  saveLeadDocHash,
   claimResourceXp,
   countRecentXpEvents,
   communityPollOptionBelongsToPost,
