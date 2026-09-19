@@ -2304,6 +2304,11 @@ async function getCommunityCommentById(id) {
   return res.rows[0] || null;
 }
 
+async function updateCommunityCommentBody(id, body) {
+  const res = await pool.query("UPDATE community_comments SET body = $1 WHERE id = $2 RETURNING *", [body, id]);
+  return res.rows[0] || null;
+}
+
 async function deleteCommunityComment(id) {
   await pool.query("DELETE FROM community_comments WHERE id = $1", [id]);
 }
@@ -2752,6 +2757,7 @@ module.exports = {
   deleteCommunityPost,
   getCommunityCommentById,
   deleteCommunityComment,
+  updateCommunityCommentBody,
   toggleCommunityPostPin,
   createCommunityComment,
   listCommunityCommentsForCommunity,

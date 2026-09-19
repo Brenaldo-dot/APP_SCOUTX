@@ -2093,7 +2093,8 @@ function createApp() {
               myOptionId: options.find((o) => o.voted_by_me)?.id || null,
             }
           : null;
-        return { ...p, comments: commentsByPost.get(p.id) || [], poll };
+        const postComments = (commentsByPost.get(p.id) || []).map((c) => ({ ...c, mine: c.author_user_id === req.appUser.id }));
+        return { ...p, comments: postComments, poll };
       }),
     });
   });
@@ -2472,9 +2473,26 @@ function createApp() {
     const comment = await db.getCommunityCommentById(Number(req.params.commentId));
     if (!comment) return res.status(404).json({ error: "Comentário não encontrado." });
     const allowed = await communityIfAllowed(req, comment.community_id);
-    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode apagar comentários." });
+    // Dono da comunidade apaga qualquer um; membro só o próprio.
+    if (!allowed || (!allowed.isOwner && comment.author_user_id !== req.appUser.id)) {
+      return res.status(403).json({ error: "Você só pode apagar seus próprios comentários." });
+    }
     await db.deleteCommunityComment(comment.id);
     res.status(204).end();
+  });
+
+  // Cada pessoa edita só o próprio comentário (nem o dono edita o dos outros).
+  app.patch("/api/community/comments/:commentId", async (req, res) => {
+    const comment = await db.getCommunityCommentById(Number(req.params.commentId));
+    if (!comment) return res.status(404).json({ error: "Comentário não encontrado." });
+    const allowed = await communityIfAllowed(req, comment.community_id);
+    if (!allowed || comment.author_user_id !== req.appUser.id) {
+      return res.status(403).json({ error: "Você só pode editar seus próprios comentários." });
+    }
+    if (allowed.membership?.muted) return res.status(403).json({ error: "Você não pode comentar nessa comunidade no momento." });
+    const bodyText = String(req.body?.body || "").trim();
+    if (!bodyText) return res.status(400).json({ error: "Escreva um comentário." });
+    res.json(await db.updateCommunityCommentBody(comment.id, bodyText));
   });
 
   app.post("/api/community/posts/:postId/comments", async (req, res) => {

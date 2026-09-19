@@ -168,7 +168,22 @@ function Avatar({ src, name, size = 9 }) {
   )
 }
 
-function Comment({ comment, ambassadorTier, canDelete, onDelete }) {
+function Comment({ comment, ambassadorTier, canDelete, onDelete, onEdit }) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(comment.body)
+  const [saving, setSaving] = useState(false)
+
+  async function save() {
+    if (!text.trim()) return
+    setSaving(true)
+    try {
+      await onEdit(comment.id, text.trim())
+      setEditing(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="flex gap-2.5 py-2">
       <div
@@ -187,9 +202,43 @@ function Comment({ comment, ambassadorTier, canDelete, onDelete }) {
             <MemberLevelBadge joinedAt={comment.author_member_since} />
           )}
         </p>
-        <p className="mt-0.5 text-sm text-[var(--text-muted)]">{comment.body}</p>
+        {editing ? (
+          <div className="mt-1 space-y-1.5">
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={2}
+              className="w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none"
+            />
+            <div className="flex gap-2">
+              <button onClick={save} disabled={saving || !text.trim()} className="rounded-lg bg-brand-600 px-3 py-1 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50">
+                {saving ? 'Salvando…' : 'Salvar'}
+              </button>
+              <button
+                onClick={() => {
+                  setEditing(false)
+                  setText(comment.body)
+                }}
+                className="rounded-lg px-3 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--hover-surface)]"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-0.5 whitespace-pre-wrap text-sm text-[var(--text-muted)]">{comment.body}</p>
+        )}
       </div>
-      {canDelete && (
+      {comment.mine && !editing && (
+        <button
+          onClick={() => setEditing(true)}
+          className="h-fit shrink-0 rounded-lg p-1.5 text-[var(--text-faint)] hover:bg-[var(--hover-surface)] hover:text-brand-500"
+          title="Editar comentário"
+        >
+          <Pencil size={13} />
+        </button>
+      )}
+      {canDelete && !editing && (
         <button
           onClick={() => onDelete(comment.id)}
           className="h-fit shrink-0 rounded-lg p-1.5 text-[var(--text-faint)] hover:bg-[var(--hover-surface)] hover:text-red-400"
@@ -435,7 +484,7 @@ function PollDisplay({ post, onVote }) {
   )
 }
 
-function PostCard({ post, community, ambassadorTier, isOwner, onComment, onToggleLike, onToggleSave, onVotePoll, onEdit, onDelete, onTogglePin, onDeleteComment }) {
+function PostCard({ post, community, ambassadorTier, isOwner, onComment, onToggleLike, onToggleSave, onVotePoll, onEdit, onDelete, onTogglePin, onDeleteComment, onEditComment }) {
   const [commentToDelete, setCommentToDelete] = useState(null)
   const [commentText, setCommentText] = useState('')
   const [sending, setSending] = useState(false)
@@ -521,7 +570,7 @@ function PostCard({ post, community, ambassadorTier, isOwner, onComment, onToggl
             <>
               <div className="mt-1 divide-y divide-[var(--border)]">
                 {post.comments.map((c) => (
-                  <Comment key={c.id} comment={c} ambassadorTier={ambassadorTier} canDelete={isOwner} onDelete={setCommentToDelete} />
+                  <Comment key={c.id} comment={c} ambassadorTier={ambassadorTier} canDelete={isOwner || c.mine} onDelete={setCommentToDelete} onEdit={onEditComment} />
                 ))}
               </div>
               {commentToDelete && (
@@ -2952,6 +3001,11 @@ function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommuni
     await load(activeChannelId)
   }
 
+  async function handleEditComment(commentId, body) {
+    await rawApi.updateCommunityComment(commentId, body)
+    await load(activeChannelId)
+  }
+
   async function handleDeleteComment(commentId) {
     await rawApi.deleteCommunityComment(commentId)
     await load(activeChannelId)
@@ -3115,6 +3169,7 @@ function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommuni
                     isOwner={isOwner}
                     onComment={handleComment}
                     onDeleteComment={handleDeleteComment}
+                    onEditComment={handleEditComment}
                     onToggleLike={handleToggleLike}
                     onToggleSave={handleToggleSave}
                     onVotePoll={handleVotePoll}
