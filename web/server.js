@@ -2467,6 +2467,16 @@ function createApp() {
     res.json(updated);
   });
 
+  // Moderação: o embaixador dono da comunidade pode apagar qualquer comentário.
+  app.delete("/api/community/comments/:commentId", async (req, res) => {
+    const comment = await db.getCommunityCommentById(Number(req.params.commentId));
+    if (!comment) return res.status(404).json({ error: "Comentário não encontrado." });
+    const allowed = await communityIfAllowed(req, comment.community_id);
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode apagar comentários." });
+    await db.deleteCommunityComment(comment.id);
+    res.status(204).end();
+  });
+
   app.post("/api/community/posts/:postId/comments", async (req, res) => {
     const postId = Number(req.params.postId);
     const bodyText = String(req.body?.body || "").trim();

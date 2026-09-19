@@ -130,6 +130,7 @@ export const rawApi = {
     request(`/api/community/posts/${postId}/vote`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ optionId }) }),
   createCommunityComment: (postId, body) =>
     request(`/api/community/posts/${postId}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) }),
+  deleteCommunityComment: (commentId) => request(`/api/community/comments/${commentId}`, { method: 'DELETE' }),
   toggleCommunityPostLike: (postId) => request(`/api/community/posts/${postId}/like`, { method: 'POST' }),
   toggleCommunityPostSave: (postId) => request(`/api/community/posts/${postId}/save`, { method: 'POST' }),
   getCommunityActivity: (id) => request(`/api/community/${id}/activity`),

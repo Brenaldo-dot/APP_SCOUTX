@@ -168,7 +168,7 @@ function Avatar({ src, name, size = 9 }) {
   )
 }
 
-function Comment({ comment, ambassadorTier }) {
+function Comment({ comment, ambassadorTier, canDelete, onDelete }) {
   return (
     <div className="flex gap-2.5 py-2">
       <div
@@ -189,6 +189,15 @@ function Comment({ comment, ambassadorTier }) {
         </p>
         <p className="mt-0.5 text-sm text-[var(--text-muted)]">{comment.body}</p>
       </div>
+      {canDelete && (
+        <button
+          onClick={() => onDelete(comment.id)}
+          className="h-fit shrink-0 rounded-lg p-1.5 text-[var(--text-faint)] hover:bg-[var(--hover-surface)] hover:text-red-400"
+          title="Apagar comentário"
+        >
+          <Trash2 size={13} />
+        </button>
+      )}
     </div>
   )
 }
@@ -426,7 +435,8 @@ function PollDisplay({ post, onVote }) {
   )
 }
 
-function PostCard({ post, community, ambassadorTier, isOwner, onComment, onToggleLike, onToggleSave, onVotePoll, onEdit, onDelete, onTogglePin }) {
+function PostCard({ post, community, ambassadorTier, isOwner, onComment, onToggleLike, onToggleSave, onVotePoll, onEdit, onDelete, onTogglePin, onDeleteComment }) {
+  const [commentToDelete, setCommentToDelete] = useState(null)
   const [commentText, setCommentText] = useState('')
   const [sending, setSending] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -511,9 +521,23 @@ function PostCard({ post, community, ambassadorTier, isOwner, onComment, onToggl
             <>
               <div className="mt-1 divide-y divide-[var(--border)]">
                 {post.comments.map((c) => (
-                  <Comment key={c.id} comment={c} ambassadorTier={ambassadorTier} />
+                  <Comment key={c.id} comment={c} ambassadorTier={ambassadorTier} canDelete={isOwner} onDelete={setCommentToDelete} />
                 ))}
               </div>
+              {commentToDelete && (
+                <ConfirmDialog
+                  title="Apagar esse comentário?"
+                  message="Ele some pra todo mundo. Essa ação não pode ser desfeita."
+                  confirmLabel="Apagar"
+                  danger
+                  onConfirm={async () => {
+                    const id = commentToDelete
+                    setCommentToDelete(null)
+                    await onDeleteComment(id)
+                  }}
+                  onCancel={() => setCommentToDelete(null)}
+                />
+              )}
               <form onSubmit={submitComment} className="mt-3 flex items-center gap-2">
                 <Avatar name={community.name} size={7} />
                 <input
@@ -2928,6 +2952,11 @@ function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommuni
     await load(activeChannelId)
   }
 
+  async function handleDeleteComment(commentId) {
+    await rawApi.deleteCommunityComment(commentId)
+    await load(activeChannelId)
+  }
+
   async function handleToggleLike(postId) {
     await rawApi.toggleCommunityPostLike(postId)
     await load(activeChannelId)
@@ -3085,6 +3114,7 @@ function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommuni
                     ambassadorTier={data.ambassadorTier}
                     isOwner={isOwner}
                     onComment={handleComment}
+                    onDeleteComment={handleDeleteComment}
                     onToggleLike={handleToggleLike}
                     onToggleSave={handleToggleSave}
                     onVotePoll={handleVotePoll}

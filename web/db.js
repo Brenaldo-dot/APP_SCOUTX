@@ -2295,6 +2295,19 @@ async function createCommunityComment({ postId, authorUserId, authorName, isAmba
 // entrou NESSA comunidade (não a data de criação da conta). Fica null pro
 // embaixador (ele não é uma linha em community_members, é o dono) e pra
 // comentário de conta já excluída (author_user_id vira null).
+// Comentário + community_id do post dele (pra checar dono antes de apagar).
+async function getCommunityCommentById(id) {
+  const res = await pool.query(
+    `SELECT cc.*, p.community_id FROM community_comments cc JOIN community_posts p ON p.id = cc.post_id WHERE cc.id = $1`,
+    [id]
+  );
+  return res.rows[0] || null;
+}
+
+async function deleteCommunityComment(id) {
+  await pool.query("DELETE FROM community_comments WHERE id = $1", [id]);
+}
+
 async function listCommunityCommentsForCommunity(communityId) {
   const res = await pool.query(
     `SELECT cc.*, cm.joined_at AS author_member_since
@@ -2737,6 +2750,8 @@ module.exports = {
   getCommunityPostById,
   updateCommunityPost,
   deleteCommunityPost,
+  getCommunityCommentById,
+  deleteCommunityComment,
   toggleCommunityPostPin,
   createCommunityComment,
   listCommunityCommentsForCommunity,
