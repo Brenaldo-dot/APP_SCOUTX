@@ -2353,6 +2353,11 @@ function MembersPanel({ communityId, isOwner }) {
                   <p className="flex flex-wrap items-center gap-1.5 truncate text-sm font-medium text-[var(--text-primary)]">
                     {m.user_name}
                     <MemberLevelBadge joinedAt={m.joined_at} />
+                    {isOwner && (
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${m.source === 'affiliate' ? 'bg-emerald-500/15 text-emerald-500' : 'bg-[var(--bg-surface-2)] text-[var(--text-faint)]'}`}>
+                        {m.source === 'affiliate' ? 'Veio pelo seu link' : 'Entrou pelo diretório'}
+                      </span>
+                    )}
                     {isOwner && m.muted && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-surface-2)] px-2 py-0.5 text-[10px] font-semibold text-[var(--text-faint)]">
                         <VolumeX size={10} /> Silenciado

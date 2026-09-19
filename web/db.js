@@ -1,4 +1,5 @@
 const { Pool, Client } = require("pg");
+const { tierForActiveMembers } = require("./communityTiers");
 const nodeCrypto = require("crypto");
 
 // Código do link de indicação de um afiliado: nome sem acento/símbolos + 4
@@ -1703,7 +1704,7 @@ async function listCommunityMembersDetailed(communityId) {
   const res = await pool.query(
     `SELECT u.id AS user_id, u.name AS user_name, u.email AS user_email,
             o.id AS organization_id, o.name AS organization_name, o.expires_at,
-            cm.joined_at, cm.muted
+            cm.joined_at, cm.muted, cm.source, o.is_trial
      FROM community_members cm
      JOIN organizations o ON o.id = cm.organization_id
      JOIN app_users u ON u.organization_id = o.id
@@ -1810,11 +1811,32 @@ async function getCommunityEarningsSummary(communityId) {
   const row = totals.rows[0];
   const avgCommissionValue = Number(row.avg_commission_value);
   const hasHistory = row.commission_count > 0;
+  let projectedNextCycle = hasHistory ? avgCommissionValue * activeMemberCount : null;
+  if (!hasHistory && activeMemberCount > 0) {
+    // Sem nenhuma comissão paga ainda: estima pelo preço mensal do plano de
+    // cada membro trazido pelo embaixador x % do nível atual (nível conta
+    // a comunidade inteira, igual ao cálculo real em cakto.js).
+    const plans = await pool.query(
+      `SELECT o.plan FROM community_members cm
+       JOIN organizations o ON o.id = cm.organization_id
+       WHERE cm.community_id = $1 AND cm.source = 'affiliate' AND o.expires_at > now()`,
+      [communityId]
+    );
+    const total = await pool.query(
+      `SELECT COUNT(*)::int AS count FROM community_members cm
+       JOIN organizations o ON o.id = cm.organization_id
+       WHERE cm.community_id = $1 AND o.expires_at > now()`,
+      [communityId]
+    );
+    const pct = tierForActiveMembers(total.rows[0].count).percentage;
+    const gross = plans.rows.reduce((s, r) => s + (TRIAL_PLAN_MONTHLY_PRICE[r.plan] || 0), 0);
+    projectedNextCycle = gross > 0 ? Math.round(gross * (pct / 100) * 100) / 100 : null;
+  }
   return {
     totalReceived: Number(row.total_received),
     totalPending: Number(row.total_pending),
     activeMemberCount,
-    projectedNextCycle: hasHistory ? avgCommissionValue * activeMemberCount : null,
+    projectedNextCycle,
     avgCommissionValue: hasHistory ? avgCommissionValue : null,
   };
 }
