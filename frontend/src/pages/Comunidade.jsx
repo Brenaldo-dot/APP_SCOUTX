@@ -1395,10 +1395,10 @@ function ChannelSidebar({ community, channels, activeChannelId, isOwner, onSelec
 
   return (
     <>
-    <aside className="w-64 shrink-0 rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)]">
+    <aside className="w-full shrink-0 rounded-2xl border lg:w-64 border-[var(--border)] bg-[var(--bg-surface)]">
       <p className="border-b border-[var(--border)] px-4 py-3 text-xs font-semibold uppercase tracking-wide text-[var(--text-faint)]">Canais</p>
 
-      <nav className="max-h-[60vh] space-y-3 overflow-y-auto p-3">
+      <nav className="max-h-48 space-y-3 lg:max-h-[60vh] overflow-y-auto p-3">
         {orderedGroups.map(([groupName, groupChannels]) => (
           <div key={groupName}>
             <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-faint)]">{groupName}</p>
@@ -2709,12 +2709,12 @@ function CommunityTabs({ tab, onChange, accent, showStats, showMembers }) {
     ...(showStats ? [{ value: 'estatisticas', label: 'Estatísticas', Icon: Trophy }] : []),
   ]
   return (
-    <div className="flex gap-1.5 rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-1.5 shadow-sm">
+    <div className="flex gap-1.5 overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-1.5 shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {tabs.map(({ value, label, Icon }) => (
         <button
           key={value}
           onClick={() => onChange(value)}
-          className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all ${
+          className={`inline-flex flex-1 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl px-3.5 py-2.5 text-sm font-semibold transition-all sm:px-4 ${
             tab === value ? `bg-gradient-to-br text-white shadow-md ${accent.grad}` : 'text-[var(--text-muted)] hover:bg-[var(--hover-surface)]'
           }`}
         >
@@ -2959,7 +2959,7 @@ function CommunityFeed({ communityId, isOwner, ambassadorStats, tiers, onCommuni
       )}
 
       {tab === 'posts' && (
-        <div className="flex items-start gap-4">
+        <div className="flex flex-col items-stretch gap-4 lg:flex-row lg:items-start">
           <ChannelSidebar
             community={data.community}
             channels={data.channels}
