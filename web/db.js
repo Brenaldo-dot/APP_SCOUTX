@@ -1590,6 +1590,11 @@ async function createCommunityChannel(communityId, name, groupName) {
   return res.rows[0];
 }
 
+async function renameCommunityChannel(id, name) {
+  const res = await pool.query("UPDATE community_channels SET name = $1 WHERE id = $2 RETURNING *", [name, id]);
+  return res.rows[0] || null;
+}
+
 // Não deixa apagar o último canal restante — sem isso a comunidade fica
 // sem lugar nenhum pra postar.
 async function deleteCommunityChannel(id) {
@@ -2648,6 +2653,7 @@ module.exports = {
   createAffiliateCommission,
   listPaidCaktoOrganizations,
   listOrganizationsAttributedToAffiliate,
+  renameCommunityChannel,
   correctUnpaidAffiliateCommission,
   setOrganizationAffiliate,
   attributeOrganizationToAffiliate,

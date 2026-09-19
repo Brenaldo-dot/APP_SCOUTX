@@ -2023,6 +2023,16 @@ function createApp() {
     res.status(201).json(channel);
   });
 
+  app.patch("/api/community/channels/:channelId", async (req, res) => {
+    const channel = await db.getCommunityChannelById(Number(req.params.channelId));
+    if (!channel) return res.status(404).json({ error: "Canal não encontrado." });
+    const allowed = await communityIfAllowed(req, channel.community_id);
+    if (!allowed || !allowed.isOwner) return res.status(403).json({ error: "Só o embaixador dono da comunidade pode editar canais." });
+    const name = String(req.body?.name || "").trim();
+    if (!name) return res.status(400).json({ error: "Nome do canal é obrigatório." });
+    res.json(await db.renameCommunityChannel(channel.id, name.slice(0, 60)));
+  });
+
   app.delete("/api/community/channels/:channelId", async (req, res) => {
     const channel = await db.getCommunityChannelById(Number(req.params.channelId));
     if (!channel) return res.status(404).json({ error: "Canal não encontrado." });

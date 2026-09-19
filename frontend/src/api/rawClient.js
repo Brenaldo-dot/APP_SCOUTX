@@ -111,6 +111,8 @@ export const rawApi = {
     }),
   createCommunityChannel: (id, name, groupName) =>
     request(`/api/community/${id}/channels`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, groupName }) }),
+  renameCommunityChannel: (channelId, name) =>
+    request(`/api/community/channels/${channelId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
   deleteCommunityChannel: (channelId) => request(`/api/community/channels/${channelId}`, { method: 'DELETE' }),
   createCommunityPost: (id, channelId, body, imageUrl, { scheduledAt, pollOptions } = {}) =>
     request(`/api/community/${id}/posts`, {

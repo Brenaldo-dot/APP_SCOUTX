@@ -1366,6 +1366,21 @@ function ConfirmDialog({ title, message, confirmLabel = 'Confirmar', danger = fa
 function ChannelSidebar({ community, channels, activeChannelId, isOwner, onSelectChannel, onChannelsChanged }) {
   const [channelToDelete, setChannelToDelete] = useState(null)
   const [deleteError, setDeleteError] = useState(null)
+  const [editingId, setEditingId] = useState(null)
+  const [editName, setEditName] = useState('')
+
+  async function saveRename() {
+    const id = editingId
+    const name = editName.trim()
+    setEditingId(null)
+    if (!id || !name) return
+    try {
+      await rawApi.renameCommunityChannel(id, name)
+      onChannelsChanged(id)
+    } catch (err) {
+      setDeleteError(err.message)
+    }
+  }
 
   async function confirmDeleteChannel() {
     const channelId = channelToDelete
@@ -1405,6 +1420,22 @@ function ChannelSidebar({ community, channels, activeChannelId, isOwner, onSelec
             <div className="space-y-0.5">
               {groupChannels.map((c) => (
                 <div key={c.id} className="group flex items-center">
+                  {editingId === c.id ? (
+                    <input
+                      autoFocus
+                      value={editName}
+                      maxLength={60}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onBlur={saveRename}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') e.currentTarget.blur()
+                        if (e.key === 'Escape') {
+                          setEditingId(null)
+                        }
+                      }}
+                      className="w-full rounded-lg border border-brand-500 bg-[var(--bg-surface)] px-2.5 py-1.5 text-sm text-[var(--text-primary)] focus:outline-none"
+                    />
+                  ) : (
                   <button
                     onClick={() => onSelectChannel(c.id)}
                     className={`flex flex-1 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left text-sm ${
@@ -1414,10 +1445,23 @@ function ChannelSidebar({ community, channels, activeChannelId, isOwner, onSelec
                     <Hash size={13} />
                     {c.name}
                   </button>
-                  {isOwner && channels.length > 1 && (
+                  )}
+                  {isOwner && editingId !== c.id && (
+                    <button
+                      onClick={() => {
+                        setEditingId(c.id)
+                        setEditName(c.name)
+                      }}
+                      className="shrink-0 rounded-lg p-1.5 text-[var(--text-faint)] hover:bg-[var(--hover-surface)] hover:text-brand-500 lg:hidden lg:group-hover:block"
+                      title="Renomear canal"
+                    >
+                      <Pencil size={12} />
+                    </button>
+                  )}
+                  {isOwner && channels.length > 1 && editingId !== c.id && (
                     <button
                       onClick={() => handleDeleteChannel(c.id)}
-                      className="hidden shrink-0 rounded-lg p-1.5 text-[var(--text-faint)] hover:bg-[var(--hover-surface)] hover:text-red-400 group-hover:block"
+                      className="shrink-0 rounded-lg p-1.5 text-[var(--text-faint)] hover:bg-[var(--hover-surface)] hover:text-red-400 lg:hidden lg:group-hover:block"
                       title="Apagar canal"
                     >
                       <Trash2 size={12} />
