@@ -110,6 +110,74 @@ def run_purge() -> dict:
         raise
 
 
+# Rede de segurança (2026-09-20): a limpeza agendada no Celery Beat já falhou em
+# rodar de madrugada sem deixar rastro (ver run_purge acima), e o resultado foi
+# meses de histórico acumulado (só o botão manual limpou ~57 mil scores e ~220
+# mil snapshots de uma vez). Aqui a limpeza também roda de uma thread dentro do
+# processo da API, independente do Celery: todo dia a partir de 08:30 UTC
+# (03:30 em Bogotá, 30 min depois do horário do Beat). É idempotente, então se
+# as duas rodarem no mesmo dia nada de mau acontece. O advisory lock impede as
+# duas de rodarem AO MESMO TEMPO (e nunca espera: se está ocupado, pula).
+import threading
+import time
+from datetime import datetime, timezone
+
+_FALLBACK_LOCK_KEY = 727101
+_FALLBACK_HOUR_UTC = 8
+_FALLBACK_MINUTE_UTC = 30
+_fallback_state: dict = {"last_run_at": None, "last_result": None, "last_error": None, "runs": 0}
+_fallback_started = False
+
+
+def get_fallback_state() -> dict:
+    return dict(_fallback_state)
+
+
+def _run_fallback_once() -> None:
+    db = SessionLocal()
+    try:
+        got = db.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": _FALLBACK_LOCK_KEY}).scalar()
+        if not got:
+            logger.info("Limpeza (rede de segurança): outra execução em andamento, pulando.")
+            return
+        try:
+            result = run_purge()
+            _fallback_state.update(
+                last_run_at=datetime.now(timezone.utc).isoformat(), last_result=result, last_error=None
+            )
+            _fallback_state["runs"] += 1
+        finally:
+            db.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _FALLBACK_LOCK_KEY})
+            db.commit()
+    except Exception as exc:  # noqa: BLE001 - nunca derruba a thread
+        _fallback_state.update(last_run_at=datetime.now(timezone.utc).isoformat(), last_error=str(exc))
+        logger.exception("Limpeza (rede de segurança) falhou.")
+    finally:
+        db.close()
+
+
+def _fallback_loop() -> None:
+    last_day = None
+    while True:
+        time.sleep(60)
+        now = datetime.now(timezone.utc)
+        due = (now.hour, now.minute) >= (_FALLBACK_HOUR_UTC, _FALLBACK_MINUTE_UTC)
+        if due and last_day != now.date():
+            last_day = now.date()
+            logger.info("Limpeza (rede de segurança): disparando.")
+            _run_fallback_once()
+
+
+def start_fallback_scheduler() -> None:
+    """Sobe a thread uma única vez por processo (chamado no startup da API)."""
+    global _fallback_started
+    if _fallback_started:
+        return
+    _fallback_started = True
+    threading.Thread(target=_fallback_loop, name="retention-fallback", daemon=True).start()
+    logger.info("Limpeza (rede de segurança): agendada diariamente às %02d:%02d UTC.", _FALLBACK_HOUR_UTC, _FALLBACK_MINUTE_UTC)
+
+
 @celery_app.task(name="app.tasks.retention.purge_old_history", acks_late=True, max_retries=2, default_retry_delay=60)
 def purge_old_history() -> dict:
     return run_purge()

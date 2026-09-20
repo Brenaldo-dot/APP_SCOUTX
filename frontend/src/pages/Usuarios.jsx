@@ -147,6 +147,8 @@ export default function Usuarios() {
   const [protectMsg, setProtectMsg] = useState(null)
   const [runningRetention, setRunningRetention] = useState(false)
   const [retentionMsg, setRetentionMsg] = useState(null)
+  const [dbUsage, setDbUsage] = useState(null)
+  const [loadingUsage, setLoadingUsage] = useState(false)
   const [celeryDiag, setCeleryDiag] = useState(null)
   const [loadingDiag, setLoadingDiag] = useState(false)
   const [assinarLeads, setAssinarLeads] = useState(null)
@@ -253,6 +255,23 @@ export default function Usuarios() {
     } catch (err) {
       setProtectMsg({ type: 'error', text: err.message || 'Não foi possível remover a proteção.' })
     }
+  }
+
+  async function handleDbUsage() {
+    setLoadingUsage(true)
+    setDbUsage(null)
+    try {
+      setDbUsage(await api.retentionStatus())
+    } catch (err) {
+      setDbUsage({ error: err.message || 'Não foi possível consultar o banco.' })
+    } finally {
+      setLoadingUsage(false)
+    }
+  }
+
+  function formatBytes(bytes) {
+    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`
+    return `${(bytes / 1024 ** 2).toFixed(1)} MB`
   }
 
   async function handleRunRetention() {
@@ -563,8 +582,9 @@ export default function Usuarios() {
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
           <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Manutenção do banco</h3>
           <p className="mb-3.5 text-sm text-[var(--text-tertiary)]">
-            Apaga pontuações e fotos de produto com mais de 14 dias (sempre mantendo a mais recente de cada
-            produto) — roda sozinho de madrugada, esse botão só força na hora pra conferir se está funcionando.
+            Apaga pontuações e fotos de produto com mais de 12 dias (sempre mantendo a mais recente de cada
+            produto). Roda sozinho toda madrugada, com uma segunda execução de reserva dentro da própria API caso a
+            primeira não rode. Esse botão só força na hora.
           </p>
           <button
             onClick={handleRunRetention}
@@ -578,6 +598,54 @@ export default function Usuarios() {
               {retentionMsg.text}
             </p>
           )}
+          <div className="mt-4 border-t border-[var(--border)] pt-4">
+            <p className="mb-2 text-xs text-[var(--text-tertiary)]">
+              Uso do banco por tabela e última execução da limpeza de reserva. Apagar linhas não devolve espaço ao
+              disco na hora: o espaço fica reservado e é reaproveitado por dados novos.
+            </p>
+            <button
+              onClick={handleDbUsage}
+              disabled={loadingUsage}
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--hover-surface)] disabled:opacity-60"
+            >
+              {loadingUsage ? 'Consultando…' : 'Ver uso do banco'}
+            </button>
+            {dbUsage?.error && <p className="mt-3 text-sm text-red-400">{dbUsage.error}</p>}
+            {dbUsage && !dbUsage.error && (
+              <div className="mt-3 space-y-2 text-xs text-[var(--text-secondary)]">
+                <p>
+                  Banco inteiro: <span className="font-semibold text-[var(--text-primary)]">{formatBytes(dbUsage.database_bytes)}</span>
+                  {' · '}
+                  Limpeza de reserva:{' '}
+                  {dbUsage.fallback?.last_run_at
+                    ? `rodou em ${new Date(dbUsage.fallback.last_run_at).toLocaleString('pt-BR')}${dbUsage.fallback.last_error ? ` (erro: ${dbUsage.fallback.last_error})` : ''}`
+                    : 'ainda não rodou desde o último deploy (roda todo dia às 03:30 de Bogotá)'}
+                </p>
+                <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
+                  <table className="w-full text-left">
+                    <thead className="bg-[var(--bg-surface-2)] text-[10px] uppercase text-[var(--text-muted)]">
+                      <tr>
+                        <th className="px-3 py-1.5">Tabela</th>
+                        <th className="px-3 py-1.5 text-right">Tamanho</th>
+                        <th className="px-3 py-1.5 text-right">Linhas</th>
+                        <th className="px-3 py-1.5 text-right">Apagadas (ainda ocupam espaço)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border)]">
+                      {dbUsage.tables.map((t) => (
+                        <tr key={t.name}>
+                          <td className="px-3 py-1.5 font-mono">{t.name}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{formatBytes(t.bytes)}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{t.live_rows.toLocaleString('pt-BR')}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{t.dead_rows.toLocaleString('pt-BR')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
           <div className="mt-4 border-t border-[var(--border)] pt-4">
             <p className="mb-2 text-xs text-[var(--text-tertiary)]">
               A limpeza automática de madrugada não deixou rastro de ter rodado — diagnóstico ao vivo dos workers:

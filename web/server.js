@@ -724,6 +724,19 @@ function createApp() {
   const app = express();
   app.set("trust proxy", 1);
   app.disable("x-powered-by");
+  // Healthcheck da Railway: registrado ANTES de qualquer middleware (sessão,
+  // CSP, auth) pra responder 200 sem depender de login. Só confirma que o
+  // processo está de pé e o banco responde. A Railway só troca a versão
+  // antiga pela nova depois que isso devolve 200; se a nova não subir (ex.:
+  // migração falhando), a antiga continua no ar.
+  app.get("/healthz", async (req, res) => {
+    try {
+      await db.pool.query("SELECT 1");
+      res.status(200).json({ ok: true });
+    } catch {
+      res.status(503).json({ ok: false });
+    }
+  });
   app.use(express.urlencoded({ extended: false }));
   // Limite padrão do express (100kb) estourava 413 em qualquer request com
   // imagem em base64 (avatar até 2MB, post/comunidade até 4MB, ver

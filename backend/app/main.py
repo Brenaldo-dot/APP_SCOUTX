@@ -48,6 +48,13 @@ async def lifespan(app: FastAPI):
             "seguindo com a API mesmo assim, já que o schema quase certamente já está em dia de deploys anteriores."
         )
 
+    try:
+        from app.tasks.retention import start_fallback_scheduler
+
+        start_fallback_scheduler()
+    except Exception:
+        logger.exception("Não consegui agendar a limpeza de histórico de reserva.")
+
     yield
 
 

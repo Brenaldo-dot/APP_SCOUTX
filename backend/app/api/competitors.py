@@ -463,6 +463,39 @@ def run_retention_now(current_user: CurrentUser = Depends(get_current_user)):
     return run_purge()
 
 
+@router.get("/retention-status")
+def retention_status(current_user: CurrentUser = Depends(get_current_user)):
+    """Estado da limpeza de reserva (thread interna) + uso do banco por
+    tabela. `dead_tuples` = linhas apagadas que ainda ocupam espaço no
+    disco até o Postgres reaproveitar (apagar não devolve espaço ao
+    disco). Só admin."""
+    if not current_user.is_admin:
+        raise HTTPException(403, "Só administradores podem ver isso.")
+    from sqlalchemy import text as sql_text
+
+    from app.database import SessionLocal
+    from app.tasks.retention import get_fallback_state
+
+    db = SessionLocal()
+    try:
+        total = db.execute(sql_text("SELECT pg_database_size(current_database())")).scalar()
+        rows = db.execute(
+            sql_text(
+                "SELECT relname, pg_total_relation_size(relid) AS bytes, n_live_tup, n_dead_tup "
+                "FROM pg_stat_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 12"
+            )
+        ).all()
+    finally:
+        db.close()
+    return {
+        "fallback": get_fallback_state(),
+        "database_bytes": int(total or 0),
+        "tables": [
+            {"name": r[0], "bytes": int(r[1]), "live_rows": int(r[2] or 0), "dead_rows": int(r[3] or 0)} for r in rows
+        ],
+    }
+
+
 @router.get("/celery-diagnostics")
 def celery_diagnostics(current_user: CurrentUser = Depends(get_current_user)):
     """Diagnóstico ao vivo (2026-08-30): `purge-old-history-daily-3am` é
