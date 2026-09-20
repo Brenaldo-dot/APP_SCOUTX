@@ -23,6 +23,7 @@ import Indicacao from './pages/Indicacao.jsx'
 import AdminIndicacoes from './pages/AdminIndicacoes.jsx'
 import Comunidade from './pages/Comunidade.jsx'
 import AdminComunidades from './pages/AdminComunidades.jsx'
+import AdminSugestoes from './pages/AdminSugestoes.jsx'
 import Conta from './pages/Conta.jsx'
 import Suporte from './pages/Suporte.jsx'
 
@@ -91,6 +92,7 @@ export default function App() {
               <Route path="/afiliados" element={<Afiliados />} />
               <Route path="/admin/indicacoes" element={<AdminIndicacoes />} />
               <Route path="/admin/comunidades" element={<AdminComunidades />} />
+              <Route path="/admin/sugestoes" element={<AdminSugestoes />} />
             </Route>
           </Route>
         </Routes>

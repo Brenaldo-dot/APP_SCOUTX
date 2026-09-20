@@ -38,6 +38,34 @@
   --text-faint: #9ca3af;
 }
 
+/* Scrollbar fina no tom do tema (trilho transparente, polegar na cor da borda,
+   azul ao passar o mouse) pra listas roláveis dentro de painéis. Os seletores
+   webkit e o par padrão ficam separados de propósito: no Chrome novo o padrão
+   (scrollbar-width/color) anula os ::-webkit-scrollbar, então o padrão só
+   entra onde o webkit não existe (Firefox). */
+.sx-scroll::-webkit-scrollbar {
+  width: 12px;
+}
+.sx-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sx-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background-clip: padding-box;
+}
+.sx-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(59, 130, 246, 0.55);
+  background-clip: padding-box;
+}
+@supports not selector(::-webkit-scrollbar) {
+  .sx-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+}
+
 /* Botão de ação principal — pílula (rounded-full) com gradiente azul vívido
    e brilho, no estilo da referência que o usuário mandou (comunidade estilo
    "hub" com cards/pills brilhantes), mas em azul em vez de roxo. A primeira

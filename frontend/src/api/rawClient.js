@@ -175,6 +175,18 @@ export const rawApi = {
       body: JSON.stringify({ paid }),
     }),
 
+  listSuggestedCompetitors: (operation) => request(`/api/suggested-competitors?${qs({ operation })}`),
+  listAdminSuggestedCompetitors: () => request('/api/admin/suggested-competitors'),
+  addSuggestedCompetitors: (operation, text) =>
+    request('/api/admin/suggested-competitors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operation, text }),
+    }),
+  deleteSuggestedCompetitor: (id) => request(`/api/admin/suggested-competitors/${id}`, { method: 'DELETE' }),
+  clearSuggestedCompetitors: (operation) =>
+    request(`/api/admin/suggested-competitors?${qs({ operation })}`, { method: 'DELETE' }),
+
   buscarBarcode: (url) => request(`/api/buscar?${qs({ url })}`),
   espionarLoja: (url) => request(`/api/spy?${qs({ url })}`),
   spyPreviewUrl: (url) => `/api/spy-preview?${qs({ url })}`,

@@ -2688,6 +2688,86 @@ function createApp() {
     res.json(updated);
   });
 
+  // ---------- Sugestões de concorrentes ----------
+
+  // Aceita "lojaexemplo.com", "https://www.lojaexemplo.com/produtos/x" ou
+  // "Nome da Loja | lojaexemplo.com". Devolve null se não parecer um domínio.
+  function parseSuggestionLine(line) {
+    let name = null;
+    let raw = line.trim();
+    if (!raw) return null;
+    if (raw.includes("|")) {
+      // O domínio é sempre o último pedaço; o nome pode ter "|" dentro.
+      const lastPipe = raw.lastIndexOf("|");
+      name = raw.slice(0, lastPipe).trim() || null;
+      raw = raw.slice(lastPipe + 1).trim();
+    }
+    const domain = raw
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .split(/[/?#\s]/)[0]
+      .replace(/:\d+$/, "");
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain)) return { invalid: line.trim() };
+    return { domain, name };
+  }
+
+  // A ordem NÃO é decidida aqui: o painel embaralha no navegador toda vez que
+  // abre (ver components/SuggestedCompetitors.jsx), então cada cliente vê uma
+  // ordem diferente e ela muda a cada abertura.
+  // Mesma permissão da aba Concorrentes (requireMineradorAccess): a lista é
+  // curada e só faz sentido pra quem usa o minerador.
+  app.get("/api/suggested-competitors", requireMineradorAccess, async (req, res) => {
+    const operation = String(req.query.operation || "").trim();
+    if (!operation) return res.json([]);
+    const rows = await db.listSuggestedCompetitors(operation);
+    res.json(rows.map((r) => ({ domain: r.domain, name: r.name })));
+  });
+
+  app.get("/api/admin/suggested-competitors", requireAdmin, async (req, res) => {
+    res.json(await db.listSuggestedCompetitors(null));
+  });
+
+  app.post("/api/admin/suggested-competitors", requireAdmin, async (req, res) => {
+    const operation = String(req.body?.operation || "").trim();
+    if (!operation) return res.status(400).json({ error: "Escolha o país." });
+    const text = String(req.body?.text || "");
+    const items = [];
+    const invalid = [];
+    const seen = new Set();
+    for (const line of text.split(/\r?\n/)) {
+      const parsed = parseSuggestionLine(line);
+      if (!parsed) continue;
+      if (parsed.invalid) {
+        invalid.push(parsed.invalid);
+        continue;
+      }
+      if (seen.has(parsed.domain)) continue;
+      seen.add(parsed.domain);
+      items.push(parsed);
+    }
+    if (items.length === 0) {
+      return res.status(400).json({ error: "Nenhum domínio válido encontrado na lista.", invalid });
+    }
+    const result = await db.addSuggestedCompetitors(operation, items);
+    res.status(201).json({ ...result, invalid });
+  });
+
+  app.delete("/api/admin/suggested-competitors/:id", requireAdmin, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Id inválido." });
+    const ok = await db.deleteSuggestedCompetitor(id);
+    if (!ok) return res.status(404).json({ error: "Sugestão não encontrada." });
+    res.status(204).end();
+  });
+
+  app.delete("/api/admin/suggested-competitors", requireAdmin, async (req, res) => {
+    const operation = String(req.query.operation || "").trim();
+    if (!operation) return res.status(400).json({ error: "Informe o país." });
+    const removed = await db.deleteSuggestedCompetitorsByOperation(operation);
+    res.json({ removed });
+  });
+
   app.get("/api/admin/users", requireAdmin, async (req, res) => {
     const users = await db.listUsersWithCounts();
     res.json(

@@ -13,6 +13,7 @@ import {
   Handshake,
   History,
   LayoutDashboard,
+  Lightbulb,
   LogOut,
   Megaphone,
   Menu,
@@ -473,6 +474,17 @@ export default function Layout() {
                   <>
                     <NavIcon Icon={Users} active={isActive} />
                     {!effectiveCollapsed && t('nav.adminComunidades')}
+                  </>
+                )}
+              </NavLink>
+            )}
+
+            {me?.isAdmin && (
+              <NavLink to="/admin/sugestoes" title={effectiveCollapsed ? t('nav.adminSugestoes') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
+                {({ isActive }) => (
+                  <>
+                    <NavIcon Icon={Lightbulb} active={isActive} />
+                    {!effectiveCollapsed && t('nav.adminSugestoes')}
                   </>
                 )}
               </NavLink>

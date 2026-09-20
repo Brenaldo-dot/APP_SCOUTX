@@ -520,6 +520,21 @@ async function migrate() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_community_channels_community ON community_channels(community_id);`);
 
+  // Lista curada pelo admin (~80 lojas por país) que aparece como carrossel de
+  // "Sugestões de concorrentes" na aba Concorrentes. `operation` é o mesmo
+  // texto livre usado em competitors.operation (colombia, mexico, espanha...).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS suggested_competitors (
+      id SERIAL PRIMARY KEY,
+      operation TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      name TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (operation, domain)
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_suggested_competitors_operation ON suggested_competitors(operation);`);
+
   // community_id fica denormalizado aqui (além de channel_id) de propósito
   // — mesmo padrão de snapshot já usado em outras tabelas deste arquivo:
   // deixa consultas que só precisam "todos os posts da comunidade" (sem
@@ -2705,7 +2720,52 @@ async function historySummaryForUser(appUserId) {
   return res.rows;
 }
 
+async function listSuggestedCompetitors(operation) {
+  if (operation) {
+    const res = await pool.query("SELECT * FROM suggested_competitors WHERE operation = $1 ORDER BY id", [operation]);
+    return res.rows;
+  }
+  const res = await pool.query("SELECT * FROM suggested_competitors ORDER BY operation, id");
+  return res.rows;
+}
+
+// Só insere o que ainda não existe naquele país (conferido em JS antes, em vez
+// de ON CONFLICT, pra não depender de suporte do pg-mem no teste local).
+async function addSuggestedCompetitors(operation, items) {
+  const existing = new Set((await listSuggestedCompetitors(operation)).map((r) => r.domain));
+  let added = 0;
+  let skipped = 0;
+  for (const item of items) {
+    if (existing.has(item.domain)) {
+      skipped++;
+      continue;
+    }
+    await pool.query("INSERT INTO suggested_competitors (operation, domain, name) VALUES ($1, $2, $3)", [
+      operation,
+      item.domain,
+      item.name || null,
+    ]);
+    existing.add(item.domain);
+    added++;
+  }
+  return { added, skipped };
+}
+
+async function deleteSuggestedCompetitor(id) {
+  const res = await pool.query("DELETE FROM suggested_competitors WHERE id = $1", [id]);
+  return res.rowCount > 0;
+}
+
+async function deleteSuggestedCompetitorsByOperation(operation) {
+  const res = await pool.query("DELETE FROM suggested_competitors WHERE operation = $1", [operation]);
+  return res.rowCount;
+}
+
 module.exports = {
+  listSuggestedCompetitors,
+  addSuggestedCompetitors,
+  deleteSuggestedCompetitor,
+  deleteSuggestedCompetitorsByOperation,
   pool,
   PLAN_LIMITS,
   BILLING_CYCLE_DAYS,
