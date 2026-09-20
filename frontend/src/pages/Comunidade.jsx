@@ -2423,8 +2423,8 @@ function AffiliateEarningsCard({ data }) {
                     <div className="text-right">
                       <p className="text-sm font-bold tabular-nums text-orange-400">{formatBRL(t.projected_commission_value)}</p>
                       <p className="text-[10px] text-[var(--text-faint)]">
-                        se assinar (1ª venda)
-                        {t.projected_recurring_value > 0 ? ` · depois ${formatBRL(t.projected_recurring_value)}/renovação` : ''}
+                        estimativa da 1ª venda
+                        {t.projected_recurring_value > 0 ? ` · depois, renovação de ~${formatBRL(t.projected_recurring_value)}` : ''}
                       </p>
                     </div>
                   </div>
