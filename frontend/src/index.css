@@ -39,31 +39,81 @@
 }
 
 /* Scrollbar fina no tom do tema (trilho transparente, polegar na cor da borda,
-   azul ao passar o mouse) pra listas roláveis dentro de painéis. Os seletores
+   azul ao passar o mouse), em TODO o app (página inteira, menu lateral e painéis). Os seletores
    webkit e o par padrão ficam separados de propósito: no Chrome novo o padrão
    (scrollbar-width/color) anula os ::-webkit-scrollbar, então o padrão só
    entra onde o webkit não existe (Firefox). */
-.sx-scroll::-webkit-scrollbar {
+*::-webkit-scrollbar {
   width: 12px;
+  height: 12px;
 }
-.sx-scroll::-webkit-scrollbar-track {
+*::-webkit-scrollbar-track {
   background: transparent;
 }
-.sx-scroll::-webkit-scrollbar-thumb {
+*::-webkit-scrollbar-thumb {
   background: var(--border);
   border: 3px solid transparent;
   border-radius: 9999px;
   background-clip: padding-box;
 }
-.sx-scroll::-webkit-scrollbar-thumb:hover {
+*::-webkit-scrollbar-thumb:hover {
   background: rgba(59, 130, 246, 0.55);
   background-clip: padding-box;
 }
 @supports not selector(::-webkit-scrollbar) {
-  .sx-scroll {
+  * {
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
   }
+}
+
+/* Caixinhas de marcar (checkbox) no estilo do resto do app: cantos arredondados,
+   borda no tom do tema, azul com gradiente e "check" branco quando marcada,
+   brilho ao passar o mouse e anel ao focar pelo teclado. */
+input[type='checkbox'] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  border: 1.5px solid rgba(148, 163, 184, 0.5);
+  border-radius: 6px;
+  background-color: var(--bg-surface-2);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+}
+input[type='checkbox']:hover {
+  border-color: rgba(59, 130, 246, 0.7);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+input[type='checkbox']:checked {
+  border-color: transparent;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E"),
+    linear-gradient(135deg, #3b82f6, #2563eb);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
+}
+input[type='checkbox']:active {
+  transform: scale(0.92);
+}
+input[type='checkbox']:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.35);
+}
+input[type='checkbox']:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+label:has(> input[type='checkbox']) {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+label:has(> input[type='checkbox']:checked) {
+  color: var(--text-primary);
 }
 
 /* Botão de ação principal — pílula (rounded-full) com gradiente azul vívido
