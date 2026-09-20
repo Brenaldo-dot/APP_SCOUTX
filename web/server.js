@@ -720,6 +720,8 @@ submitBtn.addEventListener("click", function () {
 });
 `;
 
+const serverStartedAt = new Date().toISOString();
+
 function createApp() {
   const app = express();
   app.set("trust proxy", 1);
@@ -3389,7 +3391,56 @@ function createApp() {
     next();
   }
 
+  // Medição de tempo das chamadas ao FastAPI (2026-09-20, pra descobrir qual
+  // tela está lenta). Guarda em memória, por rota normalizada (ids viram :id e a
+  // query some): quantas chamadas, tempo total, e separa "pre" (o que o Node
+  // faz ANTES de chamar o FastAPI, ex.: consulta ao banco) de "up" (tempo
+  // esperando o FastAPI responder). Zera a cada deploy/reinício.
+  const routeLatency = new Map();
+  function normalizeRoute(method, targetPath) {
+    const clean = String(targetPath || "").split("?")[0].replace(/\/\d+(?=\/|$)/g, "/:id");
+    return `${method} ${clean}`;
+  }
+  function recordProxyTiming(method, targetPath, { total, pre, up, status }) {
+    const key = normalizeRoute(method, targetPath);
+    let r = routeLatency.get(key);
+    if (!r) {
+      r = { count: 0, sum: 0, max: 0, sumPre: 0, sumUp: 0, errors: 0, samples: [] };
+      routeLatency.set(key, r);
+    }
+    r.count += 1;
+    r.sum += total;
+    r.sumPre += pre;
+    r.sumUp += up;
+    if (total > r.max) r.max = total;
+    if (status >= 500) r.errors += 1;
+    r.samples.push(total);
+    if (r.samples.length > 200) r.samples.shift();
+    if (total > 2000) {
+      console.log(`Proxy lento: ${key} ${total}ms (node antes: ${pre}ms, FastAPI: ${up}ms, status ${status})`);
+    }
+  }
+  app.get("/api/admin/route-latency", requireAdmin, (req, res) => {
+    const rows = [...routeLatency.entries()].map(([route, r]) => {
+      const sorted = [...r.samples].sort((a, b) => a - b);
+      const p95 = sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] : 0;
+      return {
+        route,
+        count: r.count,
+        avgMs: Math.round(r.sum / r.count),
+        p95Ms: p95,
+        maxMs: r.max,
+        avgNodeMs: Math.round(r.sumPre / r.count),
+        avgUpstreamMs: Math.round(r.sumUp / r.count),
+        errors: r.errors,
+      };
+    });
+    rows.sort((a, b) => b.p95Ms - a.p95Ms);
+    res.json({ since: serverStartedAt, routes: rows });
+  });
+
   app.all("/api/minerador/*", requireMineradorAccess, async (req, res) => {
+    const tStart = Date.now();
     if (!MINERADOR_API_URL) {
       return res.status(503).json({ error: "Minerador ainda não está configurado neste ambiente." });
     }
@@ -3421,6 +3472,7 @@ function createApp() {
       }
     }
 
+    const tUpStart = Date.now();
     try {
       const upstream = await fetch(targetUrl, {
         method: req.method,
@@ -3439,6 +3491,12 @@ function createApp() {
         body: ["GET", "HEAD"].includes(req.method) ? undefined : JSON.stringify(req.body || {}),
       });
       const data = await upstream.text();
+      recordProxyTiming(req.method, targetPath, {
+        total: Date.now() - tStart,
+        pre: tUpStart - tStart,
+        up: Date.now() - tUpStart,
+        status: upstream.status,
+      });
       // A prévia de produto (/api/products/:id/preview) devolve a página
       // HTML REAL de um concorrente, com CSS/fonte hospedados no domínio
       // dele — o CSP global (style-src/font-src 'self') barra tudo isso e a
@@ -3454,6 +3512,7 @@ function createApp() {
       res.send(data);
     } catch (err) {
       console.error("erro no proxy do minerador:", err);
+      recordProxyTiming(req.method, targetPath, { total: Date.now() - tStart, pre: tUpStart - tStart, up: Date.now() - tUpStart, status: 502 });
       res.status(502).json({ error: "Não foi possível contatar o serviço do Minerador." });
     }
   });

@@ -148,6 +148,8 @@ export default function Usuarios() {
   const [runningRetention, setRunningRetention] = useState(false)
   const [retentionMsg, setRetentionMsg] = useState(null)
   const [dbUsage, setDbUsage] = useState(null)
+  const [latency, setLatency] = useState(null)
+  const [loadingLatency, setLoadingLatency] = useState(false)
   const [loadingUsage, setLoadingUsage] = useState(false)
   const [celeryDiag, setCeleryDiag] = useState(null)
   const [loadingDiag, setLoadingDiag] = useState(false)
@@ -254,6 +256,17 @@ export default function Usuarios() {
       load()
     } catch (err) {
       setProtectMsg({ type: 'error', text: err.message || 'Não foi possível remover a proteção.' })
+    }
+  }
+
+  async function handleLatency() {
+    setLoadingLatency(true)
+    try {
+      setLatency(await rawApi.getRouteLatency())
+    } catch (err) {
+      setLatency({ error: err.message || 'Não foi possível consultar.' })
+    } finally {
+      setLoadingLatency(false)
     }
   }
 
@@ -638,6 +651,53 @@ export default function Usuarios() {
                           <td className="px-3 py-1.5 text-right tabular-nums">{formatBytes(t.bytes)}</td>
                           <td className="px-3 py-1.5 text-right tabular-nums">{t.live_rows.toLocaleString('pt-BR')}</td>
                           <td className="px-3 py-1.5 text-right tabular-nums">{t.dead_rows.toLocaleString('pt-BR')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="mt-4 border-t border-[var(--border)] pt-4">
+            <p className="mb-2 text-xs text-[var(--text-tertiary)]">
+              Tempo das telas: mede cada chamada ao serviço do Minerador desde o último deploy e mostra as mais lentas
+              primeiro. "Node" é o tempo antes de chamar o serviço (consulta ao banco), "Serviço" é a espera pela resposta.
+            </p>
+            <button
+              onClick={handleLatency}
+              disabled={loadingLatency}
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--hover-surface)] disabled:opacity-60"
+            >
+              {loadingLatency ? 'Consultando…' : 'Ver telas lentas'}
+            </button>
+            {latency?.error && <p className="mt-3 text-sm text-red-400">{latency.error}</p>}
+            {latency && !latency.error && (
+              <div className="mt-3 space-y-2 text-xs text-[var(--text-secondary)]">
+                <p>Medindo desde {new Date(latency.since).toLocaleString('pt-BR')}. Sem dados? Use o app um pouco e consulte de novo.</p>
+                <div className="max-h-80 overflow-auto rounded-lg border border-[var(--border)]">
+                  <table className="w-full text-left">
+                    <thead className="bg-[var(--bg-surface-2)] text-[10px] uppercase text-[var(--text-muted)]">
+                      <tr>
+                        <th className="px-3 py-1.5">Chamada</th>
+                        <th className="px-3 py-1.5 text-right">Vezes</th>
+                        <th className="px-3 py-1.5 text-right">Média</th>
+                        <th className="px-3 py-1.5 text-right">Pior 5%</th>
+                        <th className="px-3 py-1.5 text-right">Máx</th>
+                        <th className="px-3 py-1.5 text-right">Node</th>
+                        <th className="px-3 py-1.5 text-right">Serviço</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border)]">
+                      {latency.routes.map((r) => (
+                        <tr key={r.route}>
+                          <td className="px-3 py-1.5 font-mono">{r.route}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{r.count}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{r.avgMs} ms</td>
+                          <td className={`px-3 py-1.5 text-right tabular-nums ${r.p95Ms > 1500 ? 'font-semibold text-red-400' : r.p95Ms > 700 ? 'text-amber-400' : ''}`}>{r.p95Ms} ms</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{r.maxMs} ms</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{r.avgNodeMs} ms</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{r.avgUpstreamMs} ms</td>
                         </tr>
                       ))}
                     </tbody>

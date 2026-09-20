@@ -175,6 +175,7 @@ export const rawApi = {
       body: JSON.stringify({ paid }),
     }),
 
+  getRouteLatency: () => request('/api/admin/route-latency'),
   listSuggestedCompetitors: (operation) => request(`/api/suggested-competitors?${qs({ operation })}`),
   listAdminSuggestedCompetitors: () => request('/api/admin/suggested-competitors'),
   addSuggestedCompetitors: (operation, text) =>
