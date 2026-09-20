@@ -21,6 +21,12 @@
   --text-tertiary: #9ca3af;
   --text-muted: #6b7280;
   --text-faint: #4b5563;
+  /* Avisa o navegador que o app é escuro: as barras de rolagem (e controles
+     nativos) deixam de vir brancas. scrollbar-color/width é o padrão que o
+     Chrome novo respeita na barra da PÁGINA inteira; herda pros painéis. */
+  color-scheme: dark;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
 }
 
 [data-theme='light'] {
@@ -36,13 +42,16 @@
   --text-tertiary: #4b5563;
   --text-muted: #6b7280;
   --text-faint: #9ca3af;
+  color-scheme: light;
+  scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
 }
 
 /* Scrollbar fina no tom do tema (trilho transparente, polegar na cor da borda,
    azul ao passar o mouse), em TODO o app (página inteira, menu lateral e painéis). Os seletores
    webkit e o par padrão ficam separados de propósito: no Chrome novo o padrão
    (scrollbar-width/color) anula os ::-webkit-scrollbar, então o padrão só
-   entra onde o webkit não existe (Firefox). */
+   entra onde o webkit não existe (Firefox). Agora o padrão (scrollbar-color em
+   :root) já vale em todo lugar; os ::-webkit-scrollbar ficam de reserva pro Safari. */
 ::-webkit-scrollbar,
 html::-webkit-scrollbar,
 body::-webkit-scrollbar,
@@ -71,12 +80,6 @@ body::-webkit-scrollbar-thumb:hover,
 *::-webkit-scrollbar-thumb:hover {
   background: rgba(59, 130, 246, 0.55);
   background-clip: padding-box;
-}
-@supports not selector(::-webkit-scrollbar) {
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(148, 163, 184, 0.3) transparent;
-  }
 }
 
 /* Caixinhas de marcar (checkbox) no estilo do resto do app: cantos arredondados,
