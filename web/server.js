@@ -2397,7 +2397,16 @@ function createApp() {
     ]
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
       .slice(0, 10);
+    // Recorrência futura de quem está em teste: % do nível ATUAL da comunidade
+    // sobre o preço do plano (é o que ele passa a ganhar a cada renovação depois
+    // da 1ª venda). Estimativa: o nível pode mudar até lá.
+    const communityStats = await buildAmbassadorStats(allowed.community);
+    const trialWithRecurring = trialReferrals.map((t) => ({
+      ...t,
+      projected_recurring_value: Math.round(Number(t.subscription_amount || 0) * (communityStats.tierPercentage / 100) * 100) / 100,
+    }));
     res.json({
+      communityTierPercentage: communityStats.tierPercentage,
       firstSalePercentage: Number(affiliate.first_sale_percentage),
       recurringPercentage: Number(affiliate.recurring_percentage),
       refCode: affiliate.ref_code || null,
@@ -2406,7 +2415,7 @@ function createApp() {
       totalPending: Math.round((summary.totalPending + couponPending) * 100) / 100,
       referredCustomers: summary.referredCustomers + extraCustomers,
       recentCommissions: mergedRecent,
-      trialReferrals,
+      trialReferrals: trialWithRecurring,
       ...trialSummary,
     });
   });

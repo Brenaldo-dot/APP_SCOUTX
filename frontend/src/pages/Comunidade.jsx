@@ -2242,11 +2242,11 @@ function EarningsSummary({ earnings }) {
       </p>
       <div className="grid gap-3 sm:grid-cols-3">
         <div>
-          <p className="text-lg font-bold text-[var(--text-primary)]">{formatBRL(earnings.totalReceived)}</p>
+          <p className="text-lg font-bold text-emerald-400">{formatBRL(earnings.totalReceived)}</p>
           <p className="text-[11px] text-[var(--text-faint)]">Já recebido</p>
         </div>
         <div>
-          <p className="text-lg font-bold text-[var(--text-primary)]">{formatBRL(earnings.totalPending)}</p>
+          <p className="text-lg font-bold text-orange-400">{formatBRL(earnings.totalPending)}</p>
           <p className="text-[11px] text-[var(--text-faint)]">A receber (pendente)</p>
         </div>
         <div>
@@ -2273,16 +2273,59 @@ function EarningsSummary({ earnings }) {
 // — sistema PARALELO ao EarningsSummary acima (que é % sobre membros
 // ativos da comunidade). Antes só o admin via isso (tela /afiliados);
 // primeira vez que o próprio embaixador enxerga os próprios números.
-function AffiliateEarningsCard({ communityId }) {
-  const [data, setData] = useState(null)
-  const [error, setError] = useState(null)
+// Dias que faltam pro teste acabar (0 = termina hoje). null se não tiver data.
+function trialDaysLeft(endsAt) {
+  if (!endsAt) return null
+  const ms = new Date(endsAt).getTime() - Date.now()
+  if (Number.isNaN(ms)) return null
+  return Math.max(0, Math.ceil(ms / 86400000))
+}
+
+// Resumo geral dos ganhos do embaixador (comunidade + afiliado + cupom):
+// verde = já recebeu, laranja = a receber, tracejado = previsto dos testes.
+function EarningsHero({ community, affiliate }) {
+  const received = Number(community?.totalReceived || 0) + Number(affiliate?.totalReceived || 0)
+  const pending = Number(community?.totalPending || 0) + Number(affiliate?.totalPending || 0)
+  const trial = Number(affiliate?.projectedTrialTotal || 0)
+  const total = received + pending
+  const pct = total > 0 ? Math.round((received / total) * 100) : 0
+  return (
+    <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-gradient-to-br from-emerald-500/10 via-[var(--bg-surface)] to-orange-500/10 p-5">
+      <p className="mb-3 flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
+        <Wallet size={16} className="text-emerald-400" /> Seus ganhos até agora
+      </p>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5">
+          <p className="text-2xl font-extrabold tabular-nums text-emerald-400">{formatBRL(received)}</p>
+          <p className="mt-0.5 text-xs font-semibold text-emerald-300">Já recebido</p>
+        </div>
+        <div className="rounded-xl border border-orange-500/30 bg-orange-500/10 p-3.5">
+          <p className="text-2xl font-extrabold tabular-nums text-orange-400">{formatBRL(pending)}</p>
+          <p className="mt-0.5 text-xs font-semibold text-orange-300">A receber (pendente)</p>
+        </div>
+        <div className="rounded-xl border border-dashed border-orange-500/30 bg-transparent p-3.5">
+          <p className="text-2xl font-extrabold tabular-nums text-orange-300">{formatBRL(trial)}</p>
+          <p className="mt-0.5 text-xs font-semibold text-[var(--text-muted)]">Previsto dos testes grátis</p>
+          <p className="text-[10px] text-[var(--text-faint)]">só se assinarem</p>
+        </div>
+      </div>
+      {total > 0 && (
+        <div className="mt-4">
+          <div className="h-2 w-full overflow-hidden rounded-full bg-orange-500/25">
+            <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all" style={{ width: `${pct}%` }} />
+          </div>
+          <p className="mt-1.5 text-[11px] text-[var(--text-faint)]">
+            {pct}% do que já foi gerado pra você já caiu na conta. Continue trazendo gente pra crescer os dois números.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AffiliateEarningsCard({ data }) {
   const [copiedTrialLink, setCopiedTrialLink] = useState(false)
 
-  useEffect(() => {
-    rawApi.getCommunityAffiliateEarnings(communityId).then(setData).catch((e) => setError(e.message))
-  }, [communityId])
-
-  if (error) return null
   if (!data) return null
 
   return (
@@ -2298,11 +2341,11 @@ function AffiliateEarningsCard({ communityId }) {
       </p>
       <div className="grid gap-3 sm:grid-cols-4">
         <div>
-          <p className="text-lg font-bold text-[var(--text-primary)]">{formatBRL(data.totalReceived)}</p>
+          <p className="text-lg font-bold text-emerald-400">{formatBRL(data.totalReceived)}</p>
           <p className="text-[11px] text-[var(--text-faint)]">Já recebido</p>
         </div>
         <div>
-          <p className="text-lg font-bold text-[var(--text-primary)]">{formatBRL(data.totalPending)}</p>
+          <p className="text-lg font-bold text-orange-400">{formatBRL(data.totalPending)}</p>
           <p className="text-[11px] text-[var(--text-faint)]">A receber (pendente)</p>
         </div>
         <div>
@@ -2323,7 +2366,7 @@ function AffiliateEarningsCard({ communityId }) {
               <span className="text-[var(--text-muted)]">
                 {c.customer_name || c.customer_email} · {c.commission_type === 'first_sale' ? '1ª venda' : c.commission_type === 'coupon' ? 'cupom de indicação' : 'recorrência'}
               </span>
-              <span className={`font-medium ${c.paid ? 'text-emerald-500' : 'text-amber-500'}`}>
+              <span className={`font-medium ${c.paid ? 'text-emerald-400' : 'text-orange-400'}`}>
                 {formatBRL(c.commission_value)} {c.paid ? '· pago' : '· pendente'}
               </span>
             </div>
@@ -2360,16 +2403,34 @@ function AffiliateEarningsCard({ communityId }) {
             aparece aqui com o valor previsto.
           </p>
         ) : (
-          <div className="space-y-1.5">
-            {data.trialReferrals.map((t) => (
-              <div key={t.id} className="flex items-center justify-between text-xs text-[var(--text-faint)]">
-                <span>{t.customer_name || t.customer_email || 'Cliente sem nome'}</span>
-                <span className="tabular-nums">
-                  {formatBRL(t.projected_commission_value)}
-                  {t.trial_ends_at ? ` · teste até ${formatDateTime(t.trial_ends_at)}` : ''}
-                </span>
-              </div>
-            ))}
+          <div className="space-y-2">
+            {data.trialReferrals.map((t) => {
+              const days = trialDaysLeft(t.trial_ends_at)
+              return (
+                <div key={t.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--bg-surface)] px-3 py-2.5">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{t.customer_name || t.customer_email || 'Cliente sem nome'}</p>
+                    <p className="text-[11px] text-[var(--text-faint)]">
+                      {t.trial_ends_at ? `Teste termina em ${formatDateTime(t.trial_ends_at)}` : 'Em teste grátis'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {days !== null && (
+                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${days <= 2 ? 'bg-red-500/15 text-red-400' : 'bg-orange-500/15 text-orange-400'}`}>
+                        {days === 0 ? 'termina hoje' : days === 1 ? 'falta 1 dia' : `faltam ${days} dias`}
+                      </span>
+                    )}
+                    <div className="text-right">
+                      <p className="text-sm font-bold tabular-nums text-orange-400">{formatBRL(t.projected_commission_value)}</p>
+                      <p className="text-[10px] text-[var(--text-faint)]">
+                        se assinar (1ª venda)
+                        {t.projected_recurring_value > 0 ? ` · depois ${formatBRL(t.projected_recurring_value)}/renovação` : ''}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
         <p className="mt-2 text-[11px] text-[var(--text-faint)]">
@@ -2390,6 +2451,12 @@ function MembersPanel({ communityId, isOwner, readOnly = false }) {
   const [error, setError] = useState(null)
   const [memberToRemove, setMemberToRemove] = useState(null)
   const [actionError, setActionError] = useState(null)
+  const [affiliateData, setAffiliateData] = useState(null)
+
+  useEffect(() => {
+    if (!isOwner) return
+    rawApi.getCommunityAffiliateEarnings(communityId).then(setAffiliateData).catch(() => {})
+  }, [communityId, isOwner])
 
   function load() {
     return rawApi.getCommunityMembers(communityId).then(setData).catch((e) => setError(e.message))
@@ -2426,8 +2493,9 @@ function MembersPanel({ communityId, isOwner, readOnly = false }) {
 
   return (
     <div className="space-y-4">
+      {isOwner && <EarningsHero community={data.earnings} affiliate={affiliateData} />}
       {isOwner && data.earnings && <EarningsSummary earnings={data.earnings} />}
-      {isOwner && <AffiliateEarningsCard communityId={communityId} />}
+      {isOwner && <AffiliateEarningsCard data={affiliateData} />}
 
       {data.xpLeaderboard.length > 0 && (
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
