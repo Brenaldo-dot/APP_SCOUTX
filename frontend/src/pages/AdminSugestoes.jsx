@@ -15,6 +15,8 @@ export default function AdminSugestoes() {
   const [text, setText] = useState('')
   const [saving, setSaving] = useState(false)
   const [result, setResult] = useState(null)
+  const [rechecking, setRechecking] = useState(false)
+  const [recheckResult, setRecheckResult] = useState(null)
 
   function load() {
     return rawApi
@@ -50,6 +52,20 @@ export default function AdminSugestoes() {
       setError(err.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleRecheck() {
+    setRechecking(true)
+    setRecheckResult(null)
+    setError(null)
+    try {
+      setRecheckResult(await rawApi.recheckSuggestedCompetitors(country))
+      await load()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setRechecking(false)
     }
   }
 
@@ -109,6 +125,11 @@ export default function AdminSugestoes() {
           {result && (
             <p className="text-sm text-emerald-400">
               {result.added} adicionada(s), {result.skipped} já existia(m).
+              {result.rejected?.length > 0 && (
+                <span className="block text-amber-400">
+                  Recusadas por não serem Shopify com produtos: {result.rejected.map((r) => `${r.domain} (${r.reason})`).join(', ')}
+                </span>
+              )}
               {result.invalid?.length > 0 && (
                 <span className="text-amber-400"> Linhas ignoradas por não parecerem um domínio: {result.invalid.join(', ')}</span>
               )}
@@ -123,11 +144,32 @@ export default function AdminSugestoes() {
             {operationLabel(country)}: {current.length} sugestão(ões)
           </h3>
           {current.length > 0 && (
+            <button onClick={handleRecheck} disabled={rechecking} className="text-xs font-medium text-brand-500 hover:underline disabled:opacity-60">
+              {rechecking ? 'Conferindo…' : `Rechecar lojas de ${operationLabel(country)}`}
+            </button>
+          )}
+          {current.length > 0 && (
             <button onClick={handleClear} className="text-xs font-medium text-[var(--text-muted)] hover:text-red-400">
               Apagar toda a lista de {operationLabel(country)}
             </button>
           )}
         </div>
+
+        {recheckResult && (
+          <p className="mt-3 text-sm text-emerald-400">
+            {recheckResult.checked} conferida(s), {recheckResult.removed.length} removida(s).
+            {recheckResult.removed.length > 0 && (
+              <span className="block text-amber-400">
+                Removidas: {recheckResult.removed.map((r) => `${r.domain} (${r.reason})`).join(', ')}
+              </span>
+            )}
+            {recheckResult.unknown.length > 0 && (
+              <span className="block text-[var(--text-muted)]">
+                Não deu pra conferir agora (mantidas): {recheckResult.unknown.map((r) => r.domain).join(', ')}
+              </span>
+            )}
+          </p>
+        )}
 
         <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
           {orderedOperations

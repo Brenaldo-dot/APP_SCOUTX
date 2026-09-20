@@ -2712,6 +2712,67 @@ function createApp() {
     return { domain, name };
   }
 
+  // Confere se o domínio é uma loja Shopify de verdade com produtos: o
+  // /products.json tem que responder JSON com pelo menos 1 produto. Segue até 3
+  // redirecionamentos (ex.: domínio puro -> www), sempre re-travando o IP
+  // público (createPinnedFetch) pra não abrir brecha de SSRF. `definitive`
+  // = a loja respondeu e NÃO serve (404, não é JSON, 0 produtos); falha de
+  // rede/timeout não é definitiva (pode ser só um soluço), então o recheck não
+  // apaga a loja por causa disso.
+  async function verifyShopifyStore(domain) {
+    let host = domain;
+    try {
+      for (let hop = 0; hop < 4; hop++) {
+        const safeFetch = await createPinnedFetch(host);
+        const response = await safeFetch(`https://${host}/products.json?limit=1`, {
+          headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0 (compatible; ScoutXSuggestionCheck/1.0)" },
+          signal: AbortSignal.timeout(10000),
+        });
+        if ([301, 302, 307, 308].includes(response.status)) {
+          const location = response.headers.get("location");
+          if (!location) return { ok: false, definitive: true, reason: "redirecionamento sem destino" };
+          const next = new URL(location, `https://${host}/`);
+          if (next.protocol !== "https:") return { ok: false, definitive: true, reason: "redirecionamento fora de https" };
+          host = next.hostname;
+          continue;
+        }
+        if (!response.ok) return { ok: false, definitive: response.status === 404 || response.status === 403, reason: `resposta HTTP ${response.status}` };
+        if (!String(response.headers.get("content-type") || "").includes("json")) {
+          return { ok: false, definitive: true, reason: "não é uma loja Shopify (sem products.json)" };
+        }
+        const text = await response.text();
+        if (text.length > 2_000_000) return { ok: false, definitive: false, reason: "resposta grande demais" };
+        let payload;
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          return { ok: false, definitive: true, reason: "não é uma loja Shopify (resposta inválida)" };
+        }
+        if (!Array.isArray(payload?.products)) return { ok: false, definitive: true, reason: "não é uma loja Shopify" };
+        if (payload.products.length === 0) return { ok: false, definitive: true, reason: "loja sem produtos" };
+        return { ok: true };
+      }
+      return { ok: false, definitive: false, reason: "redirecionamentos demais" };
+    } catch (err) {
+      return { ok: false, definitive: false, reason: "não foi possível conectar" };
+    }
+  }
+
+  // Confere vários domínios com no máximo 8 requisições em paralelo.
+  async function verifyManyStores(domains) {
+    const results = new Map();
+    let next = 0;
+    await Promise.all(
+      Array.from({ length: 8 }, async () => {
+        while (next < domains.length) {
+          const domain = domains[next++];
+          results.set(domain, await verifyShopifyStore(domain));
+        }
+      })
+    );
+    return results;
+  }
+
   // A ordem NÃO é decidida aqui: o painel embaralha no navegador toda vez que
   // abre (ver components/SuggestedCompetitors.jsx), então cada cliente vê uma
   // ordem diferente e ela muda a cada abertura.
@@ -2749,8 +2810,37 @@ function createApp() {
     if (items.length === 0) {
       return res.status(400).json({ error: "Nenhum domínio válido encontrado na lista.", invalid });
     }
-    const result = await db.addSuggestedCompetitors(operation, items);
-    res.status(201).json({ ...result, invalid });
+    if (items.length > 300) return res.status(400).json({ error: "Muitas lojas de uma vez (máximo 300 por envio)." });
+    // Só entra loja Shopify com produtos: o resto volta em "rejected" com o motivo.
+    const checks = await verifyManyStores(items.map((i) => i.domain));
+    const accepted = items.filter((i) => checks.get(i.domain)?.ok);
+    const rejected = items
+      .filter((i) => !checks.get(i.domain)?.ok)
+      .map((i) => ({ domain: i.domain, reason: checks.get(i.domain)?.reason || "não verificada" }));
+    const result = accepted.length ? await db.addSuggestedCompetitors(operation, accepted) : { added: 0, skipped: 0 };
+    res.status(201).json({ ...result, invalid, rejected });
+  });
+
+  // Rechecar a lista de um país: tira as lojas que deixaram de servir (fechou,
+  // deixou de ser Shopify, ficou sem produtos). Falha de rede não apaga nada.
+  app.post("/api/admin/suggested-competitors/recheck", requireAdmin, async (req, res) => {
+    const operation = String(req.body?.operation || "").trim();
+    if (!operation) return res.status(400).json({ error: "Escolha o país." });
+    const rows = await db.listSuggestedCompetitors(operation);
+    const checks = await verifyManyStores(rows.map((r) => r.domain));
+    const removed = [];
+    const unknown = [];
+    for (const row of rows) {
+      const check = checks.get(row.domain);
+      if (check?.ok) continue;
+      if (check?.definitive) {
+        await db.deleteSuggestedCompetitor(row.id);
+        removed.push({ domain: row.domain, reason: check.reason });
+      } else {
+        unknown.push({ domain: row.domain, reason: check?.reason || "não verificada" });
+      }
+    }
+    res.json({ checked: rows.length, removed, unknown });
   });
 
   app.delete("/api/admin/suggested-competitors/:id", requireAdmin, async (req, res) => {

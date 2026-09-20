@@ -183,6 +183,12 @@ export const rawApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ operation, text }),
     }),
+  recheckSuggestedCompetitors: (operation) =>
+    request('/api/admin/suggested-competitors/recheck', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operation }),
+    }),
   deleteSuggestedCompetitor: (id) => request(`/api/admin/suggested-competitors/${id}`, { method: 'DELETE' }),
   clearSuggestedCompetitors: (operation) =>
     request(`/api/admin/suggested-competitors?${qs({ operation })}`, { method: 'DELETE' }),
