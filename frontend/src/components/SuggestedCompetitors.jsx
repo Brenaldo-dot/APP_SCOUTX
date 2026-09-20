@@ -36,9 +36,13 @@ const ANIMATIONS = `
 // quantas páginas existem: a ideia é parecer um catálogo sem fim. A ordem é
 // embaralhada de novo toda vez que o painel abre e toda vez que a última
 // página dá a volta pra primeira.
+// Guarda a lista de cada país na memória: ao voltar pra aba Concorrentes o botão
+// aparece na hora e a lista é atualizada em segundo plano.
+const suggestionsCache = new Map()
+
 export default function SuggestedCompetitors({ operation, trackedDomains, disabled, onAdded }) {
   const { orderedOperations } = useOperation()
-  const [suggestions, setSuggestions] = useState(null)
+  const [suggestions, setSuggestions] = useState(() => suggestionsCache.get(operation) || null)
   const [open, setOpen] = useState(false)
   const [entered, setEntered] = useState(false)
   const [order, setOrder] = useState([])
@@ -56,11 +60,14 @@ export default function SuggestedCompetitors({ operation, trackedDomains, disabl
 
   useEffect(() => {
     let cancelled = false
-    setSuggestions(null)
+    setSuggestions(suggestionsCache.get(operation) || null)
     rawApi
       .listSuggestedCompetitors(operation)
-      .then((list) => !cancelled && setSuggestions(list))
-      .catch(() => !cancelled && setSuggestions([]))
+      .then((list) => {
+        suggestionsCache.set(operation, list)
+        if (!cancelled) setSuggestions(list)
+      })
+      .catch(() => !cancelled && setSuggestions((prev) => prev || []))
     return () => {
       cancelled = true
     }
@@ -111,7 +118,9 @@ export default function SuggestedCompetitors({ operation, trackedDomains, disabl
   const rowsInPage = baseRows + (safePage < extraPages ? 1 : 0)
   const pageItems = ordered.slice(0, usableCount).slice(startRow * COLUMNS, (startRow + rowsInPage) * COLUMNS)
 
-  if (!suggestions || (available.length === 0 && !open)) return null
+  // Espera as duas listas (sugestões e concorrentes já cadastrados) pra não
+  // mostrar por um instante lojas que a pessoa já monitora.
+  if (!suggestions || !trackedDomains || (available.length === 0 && !open)) return null
 
   const flag = orderedOperations.find((op) => op.value === operation)?.flag || '🌎'
 

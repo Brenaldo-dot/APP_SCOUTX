@@ -247,14 +247,15 @@ export default function Competitors() {
           <button type="submit" disabled={submitting || atCompetitorCap} className="btn-primary">
             {submitting ? 'Adicionando…' : '+ Adicionar concorrente'}
           </button>
-          {competitors && (
-            <SuggestedCompetitors
-              operation={operation}
-              trackedDomains={competitors.map((c) => c.domain)}
-              disabled={atCompetitorCap}
-              onAdded={load}
-            />
-          )}
+          {/* Sempre montado: a lista de sugestões começa a carregar junto com a de
+              concorrentes (antes só depois dela, uma espera atrás da outra). O botão
+              só aparece quando as duas estiverem prontas. */}
+          <SuggestedCompetitors
+            operation={operation}
+            trackedDomains={competitors ? competitors.map((c) => c.domain) : null}
+            disabled={atCompetitorCap}
+            onAdded={load}
+          />
           {formError && <p className="w-full text-sm text-red-600">{formError}</p>}
           {formSuccess && <p className="w-full text-sm text-green-600">✓ {formSuccess}</p>}
         </form>
