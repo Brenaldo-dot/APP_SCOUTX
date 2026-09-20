@@ -211,7 +211,7 @@ export default function HotProducts() {
           />
         </div>
 
-        <label className="flex items-center gap-2 pb-2 text-sm text-[var(--text-tertiary)]">
+        <label className="sx-check-pill text-sm text-[var(--text-tertiary)]">
           <input
             type="checkbox"
             checked={hasSupplier}
@@ -220,7 +220,7 @@ export default function HotProducts() {
           Só com fornecedor conectado
         </label>
 
-        <label className="flex items-center gap-2 pb-2 text-sm text-[var(--text-tertiary)]">
+        <label className="sx-check-pill text-sm text-[var(--text-tertiary)]">
           <input
             type="checkbox"
             checked={growingOnly}

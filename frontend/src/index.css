@@ -43,19 +43,31 @@
    webkit e o par padrão ficam separados de propósito: no Chrome novo o padrão
    (scrollbar-width/color) anula os ::-webkit-scrollbar, então o padrão só
    entra onde o webkit não existe (Firefox). */
+::-webkit-scrollbar,
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
 *::-webkit-scrollbar {
   width: 12px;
   height: 12px;
 }
+::-webkit-scrollbar-track,
+html::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track,
 *::-webkit-scrollbar-track {
   background: transparent;
 }
+::-webkit-scrollbar-thumb,
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb,
 *::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: rgba(148, 163, 184, 0.3);
   border: 3px solid transparent;
   border-radius: 9999px;
   background-clip: padding-box;
 }
+::-webkit-scrollbar-thumb:hover,
+html::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover,
 *::-webkit-scrollbar-thumb:hover {
   background: rgba(59, 130, 246, 0.55);
   background-clip: padding-box;
@@ -63,7 +75,7 @@
 @supports not selector(::-webkit-scrollbar) {
   * {
     scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
+    scrollbar-color: rgba(148, 163, 184, 0.3) transparent;
   }
 }
 
@@ -107,6 +119,27 @@ input[type='checkbox']:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Filtro em formato de "pílula": a caixinha e o texto ficam dentro de um bloco
+   com borda que acende em azul quando marcado (usado nos filtros das listas). */
+.sx-check-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-surface-2);
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+}
+.sx-check-pill:hover {
+  border-color: rgba(59, 130, 246, 0.5);
+}
+.sx-check-pill:has(> input[type='checkbox']:checked) {
+  border-color: rgba(59, 130, 246, 0.65);
+  background: rgba(59, 130, 246, 0.1);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.08);
+}
+
 label:has(> input[type='checkbox']) {
   cursor: pointer;
   user-select: none;

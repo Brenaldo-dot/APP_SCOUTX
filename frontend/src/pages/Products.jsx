@@ -183,7 +183,7 @@ export default function Products() {
           />
         </div>
 
-        <label className="flex items-center gap-2 self-end pb-2 text-sm text-[var(--text-tertiary)]">
+        <label className="sx-check-pill self-end text-sm text-[var(--text-tertiary)]">
           <input type="checkbox" checked={hotOnly} onChange={(e) => toggleHotOnly(e.target.checked)} />
           🔥 Só produtos quentes
         </label>
