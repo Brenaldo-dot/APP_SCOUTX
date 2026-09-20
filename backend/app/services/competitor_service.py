@@ -47,6 +47,10 @@ _OPERATION_COUNTRY = {
     "equador": "EC",
     "guatemala": "GT",
     "espanha": "ES",
+    "argentina": "AR",
+    "chile": "CL",
+    "peru": "PE",
+    "panama": "PA",
 }
 
 

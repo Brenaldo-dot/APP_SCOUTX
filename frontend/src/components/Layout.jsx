@@ -9,6 +9,7 @@ import {
   Eye,
   Flame,
   Gift,
+  Globe,
   GripVertical,
   Handshake,
   History,
@@ -29,6 +30,7 @@ import {
   Users,
 } from 'lucide-react'
 import { OPERATIONS, requiredPlanForSlot, useOperation } from '../context/OperationContext.jsx'
+import CountryFlag from './CountryFlag.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useTheme } from '../context/ThemeContext.jsx'
 import { useLanguage } from '../context/LanguageContext.jsx'
@@ -696,31 +698,54 @@ export default function Layout() {
           usando com o padrão de sempre, só que agora avisado, e o aviso
           volta a aparecer enquanto a pessoa não escolher de fato. */}
       {needsCountryPick && !operationModal && !deleteOperationModal && hasAccess && !me?.isAdmin && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => {}}>
-          <div className="w-full max-w-md rounded-2xl bg-[var(--bg-surface)] p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-[var(--text-primary)]">Qual país você vai monitorar?</h3>
-            <p className="mt-1.5 text-sm text-[var(--text-muted)]">
-              Escolha o país onde ficam os concorrentes que você quer acompanhar. Dá pra adicionar outros países depois,
-              a qualquer momento, pelo menu lateral.
-            </p>
-            <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-              {OPERATIONS.map((op) => (
-                <button
-                  key={op.value}
-                  onClick={() => setOperation(op.value)}
-                  className="flex flex-col items-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-4 text-center transition-colors hover:border-brand-500 hover:bg-brand-500/10"
-                >
-                  <span className="text-2xl">{op.flag}</span>
-                  <span className="text-xs font-medium text-[var(--text-secondary)]">{op.label}</span>
-                </button>
-              ))}
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-md" onClick={() => {}}>
+          <div
+            className="relative my-auto w-full max-w-xl overflow-hidden rounded-[28px] border border-brand-500/30 bg-[var(--bg-surface)] p-7 shadow-2xl shadow-brand-600/25"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* LED azul de fundo: brilhos desfocados + fio de luz no topo */}
+            <div className="pointer-events-none absolute -left-16 -top-24 h-64 w-64 rounded-full bg-brand-500/30 blur-3xl" />
+            <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-sky-400/15 blur-3xl" />
+            <div className="pointer-events-none absolute -bottom-24 left-1/3 h-56 w-56 rounded-full bg-brand-600/20 blur-3xl" />
+            <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-brand-400 to-transparent" />
+
+            <div className="relative">
+              <div className="flex items-center gap-4">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-400 to-brand-600 text-white shadow-lg shadow-brand-600/40 ring-4 ring-brand-500/10">
+                  <Globe size={22} />
+                </span>
+                <div>
+                  <h3 className="text-lg font-semibold tracking-tight text-[var(--text-primary)]">Qual país você vai monitorar?</h3>
+                  <p className="mt-0.5 text-sm text-[var(--text-muted)]">
+                    Escolha o país onde ficam os concorrentes que você quer acompanhar. Dá pra adicionar outros países depois,
+                    a qualquer momento, pelo menu lateral.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {OPERATIONS.map((op, i) => (
+                  <button
+                    key={op.value}
+                    onClick={() => setOperation(op.value)}
+                    style={{ animationDelay: `${i * 40}ms` }}
+                    className="sx-pop group flex flex-col items-center gap-2.5 rounded-2xl border border-[var(--border)] bg-[var(--bg-surface-2)]/80 px-3 py-4 text-center backdrop-blur transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-500/70 hover:bg-brand-500/10 hover:shadow-[0_0_28px_rgba(59,130,246,0.35)]"
+                  >
+                    <CountryFlag op={op} />
+                    <span className="text-xs font-semibold text-[var(--text-secondary)] transition-colors group-hover:text-[var(--text-primary)]">
+                      {op.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={() => setOperationModal({ mode: 'add', value: null, label: '' })}
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-[var(--border)] px-3 py-3 text-xs font-medium text-[var(--text-faint)] transition-all hover:border-brand-500/60 hover:bg-brand-500/5 hover:text-brand-500"
+              >
+                <Globe size={14} /> Meu país não está na lista
+              </button>
             </div>
-            <button
-              onClick={() => setOperationModal({ mode: 'add', value: null, label: '' })}
-              className="mt-3 w-full rounded-xl border border-dashed border-[var(--border)] px-3 py-3 text-center text-xs font-medium text-[var(--text-faint)] transition-colors hover:border-brand-500/60 hover:text-brand-500"
-            >
-              🌎 Meu país não está na lista
-            </button>
           </div>
         </div>
       )}

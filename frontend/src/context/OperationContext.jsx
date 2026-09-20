@@ -31,11 +31,15 @@ export function requiredPlanForSlot(slot) {
 // verdade, é a ação de cadastrar uma nova (ver addCustomOperation) — quem
 // escolhe um país fora dessa lista fixa cai no CUSTOM_STORAGE_KEY abaixo.
 export const OPERATIONS = [
-  { value: 'colombia', label: 'Colômbia', flag: '🇨🇴' },
-  { value: 'mexico', label: 'México', flag: '🇲🇽' },
-  { value: 'equador', label: 'Equador', flag: '🇪🇨' },
-  { value: 'guatemala', label: 'Guatemala', flag: '🇬🇹' },
-  { value: 'espanha', label: 'Espanha', flag: '🇪🇸' },
+  { value: 'colombia', label: 'Colômbia', flag: '🇨🇴', code: 'co' },
+  { value: 'mexico', label: 'México', flag: '🇲🇽', code: 'mx' },
+  { value: 'equador', label: 'Equador', flag: '🇪🇨', code: 'ec' },
+  { value: 'guatemala', label: 'Guatemala', flag: '🇬🇹', code: 'gt' },
+  { value: 'espanha', label: 'Espanha', flag: '🇪🇸', code: 'es' },
+  { value: 'argentina', label: 'Argentina', flag: '🇦🇷', code: 'ar' },
+  { value: 'chile', label: 'Chile', flag: '🇨🇱', code: 'cl' },
+  { value: 'peru', label: 'Peru', flag: '🇵🇪', code: 'pe' },
+  { value: 'panama', label: 'Panamá', flag: '🇵🇦', code: 'pa' },
 ]
 
 function slugify(text) {
