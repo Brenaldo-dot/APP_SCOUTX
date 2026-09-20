@@ -1290,6 +1290,30 @@ async function deleteAffiliateTrialReferral(caktoSubscriptionId) {
 // indicação ou marcação manual). Mesmos valores das ofertas de teste.
 const TRIAL_PLAN_MONTHLY_PRICE = { solo: 127, pro: 187, agencia: 397 };
 
+// A Cakto calcula a comissão do afiliado em cima do valor LÍQUIDO (depois das
+// taxas dela), por isso o que cai na conta é menos que % x preço do plano (ex.:
+// venda de R$ 504,99 a 40% rendeu R$ 190,54 e não R$ 202,00). As previsões
+// precisam descontar isso. O fator é aprendido das vendas reais já registradas
+// desse afiliado (comissão paga pela Cakto / comissão "cheia"); sem histórico,
+// usa 0,943, que é o que essa venda de referência mostrou.
+const DEFAULT_NET_FACTOR = 0.943;
+async function getAffiliateNetFactor(affiliateId) {
+  const res = await pool.query(
+    `SELECT commission_value, sale_amount, commission_percentage
+     FROM affiliate_commissions
+     WHERE affiliate_id = $1 AND commission_type = 'first_sale' AND sale_amount > 0 AND commission_percentage > 0
+     ORDER BY id DESC LIMIT 20`,
+    [affiliateId]
+  );
+  // Só vale venda cujo valor veio da Cakto (já líquido): o valor pago é menor que
+  // a comissão "cheia". Vendas manuais (PIX por fora) têm fator 1,0 e não contam.
+  const ratios = res.rows
+    .map((r) => Number(r.commission_value) / (Number(r.sale_amount) * (Number(r.commission_percentage) / 100)))
+    .filter((x) => Number.isFinite(x) && x > 0.8 && x < 0.995);
+  if (ratios.length === 0) return DEFAULT_NET_FACTOR;
+  return ratios.reduce((a, b) => a + b, 0) / ratios.length;
+}
+
 // "Galera do teste grátis" de um afiliado (ou de todos, se affiliateId for
 // null). Junta DUAS fontes, sem contar a mesma pessoa duas vezes:
 //  1) affiliate_trial_referrals — projeção que o webhook cria quando o
@@ -1319,7 +1343,16 @@ async function collectTrialReferrals(affiliateId) {
      WHERE o.is_trial = true AND o.expires_at >= now() ${affFilter}`,
     params
   );
-  const rows = [...table.rows];
+  const factorCache = new Map();
+  const factorFor = async (id) => {
+    if (!factorCache.has(id)) factorCache.set(id, await getAffiliateNetFactor(id));
+    return factorCache.get(id);
+  };
+  const rows = [];
+  for (const r of table.rows) {
+    const f = await factorFor(r.affiliate_id);
+    rows.push({ ...r, projected_commission_value: Math.round(Number(r.projected_commission_value) * f * 100) / 100 });
+  }
   const seen = new Set(rows.map((r) => `${r.affiliate_id}|${String(r.customer_email || "").toLowerCase()}`));
   for (const o of orgs.rows) {
     const email = String(o.cakto_customer_email || o.user_email || "").toLowerCase();
@@ -1335,7 +1368,7 @@ async function collectTrialReferrals(affiliateId) {
       customer_name: o.user_name || null,
       subscription_amount: price,
       commission_percentage: pct,
-      projected_commission_value: Math.round(price * (pct / 100) * 100) / 100,
+      projected_commission_value: Math.round(price * (pct / 100) * (await factorFor(o.affiliate_id)) * 100) / 100,
       trial_ends_at: o.expires_at,
     });
   }
@@ -1661,7 +1694,7 @@ async function countActiveCommunityMembers(communityId) {
     `SELECT COUNT(*)::int AS count
      FROM community_members cm
      JOIN organizations o ON o.id = cm.organization_id
-     WHERE cm.community_id = $1 AND o.expires_at > now() AND o.is_trial = false`,
+     WHERE cm.community_id = $1 AND o.expires_at > now()`,
     [communityId]
   );
   return res.rows[0].count;
@@ -1698,7 +1731,7 @@ async function listCommunitiesDirectory() {
     FROM communities c
     JOIN affiliates a ON a.id = c.affiliate_id
     LEFT JOIN (
-      SELECT cm.community_id, SUM(CASE WHEN o.expires_at > now() AND o.is_trial = false THEN 1 ELSE 0 END) AS active_member_count
+      SELECT cm.community_id, SUM(CASE WHEN o.expires_at > now() THEN 1 ELSE 0 END) AS active_member_count
       FROM community_members cm
       JOIN organizations o ON o.id = cm.organization_id
       GROUP BY cm.community_id
@@ -1861,7 +1894,7 @@ async function getCommunityEarningsSummary(communityId) {
     const total = await pool.query(
       `SELECT COUNT(*)::int AS count FROM community_members cm
        JOIN organizations o ON o.id = cm.organization_id
-       WHERE cm.community_id = $1 AND o.expires_at > now() AND o.is_trial = false`,
+       WHERE cm.community_id = $1 AND o.expires_at > now()`,
       [communityId]
     );
     const pct = tierForActiveMembers(total.rows[0].count).percentage;
@@ -2439,7 +2472,7 @@ async function listCommunitiesAdminOverview() {
     FROM communities c
     JOIN affiliates a ON a.id = c.affiliate_id
     LEFT JOIN (
-      SELECT cm.community_id, SUM(CASE WHEN o.expires_at > now() AND o.is_trial = false THEN 1 ELSE 0 END) AS active_member_count
+      SELECT cm.community_id, SUM(CASE WHEN o.expires_at > now() THEN 1 ELSE 0 END) AS active_member_count
       FROM community_members cm
       JOIN organizations o ON o.id = cm.organization_id
       GROUP BY cm.community_id
@@ -2884,6 +2917,7 @@ module.exports = {
   updateCommunityPost,
   deleteCommunityPost,
   getCommunityCommentById,
+  getAffiliateNetFactor,
   isTrialDocUsed,
   saveLeadDocHash,
   claimResourceXp,

@@ -2434,9 +2434,8 @@ function AffiliateEarningsCard({ data }) {
           </div>
         )}
         <p className="mt-2 text-[11px] text-[var(--text-faint)]">
-          Ainda não foi cobrado nada. O valor previsto usa a sua % de 1ª venda sobre o preço do plano e só vira "a
-          receber" de verdade se a pessoa continuar assinante quando o teste acabar (o valor final pode variar um
-          pouco por taxas). Se cancelar antes, some sozinho daqui.
+          Ainda não foi cobrado nada. O valor previsto já vem descontado das taxas da Cakto e só vira "a receber" de
+          verdade se a pessoa continuar assinante quando o teste acabar. Se cancelar antes, some sozinho daqui.
         </p>
       </div>
       <p className="mt-3 text-[11px] text-[var(--text-faint)]">

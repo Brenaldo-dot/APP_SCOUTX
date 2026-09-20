@@ -2401,9 +2401,11 @@ function createApp() {
     // sobre o preço do plano (é o que ele passa a ganhar a cada renovação depois
     // da 1ª venda). Estimativa: o nível pode mudar até lá.
     const communityStats = await buildAmbassadorStats(allowed.community);
+    // Já descontado das taxas da Cakto (fator aprendido das vendas reais).
+    const netFactor = await db.getAffiliateNetFactor(affiliate.id);
     const trialWithRecurring = trialReferrals.map((t) => ({
       ...t,
-      projected_recurring_value: Math.round(Number(t.subscription_amount || 0) * (communityStats.tierPercentage / 100) * 100) / 100,
+      projected_recurring_value: Math.round(Number(t.subscription_amount || 0) * (communityStats.tierPercentage / 100) * netFactor * 100) / 100,
     }));
     res.json({
       communityTierPercentage: communityStats.tierPercentage,
