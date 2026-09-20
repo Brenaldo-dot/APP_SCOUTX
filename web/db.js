@@ -1298,6 +1298,7 @@ const TRIAL_PLAN_MONTHLY_PRICE = { solo: 127, pro: 187, agencia: 397 };
 // usa 0,943, que é o que essa venda de referência mostrou.
 const DEFAULT_NET_FACTOR = 0.943;
 async function getAffiliateNetFactor(affiliateId) {
+  if (!affiliateId) return DEFAULT_NET_FACTOR;
   const res = await pool.query(
     `SELECT commission_value, sale_amount, commission_percentage
      FROM affiliate_commissions

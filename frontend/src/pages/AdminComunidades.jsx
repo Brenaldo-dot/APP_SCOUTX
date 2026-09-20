@@ -241,9 +241,9 @@ function MembersTable({ members, percentage }) {
                   <td className="px-3 py-2.5 text-right tabular-nums text-[var(--text-primary)]">
                     {referred && price ? (
                       <>
-                        ~{money((price * percentage) / 100)}
+                        ~{money((price * 0.943 * percentage) / 100)}
                         <span className="block text-[10px] text-[var(--text-faint)]">
-                          {percentage}% de {money(price)}
+                          {percentage}% do líquido de {money(price)}
                         </span>
                       </>
                     ) : (

@@ -136,7 +136,7 @@ function affiliateCommissionFromOrder(order, fallbackPercentage) {
   if (Number.isFinite(caktoValue) && caktoValue > 0) {
     return { saleAmount, commissionValue: Math.round(caktoValue * 100) / 100, percentage: fallbackPercentage };
   }
-  const commissionValue = Math.round(saleAmount * (Number(fallbackPercentage) / 100) * 100) / 100;
+  const commissionValue = Math.round(netFromOrder(order, saleAmount, 0.943) * (Number(fallbackPercentage) / 100) * 100) / 100;
   return { saleAmount, commissionValue, percentage: fallbackPercentage };
 }
 
@@ -153,6 +153,20 @@ function isSameEmail(a, b) {
   const x = String(a || "").trim().toLowerCase();
   const y = String(b || "").trim().toLowerCase();
   return !!x && x === y;
+}
+
+// Base de cálculo LÍQUIDA de uma venda (depois das taxas da Cakto), pra nenhuma
+// comissão paga por fora (PIX) ser calculada sobre dinheiro que a plataforma não
+// recebeu de fato. A Cakto devolve o total de taxas do pedido em `fees`; se não
+// vier (ou vier estranho), usa o valor cheio x um fator conservador aprendido
+// das vendas reais (db.getAffiliateNetFactor, padrão 0,943).
+function netFromOrder(order, gross, factor) {
+  const raw = order?.fees;
+  if (raw !== undefined && raw !== null && raw !== "") {
+    const fees = Number(raw);
+    if (Number.isFinite(fees) && fees >= 0 && fees < gross * 0.5) return Math.max(0, gross - fees);
+  }
+  return gross * factor;
 }
 
 async function recordManualAffiliateCommissionIfAny(data, order) {
@@ -177,7 +191,8 @@ async function recordManualAffiliateCommissionIfAny(data, order) {
   if (prior > 0) return;
   const commissionType = "first_sale";
   const percentage = affiliate.first_sale_percentage;
-  const commissionValue = Math.round(saleAmount * (Number(percentage) / 100) * 100) / 100;
+  const netBase = netFromOrder(order, saleAmount, await db.getAffiliateNetFactor(affiliate.id));
+  const commissionValue = Math.round(netBase * (Number(percentage) / 100) * 100) / 100;
   const inserted = await db.createAffiliateCommission({
     affiliateId: affiliate.id,
     caktoOrderId: data.id,
@@ -337,7 +352,16 @@ async function recordReferralCommissionIfAny(data) {
       return;
     }
     const saleAmount = Number(data.offer?.price ?? data.amount ?? 0);
-    const commissionValue = Math.round(saleAmount * (REFERRAL_COMMISSION_PERCENTAGE / 100) * 100) / 100;
+    let orderForFees = null;
+    try {
+      orderForFees = await caktoApi.getOrder(data.id);
+    } catch (feeErr) {
+      console.warn(`Webhook Cakto: não consegui ler as taxas do pedido ${data.id} (${feeErr.message}), usando fator padrão.`);
+    }
+    // Sobre o valor efetivamente pago (já com o desconto do cupom) e LÍQUIDO das taxas.
+    const grossPaid = Number(orderForFees?.amount ?? saleAmount);
+    const netBase = netFromOrder(orderForFees, grossPaid, await db.getAffiliateNetFactor(null));
+    const commissionValue = Math.round(netBase * (REFERRAL_COMMISSION_PERCENTAGE / 100) * 100) / 100;
     const inserted = await db.createReferralCommission({
       referralCouponId: coupon.id,
       caktoOrderId: data.id,
@@ -409,7 +433,17 @@ async function recordCommunityCommissionIfAny(data, org) {
     const activeCount = await db.countActiveCommunityMembers(community.id);
     const tier = tierForActiveMembers(activeCount);
     const saleAmount = Number(data.offer?.price ?? data.amount ?? 0);
-    const commissionValue = Math.round(saleAmount * (tier.percentage / 100) * 100) / 100;
+    // Sobre o LÍQUIDO (depois das taxas da Cakto), buscado no pedido; se a busca
+    // falhar, usa o fator conservador aprendido das vendas reais.
+    let orderForFees = null;
+    try {
+      orderForFees = await caktoApi.getOrder(data.id);
+    } catch (feeErr) {
+      console.warn(`Webhook Cakto: não consegui ler as taxas do pedido ${data.id} (${feeErr.message}), usando fator padrão.`);
+    }
+    const grossForFees = Number(orderForFees?.amount ?? saleAmount);
+    const netBase = netFromOrder(orderForFees, grossForFees, await db.getAffiliateNetFactor(community.affiliate_id));
+    const commissionValue = Math.round(netBase * (tier.percentage / 100) * 100) / 100;
     const inserted = await db.createCommunityCommission({
       communityId: community.id,
       organizationId: org.id,
