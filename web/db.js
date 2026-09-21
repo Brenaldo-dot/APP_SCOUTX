@@ -374,6 +374,10 @@ async function migrate() {
   await pool.query(`ALTER TABLE assinar_leads ADD COLUMN IF NOT EXISTS ref_code TEXT;`);
   // Hash (HMAC) do CPF/CNPJ de quem já usou o teste grátis: 1 teste por documento.
   await pool.query(`ALTER TABLE assinar_leads ADD COLUMN IF NOT EXISTS doc_hash TEXT;`);
+  // Remarketing: quando o suporte chamou a pessoa no WhatsApp, e quando ela foi
+  // resgatada (fechou a compra depois do contato).
+  await pool.query(`ALTER TABLE assinar_leads ADD COLUMN IF NOT EXISTS remarketing_contacted_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE assinar_leads ADD COLUMN IF NOT EXISTS remarketing_recovered_at TIMESTAMPTZ;`);
 
   // Cada afiliado tem um código único e automático pro link de indicação
   // dele. Afiliados que já existiam ganham um código aqui mesmo (backfill).
@@ -2578,11 +2582,52 @@ async function markAssinarLeadCompleted(email, organizationId, planKey) {
 
 // Admin (aba Usuários) — quem começou o passo 1 mas nunca completou o
 // passo 2, pra equipe de suporte entrar em contato e ajudar a fechar.
+// Lista do remarketing: quem abandonou (completed_at nulo) e também quem já foi
+// chamado no WhatsApp, mesmo depois de fechar (pra aparecer como resgatado).
+// "Resgatado" = fechou a compra depois do contato: o próprio cadastro foi
+// concluído, OU outro cadastro concluído usa o mesmo telefone (últimos 8
+// dígitos), OU já existe usuário/organização com o mesmo email. Detectado aqui
+// e gravado em remarketing_recovered_at (não perde a marca depois).
 async function listAbandonedAssinarLeads() {
   const res = await pool.query(
-    "SELECT id, name, email, phone, plan_key, created_at, updated_at FROM assinar_leads WHERE completed_at IS NULL ORDER BY updated_at DESC"
+    `SELECT l.id, l.name, l.email, l.phone, l.plan_key, l.created_at, l.updated_at, l.completed_at,
+            l.remarketing_contacted_at, l.remarketing_recovered_at,
+            (
+              l.completed_at IS NOT NULL
+              OR EXISTS (
+                SELECT 1 FROM assinar_leads l2
+                WHERE l2.id <> l.id AND l2.completed_at IS NOT NULL
+                  AND length(regexp_replace(l.phone, '\\D', '', 'g')) >= 8
+                  AND right(regexp_replace(l2.phone, '\\D', '', 'g'), 8) = right(regexp_replace(l.phone, '\\D', '', 'g'), 8)
+              )
+              OR EXISTS (SELECT 1 FROM app_users u WHERE lower(u.email) = lower(l.email))
+              OR EXISTS (SELECT 1 FROM organizations o WHERE lower(o.cakto_customer_email) = lower(l.email))
+            ) AS recovered_now
+     FROM assinar_leads l
+     WHERE l.completed_at IS NULL OR l.remarketing_contacted_at IS NOT NULL
+     ORDER BY l.updated_at DESC`
   );
-  return res.rows;
+  // Quem já voltou por conta própria (mesmo telefone/email de uma compra) e nunca
+  // foi chamado não é mais abandono: sai da lista.
+  const rows = res.rows.filter((r) => !(r.recovered_now && !r.remarketing_contacted_at));
+  const toMark = rows.filter((r) => r.recovered_now && !r.remarketing_recovered_at && r.remarketing_contacted_at).map((r) => r.id);
+  if (toMark.length) {
+    await pool.query("UPDATE assinar_leads SET remarketing_recovered_at = now() WHERE id = ANY($1::int[])", [toMark]);
+  }
+  return rows.map((r) => ({
+    ...r,
+    // Só conta como resgatado quem foi chamado antes; quem fechou sem nunca ter
+    // sido chamado não é "abandono", e some da lista (o WHERE acima já filtra).
+    remarketing_recovered_at: r.remarketing_recovered_at || (toMark.includes(r.id) ? new Date() : null),
+  }));
+}
+
+async function setAssinarLeadRemarketing(id, contacted) {
+  const res = await pool.query(
+    "UPDATE assinar_leads SET remarketing_contacted_at = CASE WHEN $2 THEN COALESCE(remarketing_contacted_at, now()) ELSE NULL END WHERE id = $1 RETURNING id, remarketing_contacted_at",
+    [id, !!contacted]
+  );
+  return res.rows[0] || null;
 }
 
 async function findOrganizationByCaktoPurchaseId(purchaseId) {
@@ -2918,6 +2963,7 @@ module.exports = {
   updateCommunityPost,
   deleteCommunityPost,
   getCommunityCommentById,
+  setAssinarLeadRemarketing,
   getAffiliateNetFactor,
   isTrialDocUsed,
   saveLeadDocHash,

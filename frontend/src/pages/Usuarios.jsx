@@ -154,6 +154,16 @@ export default function Usuarios() {
   const [celeryDiag, setCeleryDiag] = useState(null)
   const [loadingDiag, setLoadingDiag] = useState(false)
   const [assinarLeads, setAssinarLeads] = useState(null)
+
+  async function toggleRemarketing(lead) {
+    const contacted = !lead.contactedAt
+    setAssinarLeads((prev) => prev.map((l) => (l.id === lead.id ? { ...l, contactedAt: contacted ? new Date().toISOString() : null } : l)))
+    try {
+      await rawApi.setLeadRemarketing(lead.id, contacted)
+    } catch {
+      rawApi.listAssinarLeads().then(setAssinarLeads).catch(() => {})
+    }
+  }
   const [searchParams, setSearchParams] = useSearchParams()
   const orgFilter = searchParams.get('org') || ''
 
@@ -725,33 +735,94 @@ export default function Usuarios() {
           </div>
         </div>
 
-        {assinarLeads?.length > 0 && (
-          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-5">
-            <h3 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-400">
-              📋 Começaram mas não terminaram ({assinarLeads.length})
-            </h3>
-            <p className="mb-3.5 text-sm text-[var(--text-tertiary)]">
-              Preencheram nome/email/WhatsApp em <code>/assinar</code> mas abandonaram antes de escolher o plano e
-              preencher o cartão — vale entrar em contato.
-            </p>
-            <div className="space-y-2">
-              {assinarLeads.map((lead) => (
-                <div
-                  key={lead.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/20 bg-[var(--bg-surface-2)] px-3.5 py-2.5 text-sm"
-                >
-                  <div>
-                    <p className="font-medium text-[var(--text-primary)]">{lead.name}</p>
-                    <p className="text-xs text-[var(--text-muted)]">
-                      {lead.email} · {lead.phone}
-                    </p>
-                  </div>
-                  <p className="text-xs text-[var(--text-muted)]">{formatDateTime(lead.updatedAt)}</p>
-                </div>
-              ))}
+        {assinarLeads?.length > 0 && (() => {
+          // Vermelho = ainda não chamado, amarelo = já chamado no WhatsApp,
+          // verde = resgatado (fechou a compra depois do contato).
+          const stateOf = (l) => (l.recoveredAt ? 'recovered' : l.contactedAt ? 'contacted' : 'new')
+          const order = { new: 0, contacted: 1, recovered: 2 }
+          const sorted = [...assinarLeads].sort(
+            (a, b) => order[stateOf(a)] - order[stateOf(b)] || new Date(b.updatedAt) - new Date(a.updatedAt)
+          )
+          const counts = { new: 0, contacted: 0, recovered: 0 }
+          for (const l of assinarLeads) counts[stateOf(l)] += 1
+          const styles = {
+            new: 'border-red-500/60 bg-red-500/5',
+            contacted: 'border-amber-500/60 bg-amber-500/5',
+            recovered: 'border-emerald-500/60 bg-emerald-500/10',
+          }
+          return (
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
+              <h3 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-400">
+                📋 Começaram mas não terminaram ({assinarLeads.length})
+              </h3>
+              <p className="mb-3 text-sm text-[var(--text-tertiary)]">
+                Pessoas que começaram o teste grátis em <code>/free-trial</code> e abandonaram antes de escolher o plano e
+                preencher o cartão. Chame no WhatsApp e marque <strong>Remarketing</strong>. Quando a pessoa fechar a
+                compra (mesmo WhatsApp ou mesmo email), o sistema marca sozinho como resgatada.
+              </p>
+              <div className="mb-3.5 flex flex-wrap gap-2 text-[11px] font-semibold">
+                <span className="rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-red-400">{counts.new} sem contato</span>
+                <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-amber-400">{counts.contacted} chamados</span>
+                <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-emerald-400">{counts.recovered} resgatados</span>
+              </div>
+              <div className="space-y-2">
+                {sorted.map((lead) => {
+                  const state = stateOf(lead)
+                  const digits = String(lead.phone || '').replace(/\D/g, '')
+                  return (
+                    <div
+                      key={lead.id}
+                      className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border-2 px-3.5 py-2.5 text-sm transition-colors ${styles[state]}`}
+                    >
+                      <div className="min-w-0">
+                        <p className="font-medium text-[var(--text-primary)]">{lead.name}</p>
+                        <p className="text-xs text-[var(--text-muted)]">
+                          {lead.email} · {lead.phone}
+                        </p>
+                        {state === 'contacted' && lead.contactedAt && (
+                          <p className="mt-0.5 text-[11px] text-amber-400">Chamado em {formatDateTime(lead.contactedAt)}</p>
+                        )}
+                        {state === 'recovered' && (
+                          <p className="mt-0.5 text-[11px] font-semibold text-emerald-400">✓ Resgatado: fechou a compra depois do contato</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <p className="text-xs text-[var(--text-muted)]">{formatDateTime(lead.updatedAt)}</p>
+                        {digits.length >= 8 && state !== 'recovered' && (
+                          <a
+                            href={`https://wa.me/55${digits}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="rounded-full border border-emerald-500/40 px-3 py-1 text-[11px] font-semibold text-emerald-400 hover:bg-emerald-500/10"
+                          >
+                            WhatsApp
+                          </a>
+                        )}
+                        {state === 'recovered' ? (
+                          <span className="rounded-full bg-emerald-500/20 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-emerald-400">
+                            Resgatado
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => toggleRemarketing(lead)}
+                            className={`rounded-full px-3.5 py-1 text-[11px] font-bold uppercase tracking-wide transition-colors ${
+                              state === 'contacted'
+                                ? 'bg-amber-500 text-black hover:bg-amber-400'
+                                : 'border border-red-500/50 text-red-400 hover:bg-red-500/10'
+                            }`}
+                          >
+                            {state === 'contacted' ? 'Remarketing ✓' : 'Remarketing'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-surface)] p-5">
           <h3 className="mb-3.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Criar novo usuário</h3>

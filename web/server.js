@@ -3186,6 +3186,15 @@ function createApp() {
 
   // Passo 1 de /free-trial sem passo 2 — pra suporte entrar em contato com
   // quem começou mas não terminou (ver db.js:listAbandonedAssinarLeads).
+  // Marca/desmarca "já chamei no WhatsApp" (remarketing) de um lead.
+  app.patch("/api/admin/assinar-leads/:id/remarketing", requireAdmin, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Id inválido." });
+    const updated = await db.setAssinarLeadRemarketing(id, req.body?.contacted !== false);
+    if (!updated) return res.status(404).json({ error: "Lead não encontrado." });
+    res.json({ contactedAt: updated.remarketing_contacted_at });
+  });
+
   app.get("/api/admin/assinar-leads", requireAdmin, async (req, res) => {
     const rows = await db.listAbandonedAssinarLeads();
     res.json(
@@ -3197,6 +3206,8 @@ function createApp() {
         planKey: r.plan_key,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
+        contactedAt: r.remarketing_contacted_at,
+        recoveredAt: r.remarketing_recovered_at,
       }))
     );
   });

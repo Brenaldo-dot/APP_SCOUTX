@@ -210,6 +210,12 @@ export const rawApi = {
 
   listOrganizations: () => request('/api/admin/organizations'),
   listAssinarLeads: () => request('/api/admin/assinar-leads'),
+  setLeadRemarketing: (id, contacted) =>
+    request(`/api/admin/assinar-leads/${id}/remarketing`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contacted }),
+    }),
   setOrganizationAffiliate: (id, affiliateId) =>
     request(`/api/admin/organizations/${id}/affiliate`, {
       method: 'PATCH',
