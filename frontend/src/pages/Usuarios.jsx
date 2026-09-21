@@ -739,7 +739,7 @@ export default function Usuarios() {
           // Vermelho = ainda não chamado, amarelo = já chamado no WhatsApp,
           // verde = resgatado (fechou a compra depois do contato).
           const stateOf = (l) => (l.recoveredAt ? 'recovered' : l.contactedAt ? 'contacted' : 'new')
-          const order = { new: 0, contacted: 1, recovered: 2 }
+          const order = { contacted: 0, recovered: 1, new: 2 }
           const sorted = [...assinarLeads].sort(
             (a, b) => order[stateOf(a)] - order[stateOf(b)] || new Date(b.updatedAt) - new Date(a.updatedAt)
           )
