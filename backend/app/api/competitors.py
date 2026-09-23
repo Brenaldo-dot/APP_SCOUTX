@@ -9,7 +9,7 @@ from contextlib import contextmanager
 
 import redis
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import CurrentUser, get_current_user, resolve_target_user
@@ -645,6 +645,47 @@ def update_competitor(
     return competitor
 
 
+# Revisão de performance (achado ao vivo, 2026-09-23): apagar um concorrente
+# com muito histórico (meses de product_scores/snapshots, muitos anúncios)
+# levava de 5 a 13s e às vezes terminava em 500 — o cascade="all, delete-orphan"
+# do ORM (ver models/competitor.py, product.py, ad.py) carrega CADA linha
+# filha em memória e manda um DELETE por linha, um round-trip de banco por
+# vez. Pra um produto com meses de snapshot/score isso são milhares de
+# DELETEs sequenciais. As DELETEs em massa abaixo (uma instrução por tabela,
+# com subquery) fazem o Postgres apagar tudo de uma vez, na ordem certa (filho
+# antes do pai, pra não esbarrar em FK) — mesmo resultado, muito mais rápido.
+def _bulk_delete_competitor_data(db: Session, competitor_id: int) -> None:
+    params = {"cid": competitor_id}
+    # Alerts referenciam competitor/product/ad sem cascade no banco — primeiro.
+    db.execute(text("DELETE FROM alerts WHERE competitor_id = :cid"), params)
+    # Anúncios: screenshots/histórico do anúncio antes do próprio anúncio.
+    db.execute(
+        text("DELETE FROM ad_snapshots WHERE ad_id IN (SELECT id FROM ads WHERE competitor_id = :cid)"), params
+    )
+    db.execute(text("DELETE FROM ads WHERE competitor_id = :cid"), params)
+    # Produtos: snapshot/evento/score histórico antes do produto.
+    db.execute(
+        text("DELETE FROM product_snapshots WHERE product_id IN (SELECT id FROM products WHERE competitor_id = :cid)"),
+        params,
+    )
+    db.execute(
+        text("DELETE FROM product_events WHERE product_id IN (SELECT id FROM products WHERE competitor_id = :cid)"),
+        params,
+    )
+    db.execute(
+        text("DELETE FROM product_scores WHERE product_id IN (SELECT id FROM products WHERE competitor_id = :cid)"),
+        params,
+    )
+    db.execute(text("DELETE FROM products WHERE competitor_id = :cid"), params)
+    db.execute(text("DELETE FROM tech_stack WHERE competitor_id = :cid"), params)
+    db.execute(text("DELETE FROM daily_volume WHERE competitor_id = :cid"), params)
+    db.execute(text("DELETE FROM store_structure_snapshots WHERE competitor_id = :cid"), params)
+    # competitor_trackers e ecosystem_map têm ON DELETE CASCADE no próprio
+    # banco (ver models/competitor.py e ecosystem.py) — o Postgres cuida
+    # sozinho quando a linha do competitor sai a seguir.
+    db.execute(text("DELETE FROM competitors WHERE id = :cid"), params)
+
+
 @router.delete("/{competitor_id}", status_code=204)
 def delete_competitor(
     competitor_id: int, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)
@@ -668,7 +709,7 @@ def delete_competitor(
     # ainda rastreia.
     remaining = db.query(CompetitorTracker).filter(CompetitorTracker.competitor_id == competitor_id).count()
     if remaining == 0:
-        db.delete(competitor)
+        _bulk_delete_competitor_data(db, competitor_id)
     db.commit()
 
 

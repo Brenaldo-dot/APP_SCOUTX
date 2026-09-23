@@ -1,6 +1,8 @@
 """Envio de alertas via Discord Webhook (Módulo 7)."""
 
+import asyncio
 import logging
+import time
 
 import httpx
 
@@ -100,14 +102,55 @@ async def send_alert(
         payload["content"] = f"<@{settings.discord_mention_id}>"
         payload["allowed_mentions"] = {"users": [settings.discord_mention_id]}
 
+    return await _post_with_rate_limit(target, payload)
+
+
+# Achado ao vivo (2026-09-21 a 2026-09-23): rajadas de alerta (várias
+# mudanças detectadas na mesma raspagem) mandavam um POST por alerta sem
+# nenhum espaçamento, estourando o limite de taxa do PRÓPRIO Discord por
+# webhook (~5 requisições a cada 2s) — resultado era "429 Too Many Requests"
+# se repetindo e alertas de cliente se perdendo de verdade (o código só
+# logava e desistia, nunca tentava de novo). Duas camadas de correção:
+# 1) um espaçamento mínimo entre envios ao MESMO webhook (evita bater no
+#    limite na maioria das vezes); 2) se mesmo assim vier 429, respeita o
+#    `retry_after` que o próprio Discord manda no corpo da resposta e tenta
+#    de novo (até 3 vezes) antes de desistir.
+_last_sent_at: dict[str, float] = {}
+_MIN_INTERVAL_SECONDS = 0.5
+
+
+async def _post_with_rate_limit(webhook_url: str, payload: dict, max_retries: int = 3) -> bool:
+    last_at = _last_sent_at.get(webhook_url, 0.0)
+    wait = _MIN_INTERVAL_SECONDS - (time.monotonic() - last_at)
+    if wait > 0:
+        await asyncio.sleep(wait)
+
     async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            response = await client.post(target, json=payload)
-            response.raise_for_status()
-            return True
-        except httpx.HTTPError:
-            logger.exception("Falha ao enviar alerta para o Discord")
-            return False
+        for attempt in range(max_retries + 1):
+            try:
+                response = await client.post(webhook_url, json=payload)
+                _last_sent_at[webhook_url] = time.monotonic()
+                if response.status_code == 429 and attempt < max_retries:
+                    retry_after = _MIN_INTERVAL_SECONDS
+                    try:
+                        retry_after = max(retry_after, float(response.json().get("retry_after", 0)))
+                    except (ValueError, KeyError):
+                        pass
+                    logger.warning(
+                        "Discord: limite de taxa (429), tentando de novo em %.1fs (tentativa %d/%d)",
+                        retry_after,
+                        attempt + 1,
+                        max_retries,
+                    )
+                    await asyncio.sleep(retry_after)
+                    continue
+                response.raise_for_status()
+                return True
+            except httpx.HTTPError:
+                if attempt >= max_retries:
+                    logger.exception("Falha ao enviar alerta para o Discord")
+                    return False
+    return False
 
 
 async def send_test(webhook_url: str) -> bool:
@@ -125,11 +168,4 @@ async def send_test(webhook_url: str) -> bool:
         ],
         "allowed_mentions": {"parse": []},
     }
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            response = await client.post(webhook_url, json=payload)
-            response.raise_for_status()
-            return True
-        except httpx.HTTPError:
-            logger.exception("Falha ao enviar teste de webhook do Discord")
-            return False
+    return await _post_with_rate_limit(webhook_url, payload)
