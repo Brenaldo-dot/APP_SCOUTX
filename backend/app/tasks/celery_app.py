@@ -2,10 +2,36 @@
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_process_init
 
 from app.config import get_settings
 
 settings = get_settings()
+
+
+# Achado numa investigação de infra (2026-09-25): o worker "geral" roda com
+# --concurrency=4 e o "browser_heavy" com --concurrency=3 (ver start_all.sh)
+# — o Celery sobe UM processo master por fila e usa os.fork() pra criar os
+# processos filhos (prefork, padrão do Celery). O engine do SQLAlchemy (ver
+# database.py, criado uma vez na importação do módulo) é criado no processo
+# MASTER antes do fork — sem isso aqui, cada um dos 7 processos filhos
+# herdava o MESMO pool de conexões (e os mesmos sockets TCP abertos) do pai,
+# o que é inseguro (dois processos brigando pela mesma conexão) e é a causa
+# clássica documentada do próprio SQLAlchemy pra "conexão trava sem erro
+# nenhum" em apps com Celery/gunicorn prefork. `pool_pre_ping=True` escondia
+# o sintoma na maioria das vezes (descarta e reconecta a conexão marcada
+# como ruim antes de usar), mas ainda cobra o custo de detectar e reabrir a
+# conexão a cada checkout problemático — combina com o padrão visto nos
+# logs (Postgres com CPU baixíssima mas o Node esperando 4-6s pela resposta
+# do FastAPI: não é a QUERY que demora, é a hora de conseguir uma conexão
+# de verdade). `dispose()` aqui descarta o pool herdado assim que cada
+# processo filho nasce, forçando conexões novas e próprias, sem custo (o
+# processo mal começou a rodar, não tinha conexão nenhuma em uso ainda).
+@worker_process_init.connect
+def _reset_db_pool_after_fork(**kwargs):
+    from app.database import engine
+
+    engine.dispose()
 
 celery_app = Celery(
     "competitor_intel",
