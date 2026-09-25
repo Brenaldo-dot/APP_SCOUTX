@@ -14,11 +14,20 @@ só existe no formato antigo, então uma segunda passada não encontra nada pra
 fazer e termina na hora — não precisa de flag de "já rodei" nem de
 tabela de controle.
 
-Em lotes pequenos, cada um sua própria transação curta, com uma pausa entre
-eles — pra nunca segurar uma trava longa nem competir demais com tráfego
-real enquanto roda. Testado contra Postgres real (embedded-postgres) antes
-de rodar em produção: preserva supplier_id (inclusive nulo), não mexe em
-raw já None, não mexe em linha já no formato novo, é idempotente."""
+Em lotes, cada um sua própria transação curta, com uma pausa entre eles —
+pra nunca segurar uma trava longa nem competir demais com tráfego real
+enquanto roda. Ajuste 2026-09-25 (achado ao vivo, rodando em produção): a
+versão original refazia a busca do zero em toda passada (`ORDER BY id LIMIT`
+sem lembrar de onde parou) — como o id de quem já foi atualizado deixa de
+bater na condição, cada lote novo precisava pular por cima de uma fatia cada
+vez MAIOR de linhas já prontas antes de achar as próximas, ficando mais
+lento a cada passada (visto ao vivo: 200 mil linhas em ~6 minutos). Agora
+guarda o maior id já processado (`last_id`) e busca sempre a PARTIR dali —
+sempre andando pra frente, nunca reescaneando o que já passou. Testado
+contra Postgres real (embedded-postgres) antes de rodar em produção:
+preserva supplier_id (inclusive nulo), não mexe em raw já None nem em linha
+já no formato novo (mesmo intercaladas no meio do caminho), é idempotente
+mesmo reiniciando o marcador do zero depois de já ter terminado."""
 
 import logging
 import threading
@@ -31,18 +40,20 @@ from app.database import SessionLocal
 
 logger = logging.getLogger(__name__)
 
-_BATCH_SIZE = 10_000
+_BATCH_SIZE = 50_000
 _PAUSE_SECONDS = 0.3
 _BATCH_QUERY = text(
     """
-    UPDATE product_snapshots
-    SET raw = json_build_object('supplier_id', raw->>'supplier_id')
-    WHERE id IN (
+    WITH batch AS (
         SELECT id FROM product_snapshots
-        WHERE raw IS NOT NULL AND raw -> 'image_urls' IS NOT NULL
+        WHERE id > :last_id AND raw IS NOT NULL AND raw -> 'image_urls' IS NOT NULL
         ORDER BY id
         LIMIT :batch_size
     )
+    UPDATE product_snapshots
+    SET raw = json_build_object('supplier_id', raw->>'supplier_id')
+    WHERE id IN (SELECT id FROM batch)
+    RETURNING id
     """
 )
 
@@ -58,18 +69,22 @@ def _run() -> None:
     _state["status"] = "running"
     _state["started_at"] = datetime.now(timezone.utc).isoformat()
     logger.info("Encolhendo product_snapshots.raw antigo: iniciando (lotes de %d).", _BATCH_SIZE)
+    last_id = 0
     try:
         while True:
             db = SessionLocal()
             try:
-                result = db.execute(_BATCH_QUERY, {"batch_size": _BATCH_SIZE})
-                updated = result.rowcount
+                result = db.execute(_BATCH_QUERY, {"last_id": last_id, "batch_size": _BATCH_SIZE})
+                updated_ids = [row[0] for row in result]
                 db.commit()
             finally:
                 db.close()
+            updated = len(updated_ids)
+            if updated_ids:
+                last_id = max(updated_ids)
             _state["batches"] += 1
             _state["updated"] += updated
-            if _state["batches"] % 10 == 0 or updated == 0:
+            if _state["batches"] % 5 == 0 or updated == 0:
                 logger.info(
                     "Encolhendo product_snapshots.raw: %d linha(s) neste lote, %d no total, %d lote(s).",
                     updated,
