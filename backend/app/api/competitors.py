@@ -475,6 +475,7 @@ def retention_status(current_user: CurrentUser = Depends(get_current_user)):
 
     from app.database import SessionLocal
     from app.tasks.retention import get_fallback_state
+    from app.tasks.snapshot_shrink import get_shrink_state
 
     db = SessionLocal()
     try:
@@ -489,6 +490,7 @@ def retention_status(current_user: CurrentUser = Depends(get_current_user)):
         db.close()
     return {
         "fallback": get_fallback_state(),
+        "snapshot_shrink": get_shrink_state(),
         "database_bytes": int(total or 0),
         "tables": [
             {"name": r[0], "bytes": int(r[1]), "live_rows": int(r[2] or 0), "dead_rows": int(r[3] or 0)} for r in rows

@@ -55,6 +55,13 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Não consegui agendar a limpeza de histórico de reserva.")
 
+    try:
+        from app.tasks.snapshot_shrink import start_snapshot_shrink
+
+        start_snapshot_shrink()
+    except Exception:
+        logger.exception("Não consegui agendar o encolhimento de product_snapshots.raw.")
+
     yield
 
 
