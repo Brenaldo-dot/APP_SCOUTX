@@ -357,6 +357,13 @@ def _save_snapshot(db: Session, product: Product, item: dict, has_urgency: bool)
             total_inventory=item["total_inventory"],
             main_image_url=item["main_image_url"],
             has_urgency_copy=has_urgency,
-            raw={k: v for k, v in item.items() if k != "body_html"},
+            # Achado numa investigação de disco (2026-09-25): isso guardava
+            # quase o `item` inteiro (descrição até 3000 caracteres, lista
+            # completa de fotos, tags…) de NOVO em toda foto diária de todo
+            # produto — e o único pedaço que o app volta a ler depois é o
+            # supplier_id (ver _detect_events abaixo, comparação de troca de
+            # fornecedor). O resto nunca é lido de volta, só ocupava espaço.
+            # `product_snapshots` sozinha já era ~80% do disco do Postgres.
+            raw={"supplier_id": item.get("supplier_id")},
         )
     )
