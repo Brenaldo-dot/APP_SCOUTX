@@ -1,5 +1,7 @@
 """Resumo pro Dashboard do frontend."""
 
+import logging
+import time
 from collections import defaultdict
 from datetime import date as date_, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -34,6 +36,33 @@ from app.schemas.dashboard import (
 from app.services.scoring_service import score_label
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+logger = logging.getLogger(__name__)
+
+
+# Instrumentação (2026-09-24): o proxy do Node já mostrou que /summary e
+# /highlights levam de 2 a 6s, mas cada rota faz de 3 a 5 queries separadas —
+# sem isso não dava pra saber QUAL etapa pesa. Um "cronômetro" simples por
+# etapa, logado só quando a rota inteira passa de 1,5s, pra não poluir o log
+# em uso normal. Puramente aditivo (só mede e loga), não muda nenhum
+# resultado nem regra de negócio.
+class _StageTimer:
+    def __init__(self, route: str):
+        self.route = route
+        self.stages: list[tuple[str, float]] = []
+        self._t0 = time.perf_counter()
+        self._last = self._t0
+
+    def mark(self, name: str) -> None:
+        now = time.perf_counter()
+        self.stages.append((name, now - self._last))
+        self._last = now
+
+    def flush(self, threshold: float = 1.5) -> None:
+        total = time.perf_counter() - self._t0
+        if total < threshold:
+            return
+        breakdown = ", ".join(f"{name}={ms * 1000:.0f}ms" for name, ms in self.stages)
+        logger.warning("Dashboard lento: %s total=%.0fms (%s)", self.route, total * 1000, breakdown)
 
 # Mesmo fuso usado em todo o resto do app pro usuário (utils/date.js no
 # frontend) — bucket por dia tem que ser dia de Brasília, não dia UTC, senão
@@ -71,6 +100,7 @@ def get_summary(
 ):
     target_user = resolve_target_user(current_user, as_user_id)
     since = datetime.now(timezone.utc) - timedelta(hours=24)
+    timer = _StageTimer("/summary")
 
     competitors_query = (
         db.query(Competitor)
@@ -96,7 +126,9 @@ def get_summary(
 
     total_competitors = competitors_query.count()
     active_competitors = competitors_query.filter(Competitor.status == CompetitorStatus.ACTIVE).count()
+    timer.mark("contagem_competitors")
     total_products = products_query.filter(Product.is_active.is_(True)).count()
+    timer.mark("contagem_products")
 
     # "Produtos Quentes" (score 56+, Quente OU Escalando — MESMO critério de
     # /api/products/hot) — não só product.scaling (80+ estrito): esse card
@@ -123,14 +155,18 @@ def get_summary(
         score_rows_query.distinct(ProductScore.product_id).order_by(ProductScore.product_id, ProductScore.date.desc()).all()
     )
     hot_products = sum(1 for _, score in latest_scores if score >= 56)
+    timer.mark("latest_scores")
 
     alerts_last_24h = alerts_query.filter(Alert.created_at >= since).count()
+    timer.mark("contagem_alertas_24h")
     recent_alerts = (
         alerts_query.options(selectinload(Alert.ad), selectinload(Alert.competitor), selectinload(Alert.product))
         .order_by(Alert.created_at.desc())
         .limit(3)
         .all()
     )
+    timer.mark("recent_alerts")
+    timer.flush()
 
     return DashboardSummary(
         total_competitors=total_competitors,
@@ -156,6 +192,7 @@ def get_highlights(
     concorrente trocando de fornecedor é sinal de novo produto chegando).
     """
     target_user = resolve_target_user(current_user, as_user_id)
+    timer = _StageTimer("/highlights")
 
     # --- Quem está bombando agora: maior salto de score nos últimos 7 dias ---
     since = datetime.now(BRASILIA_TZ).date() - timedelta(days=7)
@@ -171,6 +208,7 @@ def get_highlights(
     window: dict[int, list[tuple[date_, int]]] = defaultdict(list)
     for product_id, score_date, score in score_query.all():
         window[product_id].append((score_date, score))
+    timer.mark("score_query_7d")
 
     # Delta = score mais recente - score mais antigo dentro da janela; produto
     # com só 1 leitura na semana (raio-x novo) não tem base de comparação, fica
@@ -206,6 +244,7 @@ def get_highlights(
         for pid, score, delta in top
         if pid in products_by_id
     ]
+    timer.mark("deltas_e_produtos")
 
     # --- Anúncios vencedores (7+ dias ativos, Ad.is_winning) ainda no ar ---
     ads_query = (
@@ -228,6 +267,7 @@ def get_highlights(
         )
         for ad in ads_query.order_by(Ad.started_at.asc()).limit(5).all()
     ]
+    timer.mark("winning_ads")
 
     # --- Troca de fornecedor recente ---
     vendor_query = (
@@ -252,6 +292,8 @@ def get_highlights(
         )
         for a in vendor_query.order_by(Alert.created_at.desc()).limit(5).all()
     ]
+    timer.mark("vendor_changes")
+    timer.flush()
 
     return DashboardHighlights(
         trending_products=trending_products,
