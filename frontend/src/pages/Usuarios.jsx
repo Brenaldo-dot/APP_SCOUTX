@@ -644,6 +644,33 @@ export default function Usuarios() {
                     ? `rodou em ${new Date(dbUsage.fallback.last_run_at).toLocaleString('pt-BR')}${dbUsage.fallback.last_error ? ` (erro: ${dbUsage.fallback.last_error})` : ''}`
                     : 'ainda não rodou desde o último deploy (roda todo dia às 03:30 de Bogotá)'}
                 </p>
+                {dbUsage.connections && (
+                  <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] p-2.5">
+                    <p className="mb-1 font-semibold text-[var(--text-primary)]">Conexões com o banco agora</p>
+                    <p>
+                      App (este processo): {dbUsage.connections.api_process?.checked_out ?? '—'} em uso de{' '}
+                      {(dbUsage.connections.api_process?.size ?? 0) + (dbUsage.connections.api_process?.overflow ?? 0)} possíveis
+                    </p>
+                    {dbUsage.connections.pgbouncer?.reachable ? (
+                      <div className="mt-1">
+                        <p className="mb-0.5">
+                          PgBouncer{' '}
+                          {dbUsage.connections.pgbouncer.pools?.some((p) => p.cl_waiting > 0) && (
+                            <span className="font-semibold text-red-400">— tem gente na fila agora!</span>
+                          )}
+                        </p>
+                        {dbUsage.connections.pgbouncer.pools?.map((p) => (
+                          <p key={p.database} className="pl-2 text-[var(--text-muted)]">
+                            {p.database}: {p.cl_active} ativas, <span className={p.cl_waiting > 0 ? 'font-semibold text-red-400' : ''}>{p.cl_waiting} esperando</span>,{' '}
+                            {p.sv_active} conexões reais em uso, {p.sv_idle} sobrando
+                          </p>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[var(--text-faint)]">PgBouncer: não consegui ver (usuário do banco sem acesso ao console dele).</p>
+                    )}
+                  </div>
+                )}
                 <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
                   <table className="w-full text-left">
                     <thead className="bg-[var(--bg-surface-2)] text-[10px] uppercase text-[var(--text-muted)]">

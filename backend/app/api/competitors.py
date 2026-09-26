@@ -463,12 +463,81 @@ def run_retention_now(current_user: CurrentUser = Depends(get_current_user)):
     return run_purge()
 
 
+def _sqlalchemy_pool_stats() -> dict:
+    """Quantas conexões o PRÓPRIO processo da API está segurando agora (não
+    conta os processos do Celery, cada um tem o pool dele). `checked_out` =
+    em uso neste exato instante; perto do teto (pool_size + max_overflow,
+    ver database.py) é sinal de fila crescendo por dentro do processo."""
+    from app.database import engine
+
+    pool = engine.pool
+    return {
+        "checked_out": pool.checkedout(),
+        "checked_in": pool.checkedin(),
+        "overflow": pool.overflow(),
+        "size": pool.size(),
+    }
+
+
+def _pgbouncer_pool_stats() -> dict:
+    """`SHOW POOLS` do PgBouncer — o lado que a instrumentação da API não
+    enxerga: o app pode estar rápido POR DENTRO e mesmo assim a requisição
+    inteira ficar lenta porque ficou esperando um cliente do PgBouncer
+    liberar (fila ANTES do Postgres nem começar a trabalhar, CPU do banco
+    fica baixa mesmo com o app lento — exatamente o padrão visto numa
+    investigação de infra, 2026-09-25/26). `cl_waiting` > 0 confirma isso ao
+    vivo. Best-effort: exige que o usuário do banco tenha acesso ao console
+    administrativo do PgBouncer (base virtual "pgbouncer") — se não tiver,
+    devolve só o motivo, sem quebrar o resto do painel."""
+    import psycopg2
+
+    from app.config import get_settings
+    from urllib.parse import urlsplit
+
+    settings = get_settings()
+    parts = urlsplit(settings.database_url.replace("postgresql+psycopg2://", "postgresql://"))
+    try:
+        conn = psycopg2.connect(
+            host=parts.hostname,
+            port=parts.port or 5432,
+            user=parts.username,
+            password=parts.password,
+            dbname="pgbouncer",
+            connect_timeout=3,
+        )
+        conn.autocommit = True
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SHOW POOLS;")
+                cols = [c.name for c in cur.description]
+                pools = [dict(zip(cols, row)) for row in cur.fetchall()]
+        finally:
+            conn.close()
+        # Só os campos que importam pra diagnóstico (o resto é ruído).
+        return {
+            "reachable": True,
+            "pools": [
+                {
+                    "database": p.get("database"),
+                    "cl_active": p.get("cl_active"),
+                    "cl_waiting": p.get("cl_waiting"),
+                    "sv_active": p.get("sv_active"),
+                    "sv_idle": p.get("sv_idle"),
+                    "maxwait_seconds": p.get("maxwait"),
+                }
+                for p in pools
+            ],
+        }
+    except Exception as exc:  # noqa: BLE001 - painel de diagnóstico, nunca quebra por isso
+        return {"reachable": False, "error": str(exc)}
+
+
 @router.get("/retention-status")
 def retention_status(current_user: CurrentUser = Depends(get_current_user)):
     """Estado da limpeza de reserva (thread interna) + uso do banco por
-    tabela. `dead_tuples` = linhas apagadas que ainda ocupam espaço no
-    disco até o Postgres reaproveitar (apagar não devolve espaço ao
-    disco). Só admin."""
+    tabela + conexões (app e PgBouncer). `dead_tuples` = linhas apagadas que
+    ainda ocupam espaço no disco até o Postgres reaproveitar (apagar não
+    devolve espaço ao disco). Só admin."""
     if not current_user.is_admin:
         raise HTTPException(403, "Só administradores podem ver isso.")
     from sqlalchemy import text as sql_text
@@ -495,6 +564,10 @@ def retention_status(current_user: CurrentUser = Depends(get_current_user)):
         "tables": [
             {"name": r[0], "bytes": int(r[1]), "live_rows": int(r[2] or 0), "dead_rows": int(r[3] or 0)} for r in rows
         ],
+        "connections": {
+            "api_process": _sqlalchemy_pool_stats(),
+            "pgbouncer": _pgbouncer_pool_stats(),
+        },
     }
 
 
