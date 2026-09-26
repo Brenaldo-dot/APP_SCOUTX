@@ -2888,6 +2888,36 @@ async function logRenewalDiagnostics() {
   for (const org of systemic.rows) {
     console.log(JSON.stringify(org));
   }
+
+  // Erick Henrique (achado na varredura acima, id=24) — investigação mais
+  // funda: TODO evento da Cakto ligado à compra original dele (não só os
+  // com erro), e todo histórico de renovação/edição dessa organização no
+  // log de auditoria (renovação automática via webhook grava "Cakto
+  // (automático)" como ator; renovação manual grava o admin de verdade).
+  const erickOrg = await pool.query(
+    `SELECT id, name, plan, billing_cycle, is_trial, cakto_purchase_id, cakto_customer_email,
+            started_at, expires_at
+     FROM organizations WHERE lower(name) LIKE '%erick%henrique%'`
+  );
+  console.log("=== DIAGNÓSTICO Erick Henrique ===");
+  for (const org of erickOrg.rows) {
+    console.log(JSON.stringify(org));
+    const events = await pool.query(
+      `SELECT purchase_id, event, status, detail, created_at FROM cakto_events
+       WHERE purchase_id = $1 ORDER BY created_at ASC`,
+      [org.cakto_purchase_id]
+    );
+    console.log(`-- eventos da Cakto pra essa compra (${events.rowCount}) --`);
+    for (const ev of events.rows) console.log(JSON.stringify(ev));
+
+    const history = await pool.query(
+      `SELECT actor_name, action, details, created_at FROM admin_audit_log
+       WHERE target_name = $1 ORDER BY created_at ASC`,
+      [org.name]
+    );
+    console.log(`-- histórico de ações nessa organização (${history.rowCount}) --`);
+    for (const h of history.rows) console.log(JSON.stringify(h));
+  }
 }
 
 module.exports = {
