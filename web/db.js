@@ -2840,7 +2840,58 @@ async function deleteSuggestedCompetitorsByOperation(operation) {
   return res.rowCount;
 }
 
+// Investigação ao vivo (2026-09-26): cliente "vencido" apesar de ter pago a
+// renovação na Cakto. Sem acesso direto ao banco/API da Cakto nesta sessão,
+// isso roda uma vez no arranque do app e imprime o achado nos logs da
+// Railway (que dá pra ler) — três partes: (1) o registro exato dessa
+// organização, (2) qualquer webhook da Cakto que falhou recentemente com o
+// motivo do erro (cakto_events.detail), e (3) uma varredura geral: toda
+// organização que já pagou pelo menos uma vez (tem cakto_purchase_id) mas
+// está vencida agora — se for só o Augusto, é um caso isolado; se aparecer
+// uma lista, é sistêmico. Só leitura, nunca escreve nada, nunca derruba o
+// arranque do app (chamado com .catch em server.js).
+async function logRenewalDiagnostics() {
+  const suspect = await pool.query(
+    `SELECT id, name, plan, billing_cycle, is_trial, cakto_purchase_id, cakto_customer_email,
+            started_at, expires_at, expires_at < now() AS vencido
+     FROM organizations
+     WHERE lower(name) LIKE '%prebianca%' OR lower(cakto_customer_email) = 'augusto_prebianca@hotmail.com'`
+  );
+  console.log("=== DIAGNÓSTICO Augusto Prebianca ===");
+  if (suspect.rows.length === 0) {
+    console.log("Nenhuma organização encontrada com esse nome/email.");
+  }
+  for (const org of suspect.rows) {
+    console.log(JSON.stringify(org));
+  }
+
+  const failedEvents = await pool.query(
+    `SELECT purchase_id, event, status, detail, created_at
+     FROM cakto_events
+     WHERE status = 'error'
+     ORDER BY created_at DESC
+     LIMIT 30`
+  );
+  console.log(`=== Webhooks da Cakto com erro (últimos ${failedEvents.rows.length}) ===`);
+  for (const ev of failedEvents.rows) {
+    console.log(JSON.stringify(ev));
+  }
+
+  const systemic = await pool.query(
+    `SELECT id, name, plan, cakto_purchase_id, cakto_customer_email, expires_at
+     FROM organizations
+     WHERE is_trial = false AND cakto_purchase_id IS NOT NULL AND expires_at < now()
+     ORDER BY expires_at DESC
+     LIMIT 30`
+  );
+  console.log(`=== Organizações pagantes VENCIDAS agora (total: ${systemic.rowCount}) ===`);
+  for (const org of systemic.rows) {
+    console.log(JSON.stringify(org));
+  }
+}
+
 module.exports = {
+  logRenewalDiagnostics,
   listSuggestedCompetitors,
   addSuggestedCompetitors,
   deleteSuggestedCompetitor,

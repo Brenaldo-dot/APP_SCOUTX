@@ -3775,6 +3775,11 @@ function startServer(port = process.env.PORT || 3001) {
     db.migrate()
       .then(() => db.ensureMineradorDatabase())
       .then(() => {
+        db.logRenewalDiagnostics().catch((err) =>
+          console.error("Diagnóstico de renovação (Augusto Prebianca): falhou ao rodar:", err.message)
+        );
+      })
+      .then(() => {
         const app = createApp();
         const server = app.listen(port, () => resolve({ port: server.address().port, server }));
         server.on("error", reject);
