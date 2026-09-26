@@ -261,6 +261,16 @@ def get_highlights(
     """
     trending_params = {"uid": target_user, "since": since, "operation": operation}
     _t_trend_start = time.perf_counter()
+    # Achado ao vivo (2026-09-26, EXPLAIN ANALYZE real de um usuário com 673
+    # concorrentes): pra quem rastreia muita coisa, a janela de 7 dias cobre
+    # a MAIORIA do product_scores (não dá pra usar índice pra pular boa
+    # parte — o Postgres já escolhe certo em fazer Seq Scan aí), mas a
+    # ORDENAÇÃO dos ~400 mil registros dessa janela estourava o work_mem
+    # padrão e ia pro disco ("Sort Method: external merge Disk: 7384kB"),
+    # bem mais lento que em memória. SET LOCAL só vale dentro desta
+    # transação (reseta sozinho ao fim da requisição) — não muda nada global
+    # no banco nem afeta outra conexão.
+    db.execute(text("SET LOCAL work_mem = '64MB'"))
     top = [(row.product_id, row.score, row.delta) for row in db.execute(text(trending_sql_raw), trending_params).all()]
     if time.perf_counter() - _t_trend_start > 1.5:
         _capture_explain_once(db, trending_sql_raw, trending_params, "score_query_7d (/highlights)")
