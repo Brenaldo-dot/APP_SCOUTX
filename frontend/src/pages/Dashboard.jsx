@@ -4,6 +4,7 @@ import { Factory, Flame, Moon, MoonStar, Sun, Trophy, Zap } from 'lucide-react'
 import { api } from '../api/client.js'
 import StatCard from '../components/StatCard.jsx'
 import EmptyState from '../components/EmptyState.jsx'
+import { DashboardSkeleton } from '../components/PageSkeleton.jsx'
 import { ALERT_CATEGORIES, AlertTypeBadge, alertAccentClass } from '../components/Badges.jsx'
 import NewProductsChart from '../components/NewProductsChart.jsx'
 import AdsTimelineChart from '../components/AdsTimelineChart.jsx'
@@ -146,7 +147,7 @@ export default function Dashboard() {
   }, [operation, refreshKey])
 
   if (error) return <EmptyState title="Não deu pra carregar o dashboard" subtitle={error} />
-  if (!summary) return <p className="text-sm text-[var(--text-muted)]">Carregando…</p>
+  if (!summary) return <DashboardSkeleton />
 
   const { text: greetingText, Icon: GreetingIcon } = greetingFor(new Date().getHours(), me?.name?.split(' ')[0])
 

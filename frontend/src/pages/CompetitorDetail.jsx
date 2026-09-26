@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client.js'
 import EmptyState from '../components/EmptyState.jsx'
+import PageSkeleton from '../components/PageSkeleton.jsx'
 import StatCard from '../components/StatCard.jsx'
 import Pagination from '../components/Pagination.jsx'
 import { ClassificationBadge, DuplicateBadge, ScalingBadge, StatusBadge, SupplierIdTag } from '../components/Badges.jsx'
@@ -79,7 +80,7 @@ export default function CompetitorDetail() {
   const country = competitor ? OPERATION_COUNTRY[competitor.operation] || 'CO' : 'CO'
 
   if (error) return <EmptyState title="Não deu pra carregar o concorrente" subtitle={error} />
-  if (!competitor) return <p className="text-sm text-[var(--text-muted)]">Carregando…</p>
+  if (!competitor) return <PageSkeleton />
 
   return (
     <div className="space-y-8">
