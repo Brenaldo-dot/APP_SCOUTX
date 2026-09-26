@@ -2918,6 +2918,32 @@ async function logRenewalDiagnostics() {
     console.log(`-- histórico de ações nessa organização (${history.rowCount}) --`);
     for (const h of history.rows) console.log(JSON.stringify(h));
   }
+
+  // Hipótese do usuário (2026-09-26): Augusto pode ser assinante da REMESSA
+  // ANTIGA de produto (preço mais baixo, antes da duplicação de 31/08) — se
+  // a compra/renovação dele usou um offer.id que não está no mapa (ver
+  // CAKTO_OFFER_PLAN_MAP), o webhook falha sem gerar/renovar acesso. Mesma
+  // investigação do Erick, pros dois cadastros do Augusto (ver bloco acima).
+  const prebiancaOrgs = await pool.query(
+    `SELECT id, name, cakto_purchase_id FROM organizations WHERE lower(name) LIKE '%prebianca%'`
+  );
+  for (const org of prebiancaOrgs.rows) {
+    const events = await pool.query(
+      `SELECT purchase_id, event, status, detail, created_at FROM cakto_events
+       WHERE purchase_id = $1 ORDER BY created_at ASC`,
+      [org.cakto_purchase_id]
+    );
+    console.log(`-- eventos da Cakto pra ${org.name} (id=${org.id}, compra ${org.cakto_purchase_id}), total ${events.rowCount} --`);
+    for (const ev of events.rows) console.log(JSON.stringify(ev));
+
+    const history = await pool.query(
+      `SELECT actor_name, action, details, created_at FROM admin_audit_log
+       WHERE target_name = $1 ORDER BY created_at ASC`,
+      [org.name]
+    );
+    console.log(`-- histórico de ações em ${org.name} (id=${org.id}), total ${history.rowCount} --`);
+    for (const h of history.rows) console.log(JSON.stringify(h));
+  }
 }
 
 module.exports = {
