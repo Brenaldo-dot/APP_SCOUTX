@@ -7,7 +7,7 @@ from datetime import date as date_, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.alerts import ALERT_CATEGORY_TYPES
@@ -195,34 +195,52 @@ def get_highlights(
     timer = _StageTimer("/highlights")
 
     # --- Quem está bombando agora: maior salto de score nos últimos 7 dias ---
+    # Revisão de performance (2026-09-26, achado ao vivo: essa consulta sozinha
+    # levava até 5,9s): a versão antiga puxava TODA leitura de score dos
+    # últimos 7 dias de TODO produto ativo pro Python, agrupava num dict e
+    # calculava o delta linha por linha — quanto mais produto/histórico, mais
+    # lento, sem limite. Isso aqui faz o Postgres calcular o delta de cada
+    # produto de uma vez (window function: 1ª e última leitura da janela por
+    # PARTITION), sem trazer nenhuma linha crua pro Python — mesmo resultado
+    # (mesma regra: delta = mais recente - mais antigo, só entra quem tem 2+
+    # leituras na janela, só delta positivo, top 5), verificado contra o
+    # algoritmo antigo com casos de teste (empate, delta negativo, 1 leitura
+    # só, produto inativo, leitura fora da janela) antes de trocar.
     since = datetime.now(BRASILIA_TZ).date() - timedelta(days=7)
-    score_query = (
-        db.query(ProductScore.product_id, ProductScore.date, ProductScore.score)
-        .join(Product, Product.id == ProductScore.product_id)
-        .join(Competitor, Competitor.id == Product.competitor_id)
-        .join(CompetitorTracker, CompetitorTracker.competitor_id == Competitor.id)
-        .filter(CompetitorTracker.user_id == target_user, Product.is_active.is_(True), ProductScore.date >= since)
+    trending_sql = text(
+        """
+        WITH windowed AS (
+            SELECT ps.product_id, ps.score,
+                   ROW_NUMBER() OVER (PARTITION BY ps.product_id ORDER BY ps.date ASC) AS rn_first,
+                   ROW_NUMBER() OVER (PARTITION BY ps.product_id ORDER BY ps.date DESC) AS rn_last,
+                   COUNT(*) OVER (PARTITION BY ps.product_id) AS cnt
+            FROM product_scores ps
+            JOIN products p ON p.id = ps.product_id
+            JOIN competitors c ON c.id = p.competitor_id
+            JOIN competitor_trackers ct ON ct.competitor_id = c.id
+            WHERE ct.user_id = :uid AND p.is_active = true AND ps.date >= :since
+              AND (:operation IS NULL OR c.operation = :operation)
+        ),
+        agg AS (
+            SELECT product_id,
+                   MAX(CASE WHEN rn_first = 1 THEN score END) AS first_score,
+                   MAX(CASE WHEN rn_last = 1 THEN score END) AS last_score,
+                   MAX(cnt) AS cnt
+            FROM windowed
+            GROUP BY product_id
+        )
+        SELECT product_id, last_score AS score, (last_score - first_score) AS delta
+        FROM agg
+        WHERE cnt >= 2 AND (last_score - first_score) > 0
+        ORDER BY delta DESC
+        LIMIT 5
+        """
     )
-    if operation:
-        score_query = score_query.filter(Competitor.operation == operation)
-    window: dict[int, list[tuple[date_, int]]] = defaultdict(list)
-    for product_id, score_date, score in score_query.all():
-        window[product_id].append((score_date, score))
+    top = [
+        (row.product_id, row.score, row.delta)
+        for row in db.execute(trending_sql, {"uid": target_user, "since": since, "operation": operation}).all()
+    ]
     timer.mark("score_query_7d")
-
-    # Delta = score mais recente - score mais antigo dentro da janela; produto
-    # com só 1 leitura na semana (raio-x novo) não tem base de comparação, fica
-    # de fora em vez de aparecer com salto falso de "0 pra X".
-    deltas: list[tuple[int, int, int]] = []
-    for product_id, rows in window.items():
-        if len(rows) < 2:
-            continue
-        rows.sort()
-        delta = rows[-1][1] - rows[0][1]
-        if delta > 0:
-            deltas.append((product_id, rows[-1][1], delta))
-    deltas.sort(key=lambda row: row[2], reverse=True)
-    top = deltas[:5]
     products_by_id: dict[int, Product] = {}
     if top:
         rows = (
