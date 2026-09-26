@@ -64,6 +64,31 @@ class _StageTimer:
         breakdown = ", ".join(f"{name}={ms * 1000:.0f}ms" for name, ms in self.stages)
         logger.warning("Dashboard lento: %s total=%.0fms (%s)", self.route, total * 1000, breakdown)
 
+
+# Achado ao vivo (2026-09-26): a consulta virou puro SQL (window functions,
+# ver get_highlights) mas continuou lenta (1,7 a 6,5s) — ou seja, o custo não
+# era o Python fazendo a conta, é o próprio Postgres demorando pra escanear/
+# ordenar. Sem acesso direto ao banco de produção pra rodar EXPLAIN ANALYZE
+# manualmente, captura o plano de execução REAL na primeira vez que essa
+# consulta aparecer lenta (>1,5s) e loga — só UMA vez por processo (não
+# dobra o custo de toda consulta lenta pra sempre, só da primeira, o
+# suficiente pra ver se falta índice ou se é mesmo volume de dado).
+_explain_captured = False
+
+
+def _capture_explain_once(db: Session, sql: str, params: dict, label: str) -> None:
+    global _explain_captured
+    if _explain_captured:
+        return
+    _explain_captured = True
+    try:
+        plan_rows = db.execute(text(f"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {sql}"), params).all()
+        plan_text = "\n".join(r[0] for r in plan_rows)
+        logger.warning("Plano de execução real (%s), capturado uma única vez:\n%s", label, plan_text)
+    except Exception:  # noqa: BLE001 - diagnóstico não pode derrubar a rota
+        logger.exception("Não consegui capturar o EXPLAIN ANALYZE de %s.", label)
+
+
 # Mesmo fuso usado em todo o resto do app pro usuário (utils/date.js no
 # frontend) — bucket por dia tem que ser dia de Brasília, não dia UTC, senão
 # um produto novo às 22h de Brasília (01h UTC do dia seguinte) contaria pro
@@ -207,8 +232,7 @@ def get_highlights(
     # algoritmo antigo com casos de teste (empate, delta negativo, 1 leitura
     # só, produto inativo, leitura fora da janela) antes de trocar.
     since = datetime.now(BRASILIA_TZ).date() - timedelta(days=7)
-    trending_sql = text(
-        """
+    trending_sql_raw = """
         WITH windowed AS (
             SELECT ps.product_id, ps.score,
                    ROW_NUMBER() OVER (PARTITION BY ps.product_id ORDER BY ps.date ASC) AS rn_first,
@@ -234,12 +258,12 @@ def get_highlights(
         WHERE cnt >= 2 AND (last_score - first_score) > 0
         ORDER BY delta DESC
         LIMIT 5
-        """
-    )
-    top = [
-        (row.product_id, row.score, row.delta)
-        for row in db.execute(trending_sql, {"uid": target_user, "since": since, "operation": operation}).all()
-    ]
+    """
+    trending_params = {"uid": target_user, "since": since, "operation": operation}
+    _t_trend_start = time.perf_counter()
+    top = [(row.product_id, row.score, row.delta) for row in db.execute(text(trending_sql_raw), trending_params).all()]
+    if time.perf_counter() - _t_trend_start > 1.5:
+        _capture_explain_once(db, trending_sql_raw, trending_params, "score_query_7d (/highlights)")
     timer.mark("score_query_7d")
     products_by_id: dict[int, Product] = {}
     if top:
