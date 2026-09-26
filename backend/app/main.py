@@ -238,6 +238,25 @@ def _run_startup_migrations(conn):
             )
         )
 
+        # Investigação de disco (2026-09-26): product_snapshots era a maior
+        # tabela do banco (8,5GB) mesmo depois de encolher o campo `raw`
+        # (ver tasks/snapshot_shrink.py). Revisando TODO o código que lê
+        # ProductSnapshot (services/scoring_service.py,
+        # services/volume_service.py, e o resto do backend inteiro), essas 7
+        # colunas nunca são lidas de volta de um snapshot — toda comparação
+        # de mudança (preço, título, imagem, fornecedor, variação) usa o
+        # valor ATUAL em products.*, não o snapshot antigo; snapshot só
+        # grava e nunca relê. Só total_inventory, has_urgency_copy e raw
+        # (supplier_id) são de fato lidos depois — esses ficam (ver
+        # ProductSnapshot em models/product.py e _save_snapshot em
+        # services/snapshot_service.py, os dois atualizados juntos com isso).
+        # DROP COLUMN no Postgres é só mudança de catálogo (não reescreve as
+        # 5,9 milhões de linhas na hora, não trava nada perceptível), o
+        # espaço de cada linha antiga é reciclado aos poucos conforme a
+        # limpeza automática de 12 dias for apagando essas linhas.
+        for column in ("title", "vendor", "price_min", "price_max", "variant_count", "image_count", "main_image_url"):
+            conn.execute(text(f"ALTER TABLE product_snapshots DROP COLUMN IF EXISTS {column}"))
+
 
 app = FastAPI(title="ScoutX", version="0.1.0", lifespan=lifespan)
 

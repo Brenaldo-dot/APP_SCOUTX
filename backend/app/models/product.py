@@ -98,7 +98,15 @@ class Product(Base):
 
 
 class ProductSnapshot(Base):
-    """Foto diária de um produto (Módulo 3.1)."""
+    """Foto diária de um produto (Módulo 3.1).
+
+    Revisão de disco (2026-09-26): tinha colunas de título/fornecedor/preço/
+    variação/foto aqui que NUNCA são lidas de volta em lugar nenhum do
+    backend (verificado numa varredura completa) — toda comparação de
+    mudança usa o valor ATUAL em Product, não o snapshot antigo. Removidas
+    (ver migração em main.py:_run_startup_migrations). Só ficam os campos
+    que são de fato relidos depois: total_inventory (scoring_service.py,
+    volume_service.py) e has_urgency_copy/raw (este próprio arquivo)."""
 
     __tablename__ = "product_snapshots"
     __table_args__ = (Index("ix_product_snapshots_product_captured", "product_id", "captured_at"),)
@@ -107,14 +115,7 @@ class ProductSnapshot(Base):
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
-    title: Mapped[str] = mapped_column(String(500))
-    vendor: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    price_min: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_max: Mapped[float | None] = mapped_column(Float, nullable=True)
-    variant_count: Mapped[int] = mapped_column(Integer, default=0)
-    image_count: Mapped[int] = mapped_column(Integer, default=0)
     total_inventory: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    main_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     has_urgency_copy: Mapped[bool] = mapped_column(Boolean, default=False)
     raw: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 

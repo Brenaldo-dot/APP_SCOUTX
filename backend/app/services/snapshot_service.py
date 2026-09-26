@@ -345,17 +345,15 @@ def _record_event(db: Session, product: Product, event_type: ProductEventType, d
 
 
 def _save_snapshot(db: Session, product: Product, item: dict, has_urgency: bool) -> None:
+    # title/vendor/price_min/price_max/variant_count/image_count/main_image_url
+    # não são mais gravados aqui (2026-09-26): nunca eram lidos de volta de um
+    # snapshot antigo, e essas colunas já foram removidas da tabela — o valor
+    # ATUAL de cada um continua em Product (ver linhas mais abaixo nesta
+    # função), que é de onde todo o resto do app sempre leu mesmo.
     db.add(
         ProductSnapshot(
             product_id=product.id,
-            title=item["title"],
-            vendor=item["vendor"],
-            price_min=item["price_min"],
-            price_max=item["price_max"],
-            variant_count=item["variant_count"],
-            image_count=item["image_count"],
             total_inventory=item["total_inventory"],
-            main_image_url=item["main_image_url"],
             has_urgency_copy=has_urgency,
             # Achado numa investigação de disco (2026-09-25): isso guardava
             # quase o `item` inteiro (descrição até 3000 caracteres, lista
