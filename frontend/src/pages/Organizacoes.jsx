@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Building2, CalendarClock, RefreshCw, Trash2 } from 'lucide-react'
+import { Building2, CalendarClock, Check, Link2, RefreshCw, Trash2 } from 'lucide-react'
 import { rawApi } from '../api/rawClient.js'
 import { api } from '../api/client.js'
 import Select from '../components/Select.jsx'
@@ -60,6 +60,8 @@ export default function Organizacoes() {
   const [renewModal, setRenewModal] = useState(null)
   const [expiryModal, setExpiryModal] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
+  const [copyingLinkId, setCopyingLinkId] = useState(null)
+  const [copiedLinkId, setCopiedLinkId] = useState(null)
 
   const [affiliates, setAffiliates] = useState([])
 
@@ -190,6 +192,25 @@ export default function Organizacoes() {
       load()
     } catch (err) {
       setRenewModal({ ...renewModal, saving: false, error: err.message || 'Não foi possível renovar.' })
+    }
+  }
+
+  // Link de renovação por autoatendimento (pedido do usuário, 2026-09-27):
+  // cliente com assinatura vencida paga com o próprio cartão e renova ESSA
+  // organização direto, sem precisar criar conta nova (ver /renovar em
+  // web/server.js). Só existe pra plano/ciclo com oferta mapeada — Enterprise
+  // e combinações fora do padrão caem no erro devolvido pelo backend.
+  async function copyRenewalLink(org) {
+    setCopyingLinkId(org.id)
+    try {
+      const { url } = await rawApi.getOrganizationRenewalLink(org.id)
+      await navigator.clipboard?.writeText(url)
+      setCopiedLinkId(org.id)
+      setTimeout(() => setCopiedLinkId(null), 2000)
+    } catch (err) {
+      setError(err.message || 'Não foi possível gerar o link de renovação.')
+    } finally {
+      setCopyingLinkId(null)
     }
   }
 
@@ -386,6 +407,14 @@ export default function Organizacoes() {
                           className="rounded-lg p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--hover-surface)] hover:text-brand-500"
                         >
                           <RefreshCw size={15} />
+                        </button>
+                        <button
+                          onClick={() => copyRenewalLink(org)}
+                          disabled={copyingLinkId === org.id}
+                          title="Copiar link de renovação (cliente paga e renova essa organização direto, sem criar conta nova)"
+                          className="rounded-lg p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--hover-surface)] hover:text-emerald-400 disabled:opacity-50"
+                        >
+                          {copiedLinkId === org.id ? <Check size={15} /> : <Link2 size={15} />}
                         </button>
                         <button
                           onClick={() => openExpiry(org)}

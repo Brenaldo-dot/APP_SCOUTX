@@ -2737,6 +2737,45 @@ async function renewOrganization(id, plan, billingCycle) {
   return res.rows[0];
 }
 
+// Variante usada só pelo link de autoatendimento (/renovar, server.js) —
+// além de estender a validade, grava o id da cobrança que a gente mesmo
+// fez pela API da Cakto em cakto_purchase_id. Isso é o que permite
+// handlePurchaseApproved (cakto.js) reconhecer, quando o webhook dessa
+// MESMA compra chegar depois, que ela já foi processada aqui e não
+// renovar de novo (mesmo padrão de idempotência por purchase_id já usado
+// em handleSubscriptionCreated pro fluxo do /assinar).
+async function renewOrganizationWithPurchase(id, plan, billingCycle, purchaseId) {
+  const org = await getOrganizationById(id);
+  if (!org) return null;
+  const days = BILLING_CYCLE_DAYS[billingCycle];
+  const base = new Date(org.expires_at) > new Date() ? "expires_at" : "now()";
+  const res = await pool.query(
+    `UPDATE organizations SET plan = $1, billing_cycle = $2, expires_at = ${base} + ($3 || ' days')::interval,
+       is_trial = false, cakto_purchase_id = $4
+     WHERE id = $5 RETURNING *`,
+    [plan, billingCycle, days, purchaseId, id]
+  );
+  return res.rows[0];
+}
+
+// Só grava cakto_purchase_id, sem mexer em plano/validade — usado pelo Pix
+// Automático do link de renovação (server.js /api/renovacao) assim que o QR
+// é gerado, ANTES de qualquer confirmação. Achado ao vivo (2026-09-28,
+// incidente Gustavo Henrique): organização que nunca teve compra Cakto
+// (cakto_purchase_id nulo) trava o próprio webhook de confirmação depois —
+// handlePurchaseApproved (cakto.js) só trata como renovação de cliente
+// existente quando cakto_purchase_id já é truthy; sem isso, cai no "já
+// existe usuário com esse email" e precisa de revisão manual. Só grava se
+// ainda tiver nulo (WHERE ... IS NULL), pra nunca sobrescrever a referência
+// de uma compra anterior de verdade.
+async function linkCaktoPurchaseId(id, purchaseId) {
+  const res = await pool.query(
+    `UPDATE organizations SET cakto_purchase_id = $1 WHERE id = $2 AND cakto_purchase_id IS NULL RETURNING *`,
+    [purchaseId, id]
+  );
+  return res.rows[0] || null;
+}
+
 // Upgrade/downgrade de plano SEM mexer na validade — diferente de
 // renewOrganization: usado quando o cliente já pagou a diferença fora do
 // app (ex: upgrade no meio do ciclo) e não deve ganhar dias extras de
@@ -2850,6 +2889,89 @@ async function deleteSuggestedCompetitorsByOperation(operation) {
 // está vencida agora — se for só o Augusto, é um caso isolado; se aparecer
 // uma lista, é sistêmico. Só leitura, nunca escreve nada, nunca derruba o
 // arranque do app (chamado com .catch em server.js).
+// Diagnóstico pontual (2026-09-28, incidente ao vivo): cliente "Gustavo"
+// tentou pagar pelo link de renovação da organização 8 e caiu no erro
+// "não conseguimos identificar seu cadastro" (org sem cakto_customer_email).
+// Só pra confirmar QUEM é essa organização e achar o email certo dele antes
+// de decidir o que fazer — apagar depois de resolvido, não é permanente
+// como logRenewalDiagnostics.
+async function logOrg8Incident() {
+  const org = await pool.query(
+    `SELECT id, name, plan, billing_cycle, is_trial, cakto_purchase_id, cakto_customer_email,
+            started_at, expires_at, notes, created_at
+     FROM organizations WHERE id = 8`
+  );
+  console.log("=== INCIDENTE (2026-09-28): organização 8, link de renovação sem email Cakto ===");
+  for (const o of org.rows) console.log(JSON.stringify(o));
+
+  const users = await pool.query(
+    `SELECT id, name, email, role, created_at FROM app_users WHERE organization_id = 8`
+  );
+  console.log("-- usuários da organização 8 --");
+  for (const u of users.rows) console.log(JSON.stringify(u));
+
+  const gustavo = await pool.query(
+    `SELECT o.id AS org_id, o.name AS org_name, o.cakto_customer_email, u.id AS user_id, u.name, u.email
+     FROM app_users u JOIN organizations o ON o.id = u.organization_id
+     WHERE lower(u.name) LIKE '%gustavo%' OR lower(u.email) LIKE '%gustavo%'`
+  );
+  console.log("-- busca por \"gustavo\" em qualquer organização --");
+  for (const g of gustavo.rows) console.log(JSON.stringify(g));
+}
+
+// Correção pontual (2026-09-28, mesmo incidente do Gustavo) — a organização
+// 8 nunca teve email da Cakto vinculado (criada manualmente, nunca veio de
+// compra), o que travava o link de renovação ANTES de cobrar qualquer
+// coisa. Só preenche o email pra destravar o link; não renova, não cobra,
+// não estende validade — o Gustavo ainda precisa pagar de verdade pelo
+// link pra conta renovar. Idempotente (WHERE ... IS NULL): rodar de novo
+// não faz nada se já foi aplicado.
+async function fixOrg8Email() {
+  const res = await pool.query(
+    `UPDATE organizations SET cakto_customer_email = 'gustavohenriquegh0304@gmail.com'
+     WHERE id = 8 AND cakto_customer_email IS NULL RETURNING id, name, cakto_customer_email`
+  );
+  if (res.rows.length > 0) {
+    console.log("Correção aplicada: organização 8 (Gustavo Henrique) agora tem cakto_customer_email:", JSON.stringify(res.rows[0]));
+    await logAdminAction(
+      null,
+      "Correção manual (autoatendimento)",
+      null,
+      "Gustavo Henrique",
+      "org_edited",
+      "cakto_customer_email vinculado manualmente (organização criada sem email da Cakto, travava o link de renovação)"
+    );
+  } else {
+    console.log("Correção organização 8: nada a fazer (já tinha email ou organização não encontrada).");
+  }
+}
+
+// Correção retroativa (2026-09-28, mesmo incidente): o Gustavo PAGOU de
+// verdade pelo link de renovação (webhook "purchase_approved" confirmado
+// pela Cakto pra compra d5c24c0f-1ec7-4aca-b985-8f522166086c, R$148,72, ver
+// logs), mas o próprio código recusou renovar sozinho (bug já corrigido em
+// server.js: organização sem cakto_purchase_id trava o webhook de
+// confirmação). Isso aqui só processa manualmente o pagamento que JÁ foi
+// recebido — mesmo efeito que o webhook teria feito se não tivesse
+// travado. Idempotente: só roda se ainda não tiver sido aplicado.
+async function fixGustavoMissedRenewal() {
+  const org = await getOrganizationById(8);
+  if (!org || org.cakto_purchase_id === "d5c24c0f-1ec7-4aca-b985-8f522166086c") {
+    console.log("Correção Gustavo (renovação perdida): nada a fazer (já aplicado ou organização não encontrada).");
+    return;
+  }
+  const updated = await renewOrganizationWithPurchase(8, "pro", "mensal", "d5c24c0f-1ec7-4aca-b985-8f522166086c");
+  console.log("Correção aplicada: organização 8 (Gustavo Henrique) renovada retroativamente (pagamento real, webhook tinha travado):", JSON.stringify(updated));
+  await logAdminAction(
+    null,
+    "Correção manual (autoatendimento)",
+    null,
+    "Gustavo Henrique",
+    "org_renewed",
+    "Renovação processada manualmente — pagamento real confirmado pelo webhook da Cakto (compra d5c24c0f-1ec7-4aca-b985-8f522166086c, R$148,72), mas o código não reconheceu sozinho por bug já corrigido"
+  );
+}
+
 async function logRenewalDiagnostics() {
   const suspect = await pool.query(
     `SELECT id, name, plan, billing_cycle, is_trial, cakto_purchase_id, cakto_customer_email,
@@ -2948,6 +3070,9 @@ async function logRenewalDiagnostics() {
 
 module.exports = {
   logRenewalDiagnostics,
+  logOrg8Incident,
+  fixOrg8Email,
+  fixGustavoMissedRenewal,
   listSuggestedCompetitors,
   addSuggestedCompetitors,
   deleteSuggestedCompetitor,
@@ -3103,6 +3228,8 @@ module.exports = {
   getOrgMemberIds,
   listOrganizationsWithCounts,
   renewOrganization,
+  renewOrganizationWithPurchase,
+  linkCaktoPurchaseId,
   changeOrganizationPlan,
   setOrgDefaultOperationIfUnset,
   setOrgDefaultOperation,

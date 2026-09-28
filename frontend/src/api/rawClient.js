@@ -224,5 +224,6 @@ export const rawApi = {
     }),
   createOrganization: (data) => request('/api/admin/organizations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   updateOrganization: (id, data) => request(`/api/admin/organizations/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  getOrganizationRenewalLink: (id) => request(`/api/admin/organizations/${id}/renewal-link`),
   deleteOrganization: (id) => request(`/api/admin/organizations/${id}`, { method: 'DELETE' }),
 }

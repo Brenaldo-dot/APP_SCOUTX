@@ -40,8 +40,31 @@ async function getBearerToken() {
 // clique/retry do mesmo formulário não cria duas cobranças pro mesmo email
 // na mesma oferta (a Cakto devolve a MESMA resposta de antes por até 24h
 // pra chave repetida, em vez de cobrar duas vezes).
-async function createTrialPayment({ offerId, customer, cardToken, antifraudReference, idempotencyKey }) {
+// paymentMethod default "credit_card" (comportamento de sempre, chamado sem
+// esse campo pelo /assinar). "pix_auto" (Pix Automático, pedido do usuário
+// 2026-09-27 pro link de renovação /renovar) não usa cartão nem antifraude —
+// só o customer + a oferta, e a Cakto devolve um QR Code (pix.qrCode) pro
+// cliente escanear e AUTORIZAR; a cobrança só é confirmada de verdade quando
+// o webhook "purchase_approved" chegar depois (ver docs.cakto.com.br/
+// api-reference/payments/create-pix-auto, "boas práticas": nunca liberar
+// acesso antes do webhook confirmar).
+async function createTrialPayment({ offerId, customer, paymentMethod = "credit_card", coupon, cardToken, antifraudReference, pixExpiresIn, idempotencyKey }) {
   const token = await getBearerToken();
+  const body = { customer, items: [{ offerId }] };
+  if (coupon) body.coupon = coupon;
+  if (paymentMethod === "pix_auto") {
+    body.paymentMethod = "pix_auto";
+    if (pixExpiresIn) body.pixExpiresIn = pixExpiresIn;
+  } else {
+    // "credit_card" em vez de "threeDs" de propósito (2026-09-18, decisão
+    // do dono do produto ciente do risco): sem o desafio 3DS o banco não
+    // autentica o portador do cartão, então a responsabilidade por
+    // fraude/chargeback passa a ser DESSA conta Cakto, não do emissor.
+    // Trade-off aceito pra tirar a etapa que assustava quem assinava.
+    body.paymentMethod = "credit_card";
+    body.card = { token: cardToken };
+    body.antifraud_profiling_attempt_reference = antifraudReference;
+  }
   const resp = await fetch(`${CAKTO_API_BASE}/public_api/payments/`, {
     method: "POST",
     headers: {
@@ -49,18 +72,7 @@ async function createTrialPayment({ offerId, customer, cardToken, antifraudRefer
       "Content-Type": "application/json",
       "X-Idempotency-Key": idempotencyKey,
     },
-    body: JSON.stringify({
-      // "credit_card" em vez de "threeDs" de propósito (2026-09-18, decisão
-      // do dono do produto ciente do risco): sem o desafio 3DS o banco não
-      // autentica o portador do cartão, então a responsabilidade por
-      // fraude/chargeback passa a ser DESSA conta Cakto, não do emissor.
-      // Trade-off aceito pra tirar a etapa que assustava quem assinava.
-      paymentMethod: "credit_card",
-      customer,
-      items: [{ offerId }],
-      card: { token: cardToken },
-      antifraud_profiling_attempt_reference: antifraudReference,
-    }),
+    body: JSON.stringify(body),
   });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
@@ -71,6 +83,23 @@ async function createTrialPayment({ offerId, customer, cardToken, antifraudRefer
     throw err;
   }
   return data; // { id, status, offer: {...}, ... } — ver api-reference/payments/create
+}
+
+// Usado pela tela /renovar (server.js) pra mostrar o preço certo ANTES de
+// cobrar — a API pública não devolve preço na oferta usada pelo webhook
+// (CAKTO_OFFER_PLAN_MAP só tem plano/ciclo), então busca direto na Cakto.
+async function getOffer(offerId) {
+  const token = await getBearerToken();
+  const resp = await fetch(`${CAKTO_API_BASE}/public_api/offers/${offerId}/`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const err = new Error(data?.detail || `Falha ao buscar oferta na Cakto (HTTP ${resp.status}).`);
+    err.status = resp.status;
+    throw err;
+  }
+  return data;
 }
 
 // A resposta de payments_create não traz o id da assinatura (só o id do
@@ -105,4 +134,4 @@ async function cancelSubscription(subscriptionId) {
   return data;
 }
 
-module.exports = { createTrialPayment, getOrder, cancelSubscription };
+module.exports = { createTrialPayment, getOffer, getOrder, cancelSubscription };

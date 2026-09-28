@@ -48,6 +48,19 @@ const CAKTO_OFFER_PLAN_MAP = {
   vzdzujz: { plan: "pro", billingCycle: "mensal", label: "Pro - Teste 7 dias", isTrial: true },
 };
 
+// Link de renovação por autoatendimento (/renovar, server.js, pedido do
+// usuário 2026-09-27: cliente que atrasou o pagamento consegue reativar a
+// PRÓPRIA organização sem precisar criar conta nova). Cobra sempre pelo
+// preço ATUAL (as 9 ofertas "(novo)" acima) — decisão explícita do usuário,
+// mesmo que a organização tivesse ficado no preço antigo até então.
+// offer.id de cada combinação plano×ciclo, pra montar a cobrança direta
+// pela API (ver caktoPayments.createTrialPayment).
+const RENEW_OFFER_IDS = {
+  solo: { mensal: "zrhtj34", trimestral: "8umv5gq", anual: "36wjk7s" },
+  pro: { mensal: "zwbuutf", trimestral: "3dpynx5", anual: "cpspn3i" },
+  agencia: { mensal: "m8ih6hc", trimestral: "3b56i8v", anual: "9j9t3aq" },
+};
+
 // Nomes confirmados na documentação oficial da Cakto
 // (docs.cakto.com.br/conceitos/webhooks.md, lido em 2026-08-24) — não são
 // mais chute, mas TAMBÉM nunca foram testados contra um payload real de
@@ -581,6 +594,15 @@ async function handlePurchaseApproved(data) {
     // fazer com segurança — melhor falhar alto (fica visível no log e no
     // painel da Cakto) do que silenciosamente ignorar uma compra paga.
     const org = existing.organization_id ? await db.getOrganizationById(existing.organization_id) : null;
+    if (org && org.cakto_purchase_id === data.id) {
+      // Mesma compra que o link de autoatendimento /renovar (server.js) já
+      // processou direto pela API, ANTES desse webhook chegar (achado ao
+      // vivo, 2026-09-27, revisando o caso Augusto Prebianca: sem essa
+      // guarda, a organização seria renovada DUAS VEZES pra uma única
+      // cobrança). Mesmo padrão de handleSubscriptionCreated pro /assinar.
+      console.log(`Webhook Cakto: organização "${org.name}" já tinha sido renovada direto pelo link de autoatendimento pra essa mesma compra (${data.id}) — nada a fazer.`);
+      return;
+    }
     if (org && org.cakto_purchase_id) {
       await db.renewOrganization(org.id, mapping.plan, mapping.billingCycle);
       await db.logAdminAction(
@@ -934,4 +956,4 @@ async function handleCaktoWebhook(body) {
   }
 }
 
-module.exports = { handleCaktoWebhook, CAKTO_OFFER_PLAN_MAP, CANCELLATION_EVENTS, backfillAffiliateCommissions };
+module.exports = { handleCaktoWebhook, CAKTO_OFFER_PLAN_MAP, RENEW_OFFER_IDS, CANCELLATION_EVENTS, backfillAffiliateCommissions };

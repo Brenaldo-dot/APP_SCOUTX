@@ -6,8 +6,8 @@ const cheerio = require("cheerio");
 const { analyzeStore, UnsupportedStoreError } = require("./shopify-spy");
 const { sign, verify, parseCookies, serializeCookie } = require("./auth");
 const { createPinnedFetch } = require("./safe-fetch");
-const { handleCaktoWebhook, CAKTO_OFFER_PLAN_MAP, backfillAffiliateCommissions } = require("./cakto");
-const { createTrialPayment, getOrder, cancelSubscription } = require("./caktoPayments");
+const { handleCaktoWebhook, CAKTO_OFFER_PLAN_MAP, RENEW_OFFER_IDS, backfillAffiliateCommissions } = require("./cakto");
+const { createTrialPayment, getOffer, getOrder, cancelSubscription } = require("./caktoPayments");
 const caktoApi = require("./caktoApi");
 const db = require("./db");
 const { TIERS, tierForActiveMembers } = require("./communityTiers");
@@ -787,7 +787,8 @@ function createApp() {
     // fica contido ao formulário de cadastro, que não mostra dado de outro
     // usuário nem processa HTML de terceiro (diferente da prévia de
     // produto, por exemplo, onde isso seria bem mais perigoso).
-    const isAssinarPage = req.path === "/free-trial" || req.path === "/free-trial.js";
+    const isAssinarPage =
+      req.path === "/free-trial" || req.path === "/free-trial.js" || req.path === "/renovacao" || req.path === "/renovacao.js";
     res.setHeader(
       "Content-Security-Policy",
       [
@@ -1229,6 +1230,682 @@ function createApp() {
 
   app.get("/free-trial.js", (req, res) => {
     res.type("application/javascript").send(ASSINAR_PAGE_SCRIPT);
+  });
+
+  // ---------------------------------------------------------------------
+  // Renovação por link de autoatendimento (pedido do usuário, 2026-09-27) —
+  // ver a nota grande em cakto.js (RENEW_OFFER_IDS) pro contexto completo.
+  // Fluxo: admin gera o link em Organizações → manda pro cliente → cliente
+  // paga com o PRÓPRIO cartão aqui, sem criar conta nova → cobra direto
+  // pela API da Cakto (mesma mecânica do /free-trial, ver
+  // caktoPayments.js) → renova a organização ORIGINAL na hora, sem
+  // depender do webhook chegar.
+
+  const RENEW_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+  function signRenewalToken(orgId) {
+    return sign({ purpose: "renew_org", orgId, exp: Math.floor(Date.now() / 1000) + RENEW_TOKEN_TTL_SECONDS }, SESSION_SECRET);
+  }
+
+  function verifyRenewalToken(token) {
+    const payload = verify(token, SESSION_SECRET);
+    if (!payload || payload.purpose !== "renew_org" || !Number.isInteger(payload.orgId)) return null;
+    return payload;
+  }
+
+  const RENEW_BILLING_CYCLE_LABEL = { mensal: "por mês", trimestral: "a cada 3 meses", anual: "por ano" };
+
+  function renewalErrorPage(message) {
+    return `<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="/favicon.png">
+<title>ScoutX — Renovação</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #05070d; color: #f3f4f6; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 32px 16px; }
+  .card { background: rgba(18,20,30,0.9); border: 1px solid rgba(96,165,250,0.18); padding: 34px; border-radius: 20px; width: 420px; max-width: calc(100vw - 32px); text-align: center; }
+  h1 { font-size: 18px; margin: 0 0 10px; color: #f87171; }
+  p { color: #9ca3af; font-size: 14px; line-height: 1.6; margin: 0 0 18px; }
+  a { color: #60a5fa; text-decoration: none; font-weight: 600; }
+</style></head>
+<body><div class="card">
+  <h1>Não foi possível continuar</h1>
+  <p>${escapeHtml(message)}</p>
+  <a href="/login">Ir para o login</a>
+</div></body></html>`;
+  }
+
+  function renewalPage({ token, orgName, customerName, planLabel, billingCycle, price, expiresAt, error }) {
+    const esc = (s) => escapeHtml(s || "");
+    const priceLabel = typeof price === "number" ? price.toFixed(2).replace(".", ",") : "—";
+    const cycleLabel = RENEW_BILLING_CYCLE_LABEL[billingCycle] || billingCycle;
+    return `<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="/favicon.png">
+<title>ScoutX — Renovar assinatura</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #05070d; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 32px 16px; }
+  .card { color: #f3f4f6; background: linear-gradient(180deg, rgba(18,20,30,0.9), rgba(10,12,20,0.94)); border: 1px solid rgba(96,165,250,0.18); padding: 34px; border-radius: 20px; width: 460px; max-width: calc(100vw - 32px); box-shadow: 0 24px 70px rgba(0,0,0,0.55); }
+  .brand { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 14px; }
+  .brand img { width: 36px; height: 36px; border-radius: 10px; object-fit: cover; }
+  .brand span { font-weight: 700; font-size: 16px; }
+  .org-pill { display: flex; width: fit-content; align-items: center; background: rgba(96,165,250,0.12); border: 1px solid rgba(96,165,250,0.3); color: #93c5fd; font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 999px; margin: 0 auto 14px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  h1 { font-size: 20px; margin: 0 0 6px; text-align: center; }
+  p.subtitle { color: #9ca3af; font-size: 13px; margin: 0 0 20px; text-align: center; line-height: 1.5; }
+  .plan-box { background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.25); border-radius: 14px; padding: 14px 16px; margin-bottom: 20px; display: flex; align-items: baseline; justify-content: space-between; }
+  .plan-box .name { font-weight: 700; font-size: 15px; }
+  .plan-box .price { font-weight: 700; font-size: 16px; color: #60a5fa; }
+  .plan-box .price small { font-weight: 500; color: #6b7280; font-size: 11px; }
+  .plan-box .price .old-price { font-weight: 500; color: #6b7280; font-size: 12px; text-decoration: line-through; margin-right: 6px; }
+  .plan-box .price .discount-tag { color: #34d399; font-weight: 700; }
+  fieldset { border: none; padding: 0; margin: 0 0 18px; }
+  legend { font-size: 11px; font-weight: 700; color: #60a5fa; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; padding: 0; }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; min-width: 0; }
+  .row > div:last-child { flex: 1.3; }
+  label { display: block; font-size: 11px; font-weight: 600; color: #93c5fd; margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+  input { width: 100%; padding: 11px 13px; margin-bottom: 14px; border-radius: 10px; border: 1px solid rgba(96,165,250,0.16); background: rgba(5,7,13,0.7); color: #f3f4f6; font-size: 14px; }
+  input:focus { outline: none; border-color: #22d3ee; box-shadow: 0 0 0 3px rgba(34,211,238,0.18); }
+  .method-toggle { display: flex; gap: 8px; margin-bottom: 18px; }
+  .method-btn { flex: 1; text-align: center; padding: 10px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid rgba(96,165,250,0.16); background: transparent; color: #9ca3af; }
+  .method-btn.active { background: rgba(59,130,246,0.15); border-color: #3b82f6; color: #93c5fd; }
+  .btn-primary { width: 100%; padding: 14px; border-radius: 9999px; border: none; background: linear-gradient(90deg, #1d4ed8 0%, #3b82f6 50%, #22d3ee 100%); color: #fff; font-weight: 700; font-size: 14px; cursor: pointer; box-shadow: 0 8px 28px rgba(59,130,246,0.4); }
+  .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+  .error { background: rgba(127,29,29,0.25); color: #f87171; border: 1px solid #7f1d1d; padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; display: ${error ? "block" : "none"}; }
+  .powered-by { color: #6b7280; font-size: 11px; margin: 18px 0 0; text-align: center; }
+  .powered-by strong { color: #9ca3af; }
+  .card-number-wrap, .cvv-wrap { position: relative; display: flex; align-items: center; margin-bottom: 14px; }
+  .card-number-wrap input, .cvv-wrap input { margin-bottom: 0; padding-right: 76px; }
+  .cvv-wrap input { padding-right: 36px; }
+  .card-brands, .cvv-icon { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 5px; pointer-events: none; }
+  .brand-badge { display: inline-flex; align-items: center; justify-content: center; height: 18px; padding: 0 5px; border-radius: 3px; background: #f3f4f6; }
+  .brand-visa { color: #1a1f71; font-size: 10px; font-weight: 800; font-style: italic; letter-spacing: 0.3px; }
+  .brand-mc { display: flex; align-items: center; }
+  .mc-dot { width: 13px; height: 13px; border-radius: 50%; }
+  .mc-dot-r { background: #eb001b; }
+  .mc-dot-y { background: #f79e1b; margin-left: -5px; mix-blend-mode: multiply; }
+  .cvv-icon { right: 8px; }
+  .pix-note { color: #9ca3af; font-size: 12.5px; line-height: 1.6; margin: 0 0 16px; }
+  .pix-timer { display: inline-flex; align-items: center; gap: 6px; background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.25); color: #93c5fd; font-size: 13px; font-weight: 600; padding: 6px 14px; border-radius: 999px; }
+  .pix-timer strong { color: #22d3ee; font-variant-numeric: tabular-nums; }
+</style></head>
+<body data-cakto-client-id="${esc(process.env.CAKTO_API_CLIENT_ID || "")}" data-renew-token="${esc(token)}" data-customer-name="${esc(customerName)}" data-initial-expires-at="${esc(expiresAt)}" data-cycle-label="${esc(cycleLabel)}">
+<div class="card" id="card-root">
+  <div class="brand"><img src="${SCOUTX_LOGO_DATA_URI}" alt="ScoutX"><span>ScoutX</span></div>
+  <div class="org-pill">${esc(orgName)}</div>
+  <h1 id="main-title">Renovar assinatura</h1>
+  <p class="subtitle" id="main-subtitle">Pague agora e sua conta volta a funcionar na hora, sem precisar criar um cadastro novo.</p>
+
+  <div class="error" id="form-error">${esc(error)}</div>
+
+  <div class="plan-box">
+    <span class="name">${esc(planLabel)}</span>
+    <span class="price" id="plan-price">R$${priceLabel}<small> ${esc(cycleLabel)}</small></span>
+  </div>
+
+  <div id="form-section">
+    <fieldset>
+      <legend>Seus dados</legend>
+      <label for="whatsapp">WhatsApp (com DDD)</label>
+      <input type="tel" id="whatsapp" required placeholder="11987654321" maxlength="11">
+      <label for="docNumber">CPF ou CNPJ</label>
+      <input type="text" id="docNumber" placeholder="somente números" maxlength="14">
+      <label for="coupon">Cupom de desconto (opcional)</label>
+      <input type="text" id="coupon" placeholder="Código do cupom" maxlength="60">
+    </fieldset>
+
+    <div class="method-toggle" id="method-toggle">
+      <button type="button" class="method-btn active" data-method="credit_card">Cartão de crédito</button>
+      <button type="button" class="method-btn" data-method="pix_auto">Pix Automático</button>
+    </div>
+
+    <div id="panel-credit_card">
+      <fieldset>
+        <legend>Cartão de crédito</legend>
+        <label for="cardNumber">Número do cartão</label>
+        <div class="card-number-wrap">
+          <input type="text" id="cardNumber" inputmode="numeric" maxlength="19" placeholder="1234 1234 1234 1234">
+          <div class="card-brands" aria-hidden="true">
+            <span class="brand-badge brand-visa">VISA</span>
+            <span class="brand-badge brand-mc"><span class="mc-dot mc-dot-r"></span><span class="mc-dot mc-dot-y"></span></span>
+          </div>
+        </div>
+        <div class="row">
+          <div><label for="cardExpiry">Validade (MM/AA)</label><input type="text" id="cardExpiry" maxlength="5" placeholder="MM/AA"></div>
+          <div>
+            <label for="cardCvv">CVV</label>
+            <div class="cvv-wrap">
+              <input type="text" id="cardCvv" inputmode="numeric" maxlength="3" placeholder="•••">
+              <span class="cvv-icon" aria-hidden="true">
+                <svg width="24" height="17" viewBox="0 0 24 17" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="0.5" y="0.5" width="23" height="16" rx="2" fill="#1f2430" stroke="#4b5563"/>
+                  <rect x="0.5" y="4.5" width="23" height="3" fill="#111827"/>
+                  <text x="21" y="14" font-size="5.5" fill="#e5e7eb" text-anchor="end" font-family="Arial, sans-serif" font-weight="700">123</text>
+                </svg>
+              </span>
+            </div>
+          </div>
+        </div>
+      </fieldset>
+    </div>
+
+    <div id="panel-pix_auto" style="display:none">
+      <p class="pix-note">Escaneie o QR Code no app do seu banco pra autorizar. Sua assinatura renova sozinha em poucos segundos.</p>
+    </div>
+
+    <button type="button" id="submit-btn" class="btn-primary">Renovar agora</button>
+  </div>
+
+  <div id="pix-result" style="display:none;text-align:center">
+    <div id="pix-qr-box" style="width:200px;height:200px;margin:4px auto 16px;background:#fff;border-radius:12px;display:flex;align-items:center;justify-content:center;padding:10px"></div>
+    <div class="pix-timer">Expira em <strong id="pix-countdown">--:--</strong></div>
+    <p id="pix-waiting" style="color:#93c5fd;font-size:12.5px;margin-top:10px">Aguardando confirmação…</p>
+  </div>
+
+  <div id="pix-expired" style="display:none;text-align:center">
+    <p style="color:#f87171;font-size:13px;margin-bottom:16px;line-height:1.6">O tempo pra autorizar esse Pix acabou. Gere um novo código pra continuar.</p>
+    <button type="button" id="pix-back-btn" class="btn-primary">Voltar</button>
+  </div>
+
+  <p class="powered-by">Pagamento processado com segurança <strong>by Cakto</strong></p>
+</div>
+<script src="https://cakto-sdk.pages.dev/cakto-sdk.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="/renovacao.js"></script>
+</body></html>`;
+  }
+
+  const RENOVAR_PAGE_SCRIPT = `
+var caktoSdk = new Cakto.CaktoSDK({ client_id: document.body.dataset.caktoClientId });
+caktoSdk.initAntifraud().catch(function (err) { console.error("Antifraude Cakto:", err); });
+
+function getDeviceFingerprint() {
+  try {
+    var key = "scoutx_fp";
+    var existing = window.localStorage.getItem(key);
+    if (existing) return existing;
+    var fresh = (window.crypto && window.crypto.randomUUID)
+      ? window.crypto.randomUUID()
+      : "fp-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+    window.localStorage.setItem(key, fresh);
+    return fresh;
+  } catch (e) {
+    return "fp-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+  }
+}
+
+var errorBox = document.getElementById("form-error");
+function showError(msg) {
+  errorBox.textContent = msg;
+  errorBox.style.display = "block";
+  errorBox.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+function clearError() { errorBox.style.display = "none"; }
+
+function showSuccess(message, amountLine) {
+  document.getElementById("card-root").innerHTML =
+    '<h1 style="color:#34d399;text-align:center">Renovação confirmada!</h1>' +
+    '<p style="color:#9ca3af;font-size:14px;line-height:1.6;text-align:center">' + message + '</p>' +
+    (amountLine ? '<p style="color:#f3f4f6;font-size:14px;font-weight:700;text-align:center;margin:0 0 14px">' + amountLine + '</p>' : '') +
+    '<p style="text-align:center"><a href="/login" style="color:#60a5fa;font-weight:600;text-decoration:none">Ir para o login</a></p>';
+}
+
+function luhnValid(number) {
+  var sum = 0, alt = false;
+  for (var i = number.length - 1; i >= 0; i--) {
+    var n = parseInt(number.charAt(i), 10);
+    if (alt) { n *= 2; if (n > 9) n -= 9; }
+    sum += n;
+    alt = !alt;
+  }
+  return sum % 10 === 0;
+}
+
+var cardNumberEl = document.getElementById("cardNumber");
+cardNumberEl.addEventListener("input", function () {
+  var digits = cardNumberEl.value.replace(/\\D/g, "").slice(0, 16);
+  cardNumberEl.value = digits.replace(/(.{4})(?=.)/g, "$1 ");
+});
+
+var cardExpiryEl = document.getElementById("cardExpiry");
+cardExpiryEl.addEventListener("input", function () {
+  var digits = cardExpiryEl.value.replace(/\\D/g, "").slice(0, 4);
+  cardExpiryEl.value = digits.length > 2 ? digits.slice(0, 2) + "/" + digits.slice(2) : digits;
+});
+
+var cardCvvEl = document.getElementById("cardCvv");
+cardCvvEl.addEventListener("input", function () {
+  cardCvvEl.value = cardCvvEl.value.replace(/\\D/g, "").slice(0, 3);
+});
+
+// ---------- Escolha do método (cartão x Pix Automático) ----------
+var selectedMethod = "credit_card";
+var methodButtons = document.querySelectorAll(".method-btn");
+var panelCard = document.getElementById("panel-credit_card");
+var panelPix = document.getElementById("panel-pix_auto");
+methodButtons.forEach(function (btn) {
+  btn.addEventListener("click", function () {
+    selectedMethod = btn.dataset.method;
+    methodButtons.forEach(function (b) { b.classList.toggle("active", b === btn); });
+    panelCard.style.display = selectedMethod === "credit_card" ? "block" : "none";
+    panelPix.style.display = selectedMethod === "pix_auto" ? "block" : "none";
+    submitBtn.textContent = selectedMethod === "pix_auto" ? "Gerar QR Code Pix" : "Renovar agora";
+  });
+});
+
+// ---------- Depois de gerar o Pix: espera o webhook confirmar sozinho ----------
+var pixStatusInterval = null;
+var pixCountdownInterval = null;
+
+function stopPixTimers() {
+  if (pixStatusInterval) { clearInterval(pixStatusInterval); pixStatusInterval = null; }
+  if (pixCountdownInterval) { clearInterval(pixCountdownInterval); pixCountdownInterval = null; }
+}
+
+function pollRenewalStatus(initialExpiresAt) {
+  var attempts = 0;
+  var maxAttempts = 130; // um pouco acima dos 10 min do QR, só de folga
+  pixStatusInterval = setInterval(function () {
+    attempts++;
+    fetch("/api/renovacao/status?token=" + encodeURIComponent(document.body.dataset.renewToken))
+      .then(function (resp) { return resp.json(); })
+      .then(function (data) {
+        if (data.expiresAt && new Date(data.expiresAt).getTime() > new Date(initialExpiresAt).getTime()) {
+          stopPixTimers();
+          showSuccess("Pagamento confirmado! Sua assinatura foi renovada com sucesso. Você já pode fazer login normalmente.");
+        } else if (attempts >= maxAttempts) {
+          stopPixTimers();
+        }
+      })
+      .catch(function () {});
+  }, 5000);
+}
+
+var formSection = document.getElementById("form-section");
+var pixResultBox = document.getElementById("pix-result");
+var pixExpiredBox = document.getElementById("pix-expired");
+var mainTitle = document.getElementById("main-title");
+var mainSubtitle = document.getElementById("main-subtitle");
+
+// Contador próprio de 10 minutos, sempre — de propósito (pedido do usuário,
+// 2026-09-27): o prazo REAL que a Cakto dá pro QR costuma vir bem maior
+// (~59min, decidido pela adquirente, não por quem chama a API, e não dá
+// pra encurtar isso do nosso lado). Então essa tela só fica ESPERANDO por
+// 10min; depois disso some e pede pra gerar um novo código — não é uma
+// afirmação de que o Pix em si parou de valer, só que paramos de mostrar.
+function startPixCountdown() {
+  var endTime = Date.now() + 10 * 60 * 1000;
+  var countdownEl = document.getElementById("pix-countdown");
+  function tick() {
+    var remaining = Math.max(0, Math.round((endTime - Date.now()) / 1000));
+    var min = Math.floor(remaining / 60);
+    var sec = remaining % 60;
+    countdownEl.textContent = (min < 10 ? "0" : "") + min + ":" + (sec < 10 ? "0" : "") + sec;
+    if (remaining <= 0) {
+      stopPixTimers();
+      pixResultBox.style.display = "none";
+      pixExpiredBox.style.display = "block";
+      mainTitle.textContent = "Pix expirado";
+      mainSubtitle.textContent = "";
+    }
+  }
+  tick();
+  pixCountdownInterval = setInterval(tick, 1000);
+}
+
+function formatMoney(value) {
+  var n = Number(value);
+  if (isNaN(n)) return null;
+  return "R$" + n.toFixed(2).replace(".", ",");
+}
+
+// Atualiza a tabela de plano (topo da página) com o valor real cobrado —
+// se veio desconto de cupom, mostra o preço ANTIGO riscado antes do novo,
+// tudo dentro da mesma tabela em vez de uma linha solta por baixo.
+var planPriceEl = document.getElementById("plan-price");
+var cycleLabel = document.body.dataset.cycleLabel || "";
+function updatePlanPrice(amount, baseAmount, discount) {
+  var amountLabel = formatMoney(amount);
+  if (!amountLabel) return;
+  var hasDiscount = Number(discount) > 0;
+  var oldLabel = hasDiscount ? formatMoney(baseAmount) : null;
+  planPriceEl.innerHTML =
+    (oldLabel ? '<span class="old-price">' + oldLabel + '</span>' : '') +
+    (hasDiscount ? '<span class="discount-tag">' + amountLabel + '</span>' : amountLabel) +
+    '<small> ' + cycleLabel + '</small>';
+}
+
+function showPixQrCode(pix, amount, discount, baseAmount) {
+  mainTitle.textContent = "Escaneie pra autorizar";
+  mainSubtitle.textContent = "Abra o app do seu banco, escaneie o QR Code e autorize os débitos automáticos. Essa página atualiza sozinha quando confirmar.";
+  formSection.style.display = "none";
+  pixResultBox.style.display = "block";
+  updatePlanPrice(amount, baseAmount, discount);
+  var qrBox = document.getElementById("pix-qr-box");
+  qrBox.innerHTML = "";
+  if (window.QRCode && pix.qrCode) {
+    try {
+      new QRCode(qrBox, { text: pix.qrCode, width: 180, height: 180 });
+    } catch (err) {
+      console.error("Renovar: falha ao desenhar QR Code Pix:", err);
+    }
+  } else {
+    console.error("Renovar: biblioteca de QR Code não carregou ou o Pix não trouxe qrCode.");
+  }
+  startPixCountdown();
+}
+
+document.getElementById("pix-back-btn").addEventListener("click", function () {
+  window.location.reload();
+});
+
+var submitBtn = document.getElementById("submit-btn");
+submitBtn.addEventListener("click", function () {
+  clearError();
+  var whatsapp = document.getElementById("whatsapp").value.replace(/\\D/g, "");
+  var docNumber = document.getElementById("docNumber").value.replace(/\\D/g, "");
+  var coupon = document.getElementById("coupon").value.trim();
+
+  if (!whatsapp) return showError("Preencha seu WhatsApp com DDD.");
+  if (!docNumber) return showError("Preencha seu CPF ou CNPJ.");
+
+  var initialExpiresAt = document.body.dataset.initialExpiresAt;
+
+  if (selectedMethod === "pix_auto") {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Gerando…";
+    fetch("/api/renovacao", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: document.body.dataset.renewToken,
+        paymentMethod: "pix_auto",
+        whatsapp: whatsapp,
+        docNumber: docNumber,
+        coupon: coupon,
+        fingerprint: getDeviceFingerprint(),
+      }),
+    })
+      .then(function (resp) { return resp.json().then(function (data) { return { ok: resp.ok, data: data }; }); })
+      .then(function (r) {
+        if (!r.ok) throw new Error(r.data.error || "Não foi possível gerar o Pix.");
+        showPixQrCode(r.data.pix || {}, r.data.amount, r.data.discount, r.data.baseAmount);
+        pollRenewalStatus(initialExpiresAt);
+      })
+      .catch(function (err) {
+        console.error("Renovar:", err);
+        showError(err.message || "Algo deu errado, tente novamente.");
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Gerar QR Code Pix";
+      });
+    return;
+  }
+
+  var cardNumber = document.getElementById("cardNumber").value.replace(/\\D/g, "");
+  var cardExpiry = document.getElementById("cardExpiry").value.trim();
+  var expMatch = cardExpiry.match(/^(\\d{2})\\/(\\d{2})$/);
+
+  if (!luhnValid(cardNumber)) return showError("Número do cartão inválido, confira os dígitos.");
+  if (!expMatch) return showError("Validade do cartão inválida, use o formato MM/AA.");
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Processando…";
+
+  var card = {
+    holderName: document.body.dataset.customerName,
+    cardNumber: cardNumber,
+    cvv: document.getElementById("cardCvv").value.trim(),
+    expMonth: expMatch[1],
+    expYear: expMatch[2],
+  };
+
+  caktoSdk.createToken(card)
+    .then(function (result) {
+      return caktoSdk.completeAntifraudProfile().then(function () { return result; });
+    })
+    .then(function (result) {
+      return fetch("/api/renovacao", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: document.body.dataset.renewToken,
+          paymentMethod: "credit_card",
+          whatsapp: whatsapp,
+          docNumber: docNumber,
+          coupon: coupon,
+          cardToken: result.cardToken,
+          antifraudReference: caktoSdk.getAntifraudReference(),
+          fingerprint: getDeviceFingerprint(),
+        }),
+      });
+    })
+    .then(function (resp) { return resp.json().then(function (data) { return { ok: resp.ok, data: data }; }); })
+    .then(function (r) {
+      if (!r.ok) throw new Error(r.data.error || "Não foi possível concluir a renovação.");
+      caktoSdk.cleanupAntifraud();
+      var amountLabel = formatMoney(r.data.amount);
+      var baseLabel = formatMoney(r.data.baseAmount);
+      var hasDiscount = Number(r.data.discount) > 0;
+      var amountLine = amountLabel
+        ? "Cobrado: " + (hasDiscount && baseLabel ? '<span style="text-decoration:line-through;color:#6b7280;font-size:12px;margin-right:6px">' + baseLabel + "</span>" + amountLabel : amountLabel)
+        : "";
+      showSuccess("Sua assinatura foi renovada com sucesso. Você já pode fazer login normalmente.", amountLine);
+    })
+    .catch(function (err) {
+      console.error("Renovar:", err);
+      showError(err.message || "Algo deu errado, tente novamente.");
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Renovar agora";
+    });
+});
+`;
+
+  app.get("/renovacao", async (req, res) => {
+    const token = typeof req.query.token === "string" ? req.query.token : "";
+    const payload = verifyRenewalToken(token);
+    if (!payload) {
+      return res.status(400).send(renewalErrorPage("Esse link de renovação é inválido ou já expirou. Peça um novo ao suporte."));
+    }
+    const org = await db.getOrganizationById(payload.orgId);
+    if (!org) {
+      return res.status(404).send(renewalErrorPage("Não encontramos essa organização. Peça um novo link ao suporte."));
+    }
+    const offerId = RENEW_OFFER_IDS[org.plan]?.[org.billing_cycle];
+    if (!offerId) {
+      return res.status(400).send(renewalErrorPage("Esse plano não tem renovação por este link. Fale com o suporte."));
+    }
+    // Mesma checagem do gerador de link (achado ao vivo, 2026-09-28) — cobre
+    // um link que já tinha sido gerado/mandado ANTES dessa correção existir.
+    if (!org.cakto_customer_email) {
+      return res.status(400).send(renewalErrorPage("Não conseguimos processar a renovação dessa conta por este link. Fale com o suporte."));
+    }
+    let offer;
+    try {
+      offer = await getOffer(offerId);
+    } catch (err) {
+      console.error(`Renovar: falha ao buscar oferta ${offerId} na Cakto:`, err.message);
+      return res.status(502).send(renewalErrorPage("Não conseguimos carregar os dados da renovação agora. Tente de novo em alguns minutos."));
+    }
+    const customerName = org.name.replace(/\s*\(Cakto\)\s*$/, "");
+    res.send(
+      renewalPage({
+        token,
+        orgName: customerName,
+        customerName,
+        planLabel: db.planLimitsFor(org.plan).label,
+        billingCycle: org.billing_cycle,
+        price: offer.price,
+        // .toISOString() explícito de propósito (achado ao vivo, 2026-09-27):
+        // sem isso, esc() cai no String(date) padrão do JS (só segundos, sem
+        // milissegundo), enquanto a resposta de /api/renovacao/status usa
+        // res.json() (toJSON(), COM milissegundo) pro MESMO valor — o polling
+        // no /renovacao.js comparava as duas e a diferença de precisão sozinha
+        // já parecia "a validade mudou", confirmando uma renovação Pix que
+        // nunca aconteceu de verdade (confirmado nos logs: a organização
+        // nunca foi renovada). As duas pontas agora usam o mesmo formato.
+        expiresAt: org.expires_at ? new Date(org.expires_at).toISOString() : "",
+      })
+    );
+  });
+
+  app.get("/renovacao.js", (req, res) => {
+    res.type("application/javascript").send(RENOVAR_PAGE_SCRIPT);
+  });
+
+  // Usado pelo /renovacao.js pra saber, sem precisar de login, se a
+  // organização já foi renovada — só assim dá pra confirmar sozinho um Pix
+  // Automático (que só renova quando o webhook "purchase_approved" da
+  // Cakto chegar depois, nunca na hora da chamada, ver createTrialPayment
+  // em caktoPayments.js).
+  app.get("/api/renovacao/status", async (req, res) => {
+    const token = typeof req.query.token === "string" ? req.query.token : "";
+    const payload = verifyRenewalToken(token);
+    if (!payload) return res.status(400).json({ error: "Link inválido ou expirado." });
+    if (publicRateLimited(`renovar-status:${payload.orgId}`, 120, 60 * 60 * 1000)) {
+      return res.status(429).json({ error: "Muitas consultas, aguarde um pouco." });
+    }
+    const org = await db.getOrganizationById(payload.orgId);
+    if (!org) return res.status(404).json({ error: "Organização não encontrada." });
+    res.json({ expiresAt: org.expires_at });
+  });
+
+  app.post("/api/renovacao", async (req, res) => {
+    if (publicRateLimited(`renovar-ip:${req.ip}`, 5, 60 * 60 * 1000)) {
+      return res.status(429).json({ error: "Muitas tentativas vindas daqui, tente de novo mais tarde." });
+    }
+    const { token, paymentMethod, whatsapp, docNumber, coupon, cardToken, antifraudReference, fingerprint } = req.body || {};
+    const method = paymentMethod === "pix_auto" ? "pix_auto" : "credit_card";
+    const payload = verifyRenewalToken(typeof token === "string" ? token : "");
+    if (!payload) {
+      return res.status(400).json({ error: "Esse link de renovação é inválido ou já expirou." });
+    }
+    if (publicRateLimited(`renovar-org:${payload.orgId}`, 5, 60 * 60 * 1000)) {
+      return res.status(429).json({ error: "Muitas tentativas pra essa organização, tente de novo mais tarde." });
+    }
+
+    const org = await db.getOrganizationById(payload.orgId);
+    if (!org) return res.status(404).json({ error: "Organização não encontrada." });
+
+    const offerId = RENEW_OFFER_IDS[org.plan]?.[org.billing_cycle];
+    if (!offerId) return res.status(400).json({ error: "Esse plano não tem renovação por este link. Fale com o suporte." });
+
+    const cleanWhatsapp = String(whatsapp || "").replace(/\D/g, "");
+    const cleanDoc = String(docNumber || "").replace(/\D/g, "");
+    const cleanFingerprint = String(fingerprint || "").trim();
+    if (!cleanWhatsapp) return res.status(400).json({ error: "Preencha seu WhatsApp com DDD." });
+    if (!cleanDoc) return res.status(400).json({ error: "Preencha seu CPF ou CNPJ." });
+    if (!cleanFingerprint) {
+      return res.status(400).json({ error: "Não foi possível validar seus dados, atualize a página e tente de novo." });
+    }
+    if (method === "credit_card" && (!cardToken || !antifraudReference)) {
+      return res.status(400).json({ error: "Não foi possível validar o cartão, revise os dados e tente de novo." });
+    }
+
+    const customerEmail = org.cakto_customer_email;
+    if (!customerEmail) {
+      // Nunca deveria acontecer: só existe link pra organização com plano+
+      // ciclo em RENEW_OFFER_IDS, e essas só vêm de compra Cakto de verdade.
+      console.error(`Renovar: organização ${org.id} não tem cakto_customer_email, abortando cobrança.`);
+      return res.status(500).json({ error: "Não conseguimos identificar seu cadastro. Fale com o suporte." });
+    }
+    const customerName = org.name.replace(/\s*\(Cakto\)\s*$/, "");
+    const cleanCoupon = String(coupon || "").trim().slice(0, 60) || undefined;
+
+    let payment;
+    try {
+      payment = await createTrialPayment({
+        offerId,
+        customer: {
+          name: customerName,
+          email: customerEmail,
+          phone: `55${cleanWhatsapp}`,
+          docType: cleanDoc.length > 11 ? "cnpj" : "cpf",
+          docNumber: cleanDoc,
+          fingerprint: cleanFingerprint,
+        },
+        paymentMethod: method,
+        coupon: cleanCoupon,
+        cardToken,
+        antifraudReference,
+        // Sem pixExpiresIn de propósito (achado ao vivo, 2026-09-27): pedimos
+        // 600 (10min) e a Cakto devolveu 59min mesmo assim — a doc já avisa
+        // "se a adquirente impuser um limite próprio, vale o dela". Omitindo
+        // o campo, usa o padrão delas direto; o contador em /renovacao.js já
+        // lê o pix.expirationDate real da resposta, então mostra certo do
+        // mesmo jeito, seja lá qual for o prazo.
+        // UUID por tentativa de propósito (achado ao vivo, 2026-09-27): uma
+        // chave fixa por dia parecia mais segura, mas qualquer SEGUNDA
+        // tentativa no mesmo dia com um payload levemente diferente (outro
+        // cartão depois de recusado, CPF corrigido, fingerprint novo) batia
+        // com a chave da tentativa anterior e a Cakto recusava com 409
+        // "Header X-Idempotency-Key reutilizado com payload diferente" —
+        // travando a pessoa de tentar de novo. Duplo clique já é evitado do
+        // outro lado (submitBtn.disabled logo no clique, em /renovacao.js).
+        idempotencyKey: `renovar-${org.id}-${offerId}-${method}-${crypto.randomUUID()}`,
+      });
+    } catch (err) {
+      console.error(
+        `Renovar: pagamento recusado pra organização ${org.id} (oferta ${offerId}, método ${method}):`,
+        err.message,
+        err.caktoDetail ? JSON.stringify(err.caktoDetail) : ""
+      );
+      const couponError = err.caktoDetail?.coupon;
+      const friendly = couponError
+        ? (Array.isArray(couponError) ? couponError[0] : String(couponError))
+        : method === "pix_auto"
+          ? "Não foi possível gerar o Pix agora. Tente de novo em alguns instantes."
+          : "Não foi possível validar o cartão. Confira os dados e tente novamente, ou use outro cartão.";
+      return res.status(402).json({ error: friendly });
+    }
+
+    if (method === "pix_auto") {
+      // Diferente do cartão: a Cakto só confirma o Pix Automático quando o
+      // cliente autoriza no banco, via webhook "purchase_approved" — nunca
+      // renova aqui na hora (ver nota grande em caktoPayments.js).
+      //
+      // MAS grava cakto_purchase_id JÁ, mesmo sem confirmação ainda — bug
+      // real encontrado ao vivo (2026-09-28, cliente Gustavo Henrique pagou
+      // e não renovou sozinho): pra uma organização que nunca teve compra
+      // Cakto antes (cakto_purchase_id nulo), o PRÓPRIO webhook que
+      // confirma o pagamento não sabia tratar como renovação —
+      // handlePurchaseApproved (cakto.js) só reconhece "cliente existente
+      // renovando" quando cakto_purchase_id já é truthy; estando nulo, caía
+      // em "já existe usuário com esse email, revise manualmente" e
+      // NINGUÉM renovava sozinho, mesmo o cliente tendo pago de verdade.
+      // Gravar isso aqui não dá acesso a nada (só é uma referência pro
+      // webhook casar depois) — se o cliente desistir de escanear, a
+      // organização só fica com uma referência de compra não paga, sem
+      // nenhum efeito prático.
+      db.linkCaktoPurchaseId(org.id, payment.id).catch((err) =>
+        console.error(`Renovar: falha ao gravar cakto_purchase_id pra organização ${org.id} (compra ${payment.id}):`, err.message)
+      );
+      console.log(
+        `Renovar: QR Pix Automático gerado pra organização ${org.id} (compra ${payment.id}) — valor ${payment.amount}${cleanCoupon ? ` (cupom "${cleanCoupon}", desconto ${payment.discount || "0"})` : ""} — aguardando autorização do cliente no banco.`
+      );
+      return res.json({
+        ok: true,
+        pix: { qrCode: payment.pix?.qrCode, expirationDate: payment.pix?.expirationDate },
+        amount: payment.amount,
+        baseAmount: payment.baseAmount,
+        discount: payment.discount,
+      });
+    }
+
+    const mapping = CAKTO_OFFER_PLAN_MAP[offerId];
+    const updated = await db.renewOrganizationWithPurchase(org.id, mapping.plan, mapping.billingCycle, payment.id);
+    await db.logAdminAction(
+      null,
+      "Renovação (autoatendimento)",
+      null,
+      org.name,
+      "org_renewed",
+      `Plano ${db.planLimitsFor(mapping.plan).label} · ${mapping.billingCycle} · renovação pelo link de autoatendimento (cartão), compra Cakto ${payment.id}` +
+        (cleanCoupon ? ` · cupom "${cleanCoupon}" (desconto ${payment.discount || "0"})` : "")
+    );
+    console.log(
+      `Renovar: organização "${org.name}" renovada via link de autoatendimento (compra ${payment.id}) — valor ${payment.amount}${cleanCoupon ? ` (cupom "${cleanCoupon}", desconto ${payment.discount || "0"})` : ""}.`
+    );
+    res.json({ ok: true, expiresAt: updated.expires_at, amount: payment.amount, baseAmount: payment.baseAmount, discount: payment.discount });
   });
 
   // O favicon do app React (public-minerador/favicon.png) só é servido pelo
@@ -3347,6 +4024,34 @@ function createApp() {
     res.json(serializeOrg({ ...updated, user_count: userCount }));
   });
 
+  // Link de renovação por autoatendimento (ver /renovacao acima) — o admin
+  // copia esse link em Organizações e manda pro cliente vencido, que paga
+  // e renova a PRÓPRIA organização sem precisar criar conta nova.
+  app.get("/api/admin/organizations/:id/renewal-link", requireAdmin, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: "id inválido" });
+    const org = await db.getOrganizationById(id);
+    if (!org) return res.status(404).json({ error: "Organização não encontrada." });
+    const offerId = RENEW_OFFER_IDS[org.plan]?.[org.billing_cycle];
+    if (!offerId) {
+      return res.status(400).json({
+        error: `Não existe oferta de autoatendimento pra ${db.planLimitsFor(org.plan).label} / ${org.billing_cycle}. Renove manualmente por "Alterar plano".`,
+      });
+    }
+    // Achado ao vivo (2026-09-28, cliente real bateu nisso): faltava essa
+    // checagem aqui — o /api/renovacao já barrava cobrança sem email, mas só
+    // depois do cliente preencher a tela inteira. Organização sem
+    // cakto_customer_email nunca veio de uma compra Cakto de verdade (ex.:
+    // criada manualmente pelo admin), então não tem como cobrar por aqui.
+    if (!org.cakto_customer_email) {
+      return res.status(400).json({
+        error: `Essa organização não tem email da Cakto vinculado (provavelmente foi criada manualmente, nunca veio de uma compra) — o link de renovação não funcionaria. Renove manualmente por "Alterar plano".`,
+      });
+    }
+    const token = signRenewalToken(org.id);
+    res.json({ url: `${APP_BASE_URL}/renovacao?token=${encodeURIComponent(token)}` });
+  });
+
   app.delete("/api/admin/organizations/:id", requireAdmin, async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: "id inválido" });
@@ -3778,6 +4483,9 @@ function startServer(port = process.env.PORT || 3001) {
         db.logRenewalDiagnostics().catch((err) =>
           console.error("Diagnóstico de renovação (Augusto Prebianca): falhou ao rodar:", err.message)
         );
+        db.logOrg8Incident().catch((err) => console.error("Diagnóstico do incidente (organização 8 / Gustavo): falhou ao rodar:", err.message));
+        db.fixOrg8Email().catch((err) => console.error("Correção da organização 8 (Gustavo): falhou ao rodar:", err.message));
+        db.fixGustavoMissedRenewal().catch((err) => console.error("Correção da renovação perdida do Gustavo: falhou ao rodar:", err.message));
       })
       .then(() => {
         const app = createApp();
