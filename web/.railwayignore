@@ -1,0 +1,7 @@
+# Arquivos que o `railway up` NÃO envia pro servidor.
+# Radar de Vendas: em desenvolvimento, só roda no servidor local. A pasta tem
+# senhas (.env.local) e a sessão da Mastershop; nunca pode subir.
+dropi-stock/
+.env
+.env.local
+*.local.json

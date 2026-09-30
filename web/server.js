@@ -11,6 +11,12 @@ const { createTrialPayment, getOffer, getOrder, cancelSubscription } = require("
 const caktoApi = require("./caktoApi");
 const db = require("./db");
 const { TIERS, tierForActiveMembers } = require("./communityTiers");
+const { AFFILIATE_RECURRING_TIERS, recurringPercentageForReferredCount } = require("./affiliateTiers");
+// Radar de Vendas: ainda em desenvolvimento, só liga no servidor LOCAL
+// (dev-local-realdb.js define RADAR_ENABLED=1). Em produção a pasta
+// dropi-stock/ nem sobe (web/.railwayignore), então o require fica aqui dentro.
+const RADAR_ENABLED = process.env.RADAR_ENABLED === "1";
+const dropiStockRoutes = RADAR_ENABLED ? require("./dropi-stock/routes") : null;
 
 const APP_BASE_URL = requireEnv("APP_BASE_URL");
 const SESSION_SECRET = requireEnv("SESSION_SECRET");
@@ -979,6 +985,113 @@ function createApp() {
     }
   });
 
+  // ---------- Redefinir senha por link (pedido do usuário, 2026-09-29) ----------
+  // Antes disso só existia o admin DIGITANDO a senha nova de outra pessoa
+  // (PATCH /api/admin/users/:id) — funcional, mas incômodo quando o cliente
+  // quer escolher a própria senha (o admin teria que perguntar "qual senha
+  // você quer?", estranho/parece phishing). Esse link deixa o CLIENTE
+  // escolher, sem nunca contar a senha pra ninguém. Mesmo esquema de token
+  // assinado (HMAC, auth.js) do link de renovação — sem tabela nova.
+  const PASSWORD_RESET_TOKEN_TTL_SECONDS = 60 * 60; // 1 hora — mais curto que o de renovação (7 dias) de propósito, é credencial de login
+
+  function signPasswordResetToken(userId) {
+    return sign({ purpose: "reset_password", userId, exp: Math.floor(Date.now() / 1000) + PASSWORD_RESET_TOKEN_TTL_SECONDS }, SESSION_SECRET);
+  }
+
+  function verifyPasswordResetToken(token) {
+    const payload = verify(token, SESSION_SECRET);
+    if (!payload || payload.purpose !== "reset_password" || !Number.isInteger(payload.userId)) return null;
+    return payload;
+  }
+
+  function resetPasswordPage({ token, userName, error }) {
+    const esc = (s) => escapeHtml(s || "");
+    return `<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="/favicon.png">
+<title>ScoutX — Nova senha</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #05070d; color: #f3f4f6; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 32px 16px; }
+  .card { background: linear-gradient(180deg, rgba(18,20,30,0.9), rgba(10,12,20,0.94)); border: 1px solid rgba(96,165,250,0.18); padding: 34px; border-radius: 20px; width: 380px; max-width: calc(100vw - 32px); box-shadow: 0 24px 70px rgba(0,0,0,0.55); }
+  .brand { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 20px; }
+  .brand img { width: 36px; height: 36px; border-radius: 10px; object-fit: cover; }
+  .brand span { font-weight: 700; font-size: 16px; }
+  h1 { font-size: 19px; margin: 0 0 6px; text-align: center; }
+  p.subtitle { color: #9ca3af; font-size: 13px; margin: 0 0 22px; text-align: center; line-height: 1.5; }
+  label { display: block; font-size: 11px; font-weight: 600; color: #93c5fd; margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+  input { width: 100%; padding: 11px 13px; margin-bottom: 14px; border-radius: 10px; border: 1px solid rgba(96,165,250,0.16); background: rgba(5,7,13,0.7); color: #f3f4f6; font-size: 14px; }
+  input:focus { outline: none; border-color: #22d3ee; box-shadow: 0 0 0 3px rgba(34,211,238,0.18); }
+  .btn-primary { width: 100%; padding: 14px; border-radius: 9999px; border: none; background: linear-gradient(90deg, #1d4ed8 0%, #3b82f6 50%, #22d3ee 100%); color: #fff; font-weight: 700; font-size: 14px; cursor: pointer; box-shadow: 0 8px 28px rgba(59,130,246,0.4); }
+  .error { background: rgba(127,29,29,0.25); color: #f87171; border: 1px solid #7f1d1d; padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; display: ${error ? "block" : "none"}; }
+</style></head>
+<body>
+<div class="card">
+  <div class="brand"><img src="${SCOUTX_LOGO_DATA_URI}" alt="ScoutX"><span>ScoutX</span></div>
+  <h1>Escolher nova senha</h1>
+  <p class="subtitle">${esc(userName)}, defina sua nova senha de acesso ao ScoutX.</p>
+  <div class="error">${esc(error)}</div>
+  <form method="POST" action="/redefinir-senha">
+    <input type="hidden" name="token" value="${esc(token)}">
+    <label for="password">Nova senha</label>
+    <input type="password" id="password" name="password" required minlength="8" autocomplete="new-password">
+    <label for="confirmPassword">Confirmar nova senha</label>
+    <input type="password" id="confirmPassword" name="confirmPassword" required minlength="8" autocomplete="new-password">
+    <button type="submit" class="btn-primary">Salvar nova senha</button>
+  </form>
+</div>
+</body></html>`;
+  }
+
+  app.get("/redefinir-senha", async (req, res) => {
+    const token = typeof req.query.token === "string" ? req.query.token : "";
+    const payload = verifyPasswordResetToken(token);
+    if (!payload) {
+      return res.status(400).send(simpleErrorPage("Redefinir senha", "Esse link expirou ou é inválido. Peça um novo ao suporte."));
+    }
+    const user = await db.getAppUserById(payload.userId);
+    if (!user) {
+      return res.status(404).send(simpleErrorPage("Redefinir senha", "Não encontramos essa conta. Peça um novo link ao suporte."));
+    }
+    res.send(resetPasswordPage({ token, userName: user.name }));
+  });
+
+  app.post("/redefinir-senha", async (req, res) => {
+    const { token, password, confirmPassword } = req.body || {};
+    const payload = verifyPasswordResetToken(typeof token === "string" ? token : "");
+    if (!payload) {
+      return res.status(400).send(simpleErrorPage("Redefinir senha", "Esse link expirou ou é inválido. Peça um novo ao suporte."));
+    }
+    if (publicRateLimited(`reset-pwd:${payload.userId}`, 8, 60 * 60 * 1000)) {
+      return res.status(429).send(resetPasswordPage({ token, userName: "", error: "Muitas tentativas, aguarde um pouco e tente de novo." }));
+    }
+    const user = await db.getAppUserById(payload.userId);
+    if (!user) {
+      return res.status(404).send(simpleErrorPage("Redefinir senha", "Não encontramos essa conta. Peça um novo link ao suporte."));
+    }
+
+    const rerender = (status, error) => res.status(status).send(resetPasswordPage({ token, userName: user.name, error }));
+    const pw = String(password || "");
+    const confirm = String(confirmPassword || "");
+    if (pw.length < 8) return rerender(400, "A senha precisa ter no mínimo 8 caracteres.");
+    if (pw !== confirm) return rerender(400, "As senhas digitadas não são iguais.");
+    if (await isPasswordPwned(pw)) return rerender(400, "Essa senha já apareceu em vazamentos conhecidos, escolha outra.");
+
+    const passwordHash = await bcrypt.hash(pw, 10);
+    const newTokenVersion = await db.updateUserPassword(user.id, passwordHash);
+    await db.logAdminAction(
+      null,
+      "Redefinição por link (autoatendimento)",
+      user.id,
+      user.name,
+      "password_reset",
+      "Senha redefinida pelo próprio usuário, pelo link gerado pelo admin"
+    );
+    db.logLogin(user.id, req.ip).catch((e) => console.error("log login:", e));
+    setSessionCookie(res, user.id, newTokenVersion);
+    res.redirect("/");
+  });
+
   // ---------- Assinar (teste grátis de 7 dias, cobrança direta) ----------
   // Alternativa a mandar a pessoa pro checkout da Cakto: ela cria a conta e
   // preenche o cartão dentro do PRÓPRIO ScoutX (SDK deles tokeniza tudo no
@@ -1255,11 +1368,11 @@ function createApp() {
 
   const RENEW_BILLING_CYCLE_LABEL = { mensal: "por mês", trimestral: "a cada 3 meses", anual: "por ano" };
 
-  function renewalErrorPage(message) {
+  function simpleErrorPage(pageTitle, message) {
     return `<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/png" href="/favicon.png">
-<title>ScoutX — Renovação</title>
+<title>ScoutX — ${escapeHtml(pageTitle)}</title>
 <style>
   body { font-family: system-ui, sans-serif; background: #05070d; color: #f3f4f6; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 32px 16px; }
   .card { background: rgba(18,20,30,0.9); border: 1px solid rgba(96,165,250,0.18); padding: 34px; border-radius: 20px; width: 420px; max-width: calc(100vw - 32px); text-align: center; }
@@ -1272,6 +1385,10 @@ function createApp() {
   <p>${escapeHtml(message)}</p>
   <a href="/login">Ir para o login</a>
 </div></body></html>`;
+  }
+
+  function renewalErrorPage(message) {
+    return simpleErrorPage("Renovação", message);
   }
 
   function renewalPage({ token, orgName, customerName, planLabel, billingCycle, price, expiresAt, error }) {
@@ -2238,13 +2355,26 @@ submitBtn.addEventListener("click", function () {
 
   // ---------- Identidade / permissões pro frontend ----------
 
-  app.get("/api/me", (req, res) => {
+  app.get("/api/me", async (req, res) => {
+    // affiliateId: NÃO é só pra quem tem a conta dedicada (role "affiliate")
+    // — qualquer login (admin, colaborador) cujo EMAIL bata com um afiliado
+    // cadastrado também ganha a aba "Meu Painel", revisão pedida pelo
+    // usuário (2026-09-29) depois de testar como admin e não ver nada.
+    const affiliateMatch = await db.findAffiliateByCaktoEmail(req.appUser.email);
     res.json({
       name: req.appUser.name,
       email: req.appUser.email,
       role: req.appUser.role,
       isAdmin: req.appUser.role === "admin",
+      // Afiliado com conta DEDICADA (sem organização, sem admin) — só vê a
+      // aba "Meu Painel", nada mais do ScoutX (ver RouteGuard/Layout no
+      // frontend). Diferente de affiliateId abaixo, que qualquer conta pode
+      // ter.
+      isAffiliate: req.appUser.role === "affiliate",
+      affiliateId: affiliateMatch ? affiliateMatch.id : null,
       canAccessMinerador: req.appUser.role === "admin" || req.appUser.can_access_minerador,
+      // Radar de Vendas só existe no servidor local por enquanto (ver RADAR_ENABLED).
+      radarEnabled: RADAR_ENABLED,
       // Admin (dono da plataforma) não tem organização/plano — planLabel
       // fica null e o front mostra um selo diferente (ver Layout.jsx).
       planLabel: req.appUser.org_plan ? db.planLimitsFor(req.appUser.org_plan).label : null,
@@ -2263,6 +2393,85 @@ submitBtn.addEventListener("click", function () {
       // PATCH /api/me/default-operation logo abaixo.
       defaultOperation: req.appUser.org_default_operation || null,
     });
+  });
+
+  // "Meu Painel" do afiliado (pedido do usuário, 2026-09-29) — mesmos dados
+  // que a aba admin de Afiliados já calculava (db.getAffiliateEarningsSummary
+  // etc.), só formatados pro card/tabela do painel. Compartilhado entre
+  // GET /api/me/affiliate-earnings (o próprio afiliado logado) e GET
+  // /api/admin/affiliates/:id/earnings (admin espiando o painel de
+  // qualquer um) — pra nunca ter duas fórmulas calculando o mesmo número.
+  async function buildAffiliateEarningsPayload(affiliate) {
+    const [summary, recentCommissions, trialReferrals, trialSummary, upcomingRenewals, renewalSummary, trialHistory] = await Promise.all([
+      db.getAffiliateEarningsSummary(affiliate.id),
+      db.listAffiliateCommissionsForAffiliate(affiliate.id, 30),
+      db.listAffiliateTrialReferrals(affiliate.id),
+      db.getAffiliateTrialSummary(affiliate.id),
+      db.listAffiliateUpcomingRenewals(affiliate.id),
+      db.getAffiliateRenewalSummary(affiliate.id),
+      db.listAffiliateTrialHistory(affiliate.id),
+    ]);
+    // Percentual de recorrência é por NÍVEL agora (2026-09-29, ver
+    // affiliateTiers.js) — não é mais o campo fixo cadastrado no afiliado,
+    // que fica sem uso pra esse cálculo (mantido só de referência histórica).
+    const recurringPercentage = recurringPercentageForReferredCount(summary.referredCustomers);
+    return {
+      affiliateName: affiliate.name,
+      firstSalePercentage: Number(affiliate.first_sale_percentage),
+      recurringPercentage,
+      recurringTiers: AFFILIATE_RECURRING_TIERS,
+      summary,
+      trialSummary,
+      // Previsão combinada (pedido do usuário, 2026-09-29: "tem que tentar
+      // o máximo possível prever valores que eles vão receber") — teste
+      // grátis a caminho de converter + cliente pagante prestes a renovar,
+      // tudo somado no hero do painel.
+      combinedProjectedTotal: Math.round((trialSummary.projectedTrialTotal + renewalSummary.projectedRenewalTotal) * 100) / 100,
+      renewalSummary,
+      trialReferrals: trialReferrals.map((t) => ({
+        customerName: t.customer_name,
+        customerEmail: t.customer_email,
+        trialEndsAt: t.trial_ends_at,
+        projectedCommissionValue: Number(t.projected_commission_value),
+      })),
+      upcomingRenewals: upcomingRenewals.map((t) => ({
+        customerName: t.customer_name,
+        customerEmail: t.customer_email,
+        renewsAt: t.trial_ends_at,
+        projectedCommissionValue: Number(t.projected_commission_value),
+      })),
+      // Todo mundo que já entrou em teste pelo link dele, com o desfecho
+      // (pedido do usuário, 2026-09-29): "converted" | "expired" | "ongoing".
+      trialHistory: trialHistory.map((h) => ({
+        customerName: h.customerName,
+        customerEmail: h.customerEmail,
+        startedAt: h.startedAt,
+        trialEndsAt: h.trialEndsAt,
+        outcome: h.outcome,
+      })),
+      recentCommissions: recentCommissions.map((c) => ({
+        id: c.id,
+        createdAt: c.created_at,
+        customerName: c.customer_name,
+        customerEmail: c.customer_email,
+        commissionType: c.commission_type,
+        commissionValue: Number(c.commission_value),
+        paid: c.paid,
+      })),
+    };
+  }
+
+  // 403 (não 404) pra quem não é afiliado: a aba nem aparece pra eles no
+  // menu, mas a rota em si também não deixa passar batendo direto na API.
+  app.get("/api/me/affiliate-earnings", async (req, res) => {
+    // Mesmo critério do /api/me: casa pelo EMAIL da sessão, não pelo role —
+    // qualquer conta (admin, colaborador ou a dedicada) cujo email bata com
+    // um afiliado cadastrado vê os próprios números.
+    const affiliate = await db.findAffiliateByCaktoEmail(req.appUser.email);
+    if (!affiliate) {
+      return res.status(403).json({ error: "Essa área é só pro afiliado ver os próprios números." });
+    }
+    res.json(await buildAffiliateEarningsPayload(affiliate));
   });
 
   // Grava o país da organização na PRIMEIRA vez (ver
@@ -2485,6 +2694,55 @@ submitBtn.addEventListener("click", function () {
     res.status(204).end();
   });
 
+  // Login próprio do afiliado (pedido do usuário, 2026-09-29) — role
+  // "affiliate", sem organização, só vê a própria aba "Meu Painel" (ver
+  // RouteGuard/Layout no frontend e GET /api/me/affiliate-earnings abaixo).
+  // Mesmo truque de senha do POST /api/admin/users com withoutPassword:
+  // aleatória, ninguém vê, a pessoa escolhe a de verdade pelo link de
+  // redefinição (reaproveita signPasswordResetToken, já existe pra
+  // Usuários) — devolvido aqui pra copiar e mandar numa tacada só.
+  app.post("/api/admin/affiliates/:id/create-login", requireAdmin, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: "id inválido" });
+    const affiliate = await db.getAffiliateById(id);
+    if (!affiliate) return res.status(404).json({ error: "Afiliado não encontrado." });
+
+    const existingLogin = await db.findUserByAffiliateId(id);
+    if (existingLogin) {
+      return res.status(409).json({ error: `Esse afiliado já tem acesso (conta: ${existingLogin.email}).` });
+    }
+
+    const email = String(req.body?.email || affiliate.cakto_email || "").trim();
+    if (!email) return res.status(400).json({ error: "Informe um email pra esse acesso." });
+    const existingUser = await db.findUserByEmail(email);
+    if (existingUser) return res.status(409).json({ error: "Já existe uma conta com esse email, use outro." });
+
+    const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString("base64url"), 10);
+    const user = await db.createUser({
+      name: affiliate.name,
+      email,
+      passwordHash,
+      role: "affiliate",
+      affiliateId: affiliate.id,
+      needsPasswordSetup: true,
+    });
+    await db.logAdminAction(
+      req.appUser.id,
+      req.appUser.name,
+      user.id,
+      user.name,
+      "created",
+      `Acesso de afiliado criado (painel de ganhos), vinculado a "${affiliate.name}"`
+    );
+    const token = signPasswordResetToken(user.id);
+    res.status(201).json({
+      userId: user.id,
+      email: user.email,
+      resetUrl: `${APP_BASE_URL}/redefinir-senha?token=${encodeURIComponent(token)}`,
+    });
+  });
+
+
   app.post("/api/admin/affiliates/:id/backfill", requireAdmin, async (req, res) => {
     const affiliate = (await db.listAffiliates()).find((a) => a.id === Number(req.params.id));
     if (!affiliate) return res.status(404).json({ error: "Afiliado não encontrado." });
@@ -2494,6 +2752,18 @@ submitBtn.addEventListener("click", function () {
       console.error("Backfill de afiliado falhou:", err.message);
       res.status(502).json({ error: "Não foi possível consultar a Cakto agora. Tente de novo em instantes." });
     }
+  });
+
+  // Admin "espiando" o painel de um afiliado específico (pedido do usuário,
+  // 2026-09-29: "ver o que cada afiliado tá vendo") — mesmo payload de
+  // /api/me/affiliate-earnings, só que por id em vez de casar pelo email da
+  // própria sessão. Reaproveita buildAffiliateEarningsPayload (ver acima).
+  app.get("/api/admin/affiliates/:id/earnings", requireAdmin, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: "id inválido" });
+    const affiliate = await db.getAffiliateById(id);
+    if (!affiliate) return res.status(404).json({ error: "Afiliado não encontrado." });
+    res.json(await buildAffiliateEarningsPayload(affiliate));
   });
 
   // Projeções de "período de teste" (ver web/cakto.js
@@ -3476,6 +3746,11 @@ submitBtn.addEventListener("click", function () {
     return results;
   }
 
+  // ---------- Estoque de Fornecedor (Dropi) ----------
+  // Só leitura: quem grava é o worker de varredura (dropi-stock/worker.js),
+  // processo separado com Chromium. Mesma permissão da aba Concorrentes.
+  if (dropiStockRoutes) dropiStockRoutes.register(app, requireMineradorAccess);
+
   // A ordem NÃO é decidida aqui: o painel embaralha no navegador toda vez que
   // abre (ver components/SuggestedCompetitors.jsx), então cada cliente vê uma
   // ordem diferente e ela muda a cada abertura.
@@ -3803,6 +4078,18 @@ submitBtn.addEventListener("click", function () {
     }
 
     res.json({ ok: true });
+  });
+
+  // Link de redefinição de senha (ver /redefinir-senha acima) — o admin
+  // copia e manda pro usuário, que escolhe a própria senha nova sem
+  // precisar contar ela pra ninguém.
+  app.get("/api/admin/users/:id/password-reset-link", requireAdmin, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: "id inválido" });
+    const user = await db.getAppUserById(id);
+    if (!user) return res.status(404).json({ error: "Usuário não encontrado." });
+    const token = signPasswordResetToken(id);
+    res.json({ url: `${APP_BASE_URL}/redefinir-senha?token=${encodeURIComponent(token)}` });
   });
 
   app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
@@ -4486,6 +4773,7 @@ function startServer(port = process.env.PORT || 3001) {
         db.logOrg8Incident().catch((err) => console.error("Diagnóstico do incidente (organização 8 / Gustavo): falhou ao rodar:", err.message));
         db.fixOrg8Email().catch((err) => console.error("Correção da organização 8 (Gustavo): falhou ao rodar:", err.message));
         db.fixGustavoMissedRenewal().catch((err) => console.error("Correção da renovação perdida do Gustavo: falhou ao rodar:", err.message));
+        db.logJhonatasTrialIncident().catch((err) => console.error("Diagnóstico do incidente (Jhonatas, teste grátis): falhou ao rodar:", err.message));
       })
       .then(() => {
         const app = createApp();

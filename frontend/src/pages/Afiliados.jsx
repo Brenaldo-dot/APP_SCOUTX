@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronUp, Image as ImageIcon, Trash2, Users } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { ChevronDown, ChevronUp, Image as ImageIcon, LayoutDashboard, Trash2, Users } from 'lucide-react'
 import { rawApi } from '../api/rawClient.js'
 import EmptyState from '../components/EmptyState.jsx'
 import RefreshButton from '../components/RefreshButton.jsx'
@@ -112,6 +113,45 @@ export default function Afiliados() {
   const [expandedId, setExpandedId] = useState(null)
   const [backfill, setBackfill] = useState({ id: null, loading: false, text: null })
   const [copiedRef, setCopiedRef] = useState(null)
+  const [creatingLoginId, setCreatingLoginId] = useState(null)
+  const [copiedLoginLinkId, setCopiedLoginLinkId] = useState(null)
+
+  // "Meu Painel" do afiliado (pedido do usuário, 2026-09-29, revisado depois
+  // de uma primeira tentativa só por link sem login — o usuário pediu login
+  // de verdade com aba própria em vez disso): cria a conta dele (role
+  // "affiliate", sem senha ainda) e já copia o link de redefinição — reusa
+  // o MESMO mecanismo de "Trocar senha" da tela Usuários — pra você mandar
+  // pro afiliado escolher a própria senha e entrar direto no painel dele.
+  async function createAffiliateAccess(affiliate) {
+    setCreatingLoginId(affiliate.id)
+    try {
+      const { resetUrl } = await rawApi.createAffiliateLogin(affiliate.id, { email: affiliate.cakto_email })
+      await navigator.clipboard?.writeText(resetUrl)
+      setCopiedLoginLinkId(affiliate.id)
+      setTimeout(() => setCopiedLoginLinkId(null), 2500)
+      load()
+    } catch (err) {
+      setError(err.message || 'Não foi possível criar o acesso desse afiliado.')
+    } finally {
+      setCreatingLoginId(null)
+    }
+  }
+
+  // Afiliado que já tem login mas perdeu/esqueceu a senha: reusa o mesmo
+  // link de redefinição de senha da tela Usuários (já existe, sem duplicar).
+  async function resendAffiliateAccessLink(affiliate) {
+    setCreatingLoginId(affiliate.id)
+    try {
+      const { url } = await rawApi.getUserPasswordResetLink(affiliate.login_user_id)
+      await navigator.clipboard?.writeText(url)
+      setCopiedLoginLinkId(affiliate.id)
+      setTimeout(() => setCopiedLoginLinkId(null), 2500)
+    } catch (err) {
+      setError(err.message || 'Não foi possível gerar o link de acesso.')
+    } finally {
+      setCreatingLoginId(null)
+    }
+  }
 
   function load() {
     return Promise.all([
@@ -322,6 +362,14 @@ export default function Afiliados() {
                     <p className="text-xs uppercase text-[var(--text-muted)]">Já recebido</p>
                     <p className="font-semibold text-emerald-400">{money(a.paid)}</p>
                   </div>
+                  <Link
+                    to={`/afiliados/${a.id}/painel`}
+                    onClick={(e) => e.stopPropagation()}
+                    title="Ver o painel dele (exatamente o que ele vê)"
+                    className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--hover-surface)] hover:text-brand-500"
+                  >
+                    <LayoutDashboard size={15} />
+                  </Link>
                   <span
                     onClick={(e) => {
                       e.stopPropagation()
@@ -357,6 +405,26 @@ export default function Afiliados() {
                       </button>
                     </div>
                   )}
+                  <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg-surface-2)] px-3 py-2">
+                    <span className="text-xs text-[var(--text-muted)]">
+                      {a.login_user_id
+                        ? `Acesso dele à aba "Meu Painel": ${a.login_email}`
+                        : 'Aba "Meu Painel" (previsão de ganho, quem tá em teste, histórico):'}
+                    </span>
+                    <button
+                      onClick={() => (a.login_user_id ? resendAffiliateAccessLink(a) : createAffiliateAccess(a))}
+                      disabled={creatingLoginId === a.id}
+                      className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--hover-surface)] disabled:opacity-60"
+                    >
+                      {copiedLoginLinkId === a.id
+                        ? 'Link copiado!'
+                        : creatingLoginId === a.id
+                        ? 'Gerando…'
+                        : a.login_user_id
+                        ? 'Copiar link de acesso'
+                        : 'Criar acesso e copiar link'}
+                    </button>
+                  </div>
                   <div className="mb-3 flex flex-wrap items-center gap-3">
                     <button
                       onClick={() => handleBackfill(a.id)}

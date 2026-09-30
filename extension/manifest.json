@@ -1,0 +1,70 @@
+{
+  "manifest_version": 3,
+  "name": "ScoutX Radar",
+  "version": "0.6.1",
+  "description": "Mostra as vendas de cada produto direto no catálogo da DropLatam, da Dropi e da Mastershop.",
+  "icons": {
+    "16": "icons/logo.png",
+    "48": "icons/logo.png",
+    "128": "icons/logo.png"
+  },
+  "action": {
+    "default_title": "ScoutX Radar",
+    "default_popup": "popup.html",
+    "default_icon": "icons/logo.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "storage",
+    "cookies"
+  ],
+  "host_permissions": [
+    "http://localhost:3011/*",
+    "https://app.scoutx.com.br/*",
+    "https://*.mastershop.com/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/logo.png"
+      ],
+      "matches": [
+        "https://co.droplatam.com.br/*",
+        "https://app.dropi.co/*",
+        "https://mx.droplatam.com.br/*",
+        "https://app.dropi.mx/*",
+        "https://gt.droplatam.com.br/*",
+        "https://app.dropi.gt/*",
+        "https://ec.droplatam.com.br/*",
+        "https://app.dropi.ec/*",
+        "https://app.mastershop.com/*",
+        "https://es.droplatam.com.br/*"
+      ]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://co.droplatam.com.br/*",
+        "https://app.dropi.co/*",
+        "https://mx.droplatam.com.br/*",
+        "https://app.dropi.mx/*",
+        "https://gt.droplatam.com.br/*",
+        "https://app.dropi.gt/*",
+        "https://ec.droplatam.com.br/*",
+        "https://app.dropi.ec/*",
+        "https://app.mastershop.com/*",
+        "https://es.droplatam.com.br/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -56,6 +56,11 @@ export const rawApi = {
     }),
 
   listAffiliates: () => request('/api/admin/affiliates'),
+  createAffiliateLogin: (id, data) =>
+    request(`/api/admin/affiliates/${id}/create-login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  getMyAffiliateEarnings: () => request('/api/me/affiliate-earnings'),
+  getAffiliateEarnings: (id) => request(`/api/admin/affiliates/${id}/earnings`),
+  getAffiliateDashboardLink: (id) => request(`/api/admin/affiliates/${id}/dashboard-link`),
   createAffiliate: (data) =>
     request('/api/admin/affiliates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   deleteAffiliate: (id) => request(`/api/admin/affiliates/${id}`, { method: 'DELETE' }),
@@ -176,6 +181,17 @@ export const rawApi = {
     }),
 
   getRouteLatency: () => request('/api/admin/route-latency'),
+  radarOverview: (country) => request(`/api/radar/overview?${qs({ country })}`),
+  radarCategories: (country) => request(`/api/radar/categories?${qs({ country })}`),
+  radarSearchSuppliers: (country, q) => request(`/api/radar/suppliers/search?${qs({ country, q })}`),
+  radarCatalog: (params) => request(`/api/radar/catalog?${qs(params)}`),
+  radarTrends: (params) => request(`/api/radar/trends?${qs(params)}`),
+  radarWinners: (params) => request(`/api/radar/winners?${qs(params)}`),
+  radarDays: (country) => request(`/api/radar/days?${qs({ country })}`),
+  radarDaySales: (day, params) => request(`/api/radar/days/${day}?${qs(params)}`),
+  radarTopSuppliers: (params) => request(`/api/radar/suppliers?${qs(params)}`),
+  radarSupplier: (id, country) => request(`/api/radar/suppliers/${id}?${qs({ country })}`),
+  radarProduct: (id, days, country) => request(`/api/radar/products/${id}?${qs({ days, country })}`),
   listSuggestedCompetitors: (operation) => request(`/api/suggested-competitors?${qs({ operation })}`),
   listAdminSuggestedCompetitors: () => request('/api/admin/suggested-competitors'),
   addSuggestedCompetitors: (operation, text) =>
@@ -206,6 +222,7 @@ export const rawApi = {
   listAuditLog: () => request('/api/admin/audit-log'),
   createUser: (data) => request('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   updateUser: (id, data) => request(`/api/admin/users/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  getUserPasswordResetLink: (id) => request(`/api/admin/users/${id}/password-reset-link`),
   deleteUser: (id) => request(`/api/admin/users/${id}`, { method: 'DELETE' }),
 
   listOrganizations: () => request('/api/admin/organizations'),

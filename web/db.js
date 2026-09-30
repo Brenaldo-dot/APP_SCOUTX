@@ -1,5 +1,6 @@
 const { Pool, Client } = require("pg");
 const { tierForActiveMembers } = require("./communityTiers");
+const { recurringPercentageForReferredCount } = require("./affiliateTiers");
 const nodeCrypto = require("crypto");
 
 // Código do link de indicação de um afiliado: nome sem acento/símbolos + 4
@@ -218,6 +219,15 @@ async function migrate() {
     );
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_affiliate_commissions_affiliate ON affiliate_commissions(affiliate_id);`);
+
+  // Login próprio de afiliado (pedido do usuário, 2026-09-29): role vira
+  // 'affiliate' (sem CHECK constraint na coluna role, TEXT solto — só
+  // validação em app), organization_id continua NULL (não é cliente
+  // pagante, mesmo padrão do admin), e esse FK aponta pra QUAL afiliado é.
+  // Tem que vir DEPOIS da criação de `affiliates` acima (referenciada por
+  // FK). ON DELETE SET NULL: apagar o cadastro de afiliado não deve
+  // arrastar/quebrar o login, só desvincular.
+  await pool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS affiliate_id INTEGER REFERENCES affiliates(id) ON DELETE SET NULL;`);
 
   // Assinantes trazidos por um afiliado que ainda estão em PERÍODO DE TESTE
   // (pedido do Samuel, 2026-09-18): nenhuma comissão de fato existe ainda
@@ -793,27 +803,29 @@ async function countActiveAdmins() {
   return res.rows[0].n;
 }
 
-async function createUser({ name, email, passwordHash, role, createdById, organizationId, needsPasswordSetup }) {
+async function createUser({ name, email, passwordHash, role, createdById, organizationId, needsPasswordSetup, affiliateId }) {
   const isAdmin = role === "admin";
   // Colaborador preso a uma organização é cliente pagante — ScoutX é o
   // PRÓPRIO produto vendido, não faz sentido nascer sem acesso a ele e
   // depender do admin lembrar de destravar depois manualmente (bug real:
   // usuário do plano Standard criado sem conseguir nem ver o app até alguém
   // notar e mexer no toggle). Admin continua sem esse campo fazer sentido
-  // (já tem acesso total por ser admin).
-  const canAccessMinerador = !isAdmin && !!organizationId;
+  // (já tem acesso total por ser admin). Afiliado (role="affiliate") também
+  // fica false — não é cliente do ScoutX, só vê o próprio painel de ganhos.
+  const canAccessMinerador = !isAdmin && role !== "affiliate" && !!organizationId;
   const res = await pool.query(
-    `INSERT INTO app_users (name, email, password_hash, role, role_changed_by_id, role_changed_at, organization_id, can_access_minerador, needs_password_setup)
-     VALUES ($1, $2, $3, $4, $5, ${isAdmin ? "now()" : "NULL"}, $6, $7, $8) RETURNING *`,
+    `INSERT INTO app_users (name, email, password_hash, role, role_changed_by_id, role_changed_at, organization_id, can_access_minerador, needs_password_setup, affiliate_id)
+     VALUES ($1, $2, $3, $4, $5, ${isAdmin ? "now()" : "NULL"}, $6, $7, $8, $9) RETURNING *`,
     [
       name,
       email.toLowerCase().trim(),
       passwordHash,
       role || "collaborator",
       isAdmin ? createdById || null : null,
-      isAdmin ? null : organizationId || null,
+      isAdmin || role === "affiliate" ? null : organizationId || null,
       canAccessMinerador,
       !!needsPasswordSetup,
+      affiliateId || null,
     ]
   );
   return res.rows[0];
@@ -1042,9 +1054,22 @@ async function listAdminAuditLog(limit = 100) {
 
 // ---------- Afiliados ----------
 
+// login_user_id/login_email: se o afiliado já tem conta própria (ver
+// createAffiliateLogin) — o front usa isso pra trocar "Criar acesso" por
+// "Copiar link de acesso" e não deixar duplicar login pro mesmo afiliado.
 async function listAffiliates() {
-  const res = await pool.query("SELECT * FROM affiliates ORDER BY created_at DESC");
+  const res = await pool.query(`
+    SELECT a.*, u.id AS login_user_id, u.email AS login_email
+    FROM affiliates a
+    LEFT JOIN app_users u ON u.affiliate_id = a.id
+    ORDER BY a.created_at DESC
+  `);
   return res.rows;
+}
+
+async function findUserByAffiliateId(affiliateId) {
+  const res = await pool.query("SELECT * FROM app_users WHERE affiliate_id = $1 LIMIT 1", [affiliateId]);
+  return res.rows[0] || null;
 }
 
 async function findAffiliateByCaktoEmail(email) {
@@ -1399,6 +1424,87 @@ async function getAffiliateTrialSummary(affiliateId) {
     trialCount: rows.length,
     projectedTrialTotal: Math.round(rows.reduce((s, r) => s + Number(r.projected_commission_value || 0), 0) * 100) / 100,
   };
+}
+
+// Ciclo → múltiplo do preço mensal, só pra ESTIMAR a próxima renovação
+// (não tem como saber o valor exato antes da cobrança acontecer de
+// verdade). Trimestral/anual não têm desconto embutido aqui de propósito —
+// é só uma previsão pro afiliado se planejar, o valor real pode variar.
+const BILLING_CYCLE_MONTHS = { mensal: 1, trimestral: 3, anual: 12 };
+
+// Previsão de RENOVAÇÃO (pedido do usuário, 2026-09-29: "tem que deixar
+// isso em previsão também" — cliente que já paga e vai renovar em breve).
+// Diferente do teste grátis (collectTrialReferrals, incerto se converte):
+// aqui já é cliente pagante, só falta a data virar — maior confiança, por
+// isso entra separado no painel. Usa o percentual de NÍVEL (não o fixo do
+// afiliado), mesmo critério de cakto.js:recordAffiliateCommissionIfAny.
+async function listAffiliateUpcomingRenewals(affiliateId) {
+  const res = await pool.query(
+    `SELECT o.id AS org_id, o.plan, o.billing_cycle, o.expires_at, o.cakto_customer_email,
+            (SELECT u.name FROM app_users u WHERE u.organization_id = o.id ORDER BY u.id LIMIT 1) AS user_name,
+            (SELECT u.email FROM app_users u WHERE u.organization_id = o.id ORDER BY u.id LIMIT 1) AS user_email
+     FROM organizations o
+     WHERE o.referred_by_affiliate_id = $1 AND o.is_trial = false AND o.expires_at >= now()
+     ORDER BY o.expires_at ASC`,
+    [affiliateId]
+  );
+  if (res.rows.length === 0) return [];
+  const { referredCustomers } = await getAffiliateEarningsSummary(affiliateId);
+  const percentage = recurringPercentageForReferredCount(referredCustomers);
+  const netFactor = await getAffiliateNetFactor(affiliateId);
+  return res.rows.map((o) => {
+    const monthlyPrice = TRIAL_PLAN_MONTHLY_PRICE[o.plan] || 0;
+    const price = monthlyPrice * (BILLING_CYCLE_MONTHS[o.billing_cycle] || 1);
+    return {
+      id: `renew-${o.org_id}`,
+      customer_email: (o.cakto_customer_email || o.user_email || "").toLowerCase() || null,
+      customer_name: o.user_name || null,
+      trial_ends_at: o.expires_at, // mesmo nome de campo do trial, front reaproveita a formatação
+      projected_commission_value: Math.round(price * (percentage / 100) * netFactor * 100) / 100,
+    };
+  });
+}
+
+async function getAffiliateRenewalSummary(affiliateId) {
+  const rows = await listAffiliateUpcomingRenewals(affiliateId);
+  return {
+    renewalCount: rows.length,
+    projectedRenewalTotal: Math.round(rows.reduce((s, r) => s + Number(r.projected_commission_value || 0), 0) * 100) / 100,
+  };
+}
+
+// Histórico COMPLETO de todo mundo que já entrou em teste grátis pelo link
+// desse afiliado, com o desfecho de cada um (pedido do usuário, 2026-09-29:
+// "mostra também todos que entraram em teste grátis e no final se a pessoa
+// foi convertida ou só expirou"). Só cobre o caminho de atribuição manual
+// (/free-trial?ref=, organizations.referred_by_affiliate_id) — é o único
+// que preserva histórico; o caminho rastreado nativamente pela Cakto
+// (affiliate_trial_referrals) APAGA a linha assim que resolve (converte ou
+// cancela, ver deleteAffiliateTrialReferral), então não tem o que listar
+// depois pra esse caminho. Nunca deletamos organizations, por isso dá pra
+// contar a história inteira por aqui.
+async function listAffiliateTrialHistory(affiliateId) {
+  const res = await pool.query(
+    `SELECT o.id AS org_id, o.is_trial, o.expires_at, o.cakto_customer_email, o.created_at,
+            (SELECT u.name FROM app_users u WHERE u.organization_id = o.id ORDER BY u.id LIMIT 1) AS user_name,
+            (SELECT u.email FROM app_users u WHERE u.organization_id = o.id ORDER BY u.id LIMIT 1) AS user_email
+     FROM organizations o
+     WHERE o.referred_by_affiliate_id = $1
+     ORDER BY o.created_at DESC`,
+    [affiliateId]
+  );
+  const now = Date.now();
+  return res.rows.map((o) => ({
+    orgId: o.org_id,
+    customerName: o.user_name,
+    customerEmail: (o.cakto_customer_email || o.user_email || "").toLowerCase() || null,
+    startedAt: o.created_at,
+    trialEndsAt: o.expires_at,
+    // is_trial só vira false depois de uma renovação/cobrança de verdade
+    // (ver renewOrganization/renewOrganizationWithPurchase) — nunca some
+    // sozinho, então "converted" aqui é confiável.
+    outcome: !o.is_trial ? "converted" : new Date(o.expires_at).getTime() < now ? "expired" : "ongoing",
+  }));
 }
 
 // ---------- Indicação (cupom de cliente) ----------
@@ -2926,6 +3032,59 @@ async function logOrg8Incident() {
 // não estende validade — o Gustavo ainda precisa pagar de verdade pelo
 // link pra conta renovar. Idempotente (WHERE ... IS NULL): rodar de novo
 // não faz nada se já foi aplicado.
+// Diagnóstico pontual (2026-09-29, incidente ao vivo): painel do Jhonatas
+// mostra "0 em teste" mas ele diz ter várias pessoas em teste grátis pelo
+// link dele. Só leitura — apaga depois de descobrir a causa.
+async function logJhonatasTrialIncident() {
+  const aff = await pool.query(
+    `SELECT id, name, ref_code, cakto_email FROM affiliates WHERE lower(name) LIKE '%jhonatas%' OR ref_code LIKE '%jhonatas%'`
+  );
+  console.log("=== INCIDENTE (2026-09-29): teste grátis do Jhonatas não aparece no painel ===");
+  for (const a of aff.rows) console.log(JSON.stringify(a));
+  if (aff.rows.length === 0) return;
+  const affiliateId = aff.rows[0].id;
+
+  const orgs = await pool.query(
+    `SELECT id, name, is_trial, expires_at, expires_at >= now() AS ainda_no_prazo, referred_by_affiliate_id,
+            cakto_customer_email, cakto_purchase_id, plan, created_at
+     FROM organizations WHERE referred_by_affiliate_id = $1 ORDER BY created_at DESC`,
+    [affiliateId]
+  );
+  console.log(`-- organizações com referred_by_affiliate_id = ${affiliateId} (total ${orgs.rows.length}) --`);
+  for (const o of orgs.rows) {
+    console.log(JSON.stringify(o));
+    if (o.cakto_purchase_id) {
+      const events = await pool.query(
+        `SELECT purchase_id, event, status, detail, created_at FROM cakto_events WHERE purchase_id = $1 ORDER BY created_at ASC`,
+        [o.cakto_purchase_id]
+      );
+      console.log(`   eventos da compra ${o.cakto_purchase_id} (${events.rows.length}):`);
+      for (const e of events.rows) console.log("   " + JSON.stringify(e));
+    }
+    const lastLogin = await pool.query(
+      `SELECT u.id, u.email, u.last_seen_at, u.suspended
+       FROM app_users u WHERE u.organization_id = $1 ORDER BY u.id LIMIT 1`,
+      [o.id]
+    );
+    if (lastLogin.rows[0]) console.log("   usuário: " + JSON.stringify(lastLogin.rows[0]));
+  }
+
+  const trialRefs = await pool.query(
+    `SELECT * FROM affiliate_trial_referrals WHERE affiliate_id = $1 ORDER BY id DESC`,
+    [affiliateId]
+  );
+  console.log(`-- affiliate_trial_referrals do afiliado ${affiliateId} (total ${trialRefs.rows.length}) --`);
+  for (const t of trialRefs.rows) console.log(JSON.stringify(t));
+
+  // leads criados por /free-trial (mesmo sem terminar o passo 2) com esse ref_code
+  const leads = await pool.query(
+    `SELECT email, ref_code, completed_at, created_at FROM assinar_leads WHERE ref_code = $1 ORDER BY created_at DESC LIMIT 20`,
+    [aff.rows[0].ref_code]
+  );
+  console.log(`-- assinar_leads com ref_code = "${aff.rows[0].ref_code}" (total ${leads.rows.length}) --`);
+  for (const l of leads.rows) console.log(JSON.stringify(l));
+}
+
 async function fixOrg8Email() {
   const res = await pool.query(
     `UPDATE organizations SET cakto_customer_email = 'gustavohenriquegh0304@gmail.com'
@@ -3073,6 +3232,7 @@ module.exports = {
   logOrg8Incident,
   fixOrg8Email,
   fixGustavoMissedRenewal,
+  logJhonatasTrialIncident,
   listSuggestedCompetitors,
   addSuggestedCompetitors,
   deleteSuggestedCompetitor,
@@ -3104,6 +3264,7 @@ module.exports = {
   logAdminAction,
   listAdminAuditLog,
   listAffiliates,
+  findUserByAffiliateId,
   findAffiliateByCaktoEmail,
   createAffiliate,
   deleteAffiliate,
@@ -3128,6 +3289,9 @@ module.exports = {
   listAffiliateTrialReferrals,
   listAllAffiliateTrialReferrals,
   getAffiliateTrialSummary,
+  listAffiliateUpcomingRenewals,
+  getAffiliateRenewalSummary,
+  listAffiliateTrialHistory,
   getReferralCouponByUserId,
   findReferralCouponByCode,
   createReferralCouponRequest,

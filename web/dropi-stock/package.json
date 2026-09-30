@@ -1,0 +1,11 @@
+{
+  "name": "scoutx-dropi-stock",
+  "private": true,
+  "description": "Varredura diária de estoque do catálogo Dropi (Colômbia) pra estimar vendas por queda de estoque.",
+  "scripts": {
+    "probe": "node probe.js"
+  },
+  "dependencies": {
+    "playwright": "1.48.0"
+  }
+}

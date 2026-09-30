@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>ScoutX Radar</title>
+    <style>
+      body {
+        width: 300px;
+        margin: 0;
+        padding: 16px;
+        background: #0b1220;
+        color: #e2e8f0;
+        font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      .head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+      .head img {
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+      }
+      .head b {
+        font-size: 15px;
+      }
+      .head small {
+        display: block;
+        color: #94a3b8;
+      }
+      .card {
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid #1e293b;
+        background: #111a2e;
+        margin-bottom: 10px;
+      }
+      .dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 6px;
+        background: #64748b;
+      }
+      .ok .dot {
+        background: #34d399;
+      }
+      .bad .dot {
+        background: #f87171;
+      }
+      label {
+        display: block;
+        color: #94a3b8;
+        font-size: 11px;
+        margin-bottom: 4px;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 7px 9px;
+        border-radius: 8px;
+        border: 1px solid #1e293b;
+        background: #0b1220;
+        color: #e2e8f0;
+      }
+      button {
+        width: 100%;
+        margin-top: 8px;
+        padding: 9px;
+        border: 0;
+        border-radius: 10px;
+        background: linear-gradient(90deg, #2563eb, #3b82f6);
+        color: #fff;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #1e293b;
+      }
+      .seg {
+        display: flex;
+        gap: 4px;
+        padding: 3px;
+        border-radius: 10px;
+        background: #0b1220;
+        border: 1px solid #1e293b;
+      }
+      .seg button {
+        margin: 0;
+        padding: 7px 6px;
+        border-radius: 8px;
+        background: transparent;
+        color: #94a3b8;
+        font-weight: 600;
+      }
+      .ms-status {
+        margin-top: 8px;
+        font-size: 11px;
+        color: #94a3b8;
+      }
+      .ms-status b.ok {
+        color: #34d399;
+      }
+      .ms-status b.bad {
+        color: #f87171;
+      }
+      .seg button.on {
+        background: linear-gradient(90deg, #2563eb, #3b82f6);
+        color: #fff;
+        box-shadow: 0 0 12px rgba(59, 130, 246, 0.45);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="head">
+      <img src="icons/logo.png" alt="" />
+      <div><b>ScoutX Radar</b><small>Vendas no catálogo da DropLatam, Dropi e Mastershop</small></div>
+    </div>
+    <div id="status" class="card"><span class="dot"></span>Verificando conexão…</div>
+    <div class="card">
+      <label>Nos produtos do catálogo</label>
+      <div class="seg">
+        <button type="button" data-mode="full">Painel completo</button>
+        <button type="button" data-mode="compact">Selo compacto</button>
+      </div>
+    </div>
+    <!-- só pro admin (popup.js mostra quando a conta é admin) -->
+    <div class="card" id="ms-card" hidden>
+      <label>Sessão da Mastershop (admin)</label>
+      <div class="seg">
+        <button type="button" data-ms="on">Renovar sozinho</button>
+        <button type="button" data-ms="off">Desligado</button>
+      </div>
+      <div id="ms-status" class="ms-status"></div>
+      <button id="ms-now" class="secondary" type="button" hidden>Renovar agora</button>
+    </div>
+    <div class="card">
+      <label for="url">Endereço da ScoutX</label>
+      <input id="url" placeholder="http://localhost:3011" />
+      <button id="save" class="secondary" type="button">Salvar endereço</button>
+    </div>
+    <button id="open" type="button">Abrir Radar de Vendas</button>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -5,8 +5,10 @@ import {
   ArrowRightLeft,
   Ban,
   Building2,
+  Check,
   History,
   KeyRound,
+  Link2,
   Lock,
   PlusCircle,
   RefreshCw,
@@ -130,6 +132,8 @@ export default function Usuarios() {
   const [creating, setCreating] = useState(false)
   const [ipDetail, setIpDetail] = useState(null)
   const [passwordEdit, setPasswordEdit] = useState(null)
+  const [copyingResetLinkId, setCopyingResetLinkId] = useState(null)
+  const [copiedResetLinkId, setCopiedResetLinkId] = useState(null)
   const [orgPicker, setOrgPicker] = useState(null)
   const [planEditor, setPlanEditor] = useState(null)
   const [competitorSummary, setCompetitorSummary] = useState(null)
@@ -481,6 +485,24 @@ export default function Usuarios() {
 
   function openPasswordEdit(user) {
     setPasswordEdit({ user, value: '', saving: false, error: null })
+  }
+
+  // Link de redefinição por autoatendimento (pedido do usuário, 2026-09-29):
+  // em vez do admin digitar a senha nova de outra pessoa (estranho pedir
+  // pro cliente "qual senha você quer"), esse link deixa o próprio cliente
+  // escolher, sem contar ela pra ninguém (ver /redefinir-senha em server.js).
+  async function copyPasswordResetLink(user) {
+    setCopyingResetLinkId(user.id)
+    try {
+      const { url } = await rawApi.getUserPasswordResetLink(user.id)
+      await navigator.clipboard?.writeText(url)
+      setCopiedResetLinkId(user.id)
+      setTimeout(() => setCopiedResetLinkId(null), 2000)
+    } catch (err) {
+      setError(err.message || 'Não foi possível gerar o link de redefinição.')
+    } finally {
+      setCopyingResetLinkId(null)
+    }
   }
 
   async function submitPasswordEdit() {
@@ -1231,8 +1253,16 @@ export default function Usuarios() {
                     <td className="px-3 py-2.5 text-right">
                       <div className="flex items-center justify-end gap-1">
                         <button
+                          onClick={() => copyPasswordResetLink(u)}
+                          disabled={copyingResetLinkId === u.id}
+                          title="Copiar link pra ele escolher a própria senha"
+                          className="rounded-lg p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--hover-surface)] hover:text-emerald-400 disabled:opacity-50"
+                        >
+                          {copiedResetLinkId === u.id ? <Check size={15} /> : <Link2 size={15} />}
+                        </button>
+                        <button
                           onClick={() => openPasswordEdit(u)}
-                          title="Trocar senha"
+                          title="Definir senha manualmente (admin escolhe)"
                           className="rounded-lg p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--hover-surface)] hover:text-brand-500"
                         >
                           <KeyRound size={15} />

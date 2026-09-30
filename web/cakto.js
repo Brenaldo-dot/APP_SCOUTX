@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const db = require("./db");
 const caktoApi = require("./caktoApi");
 const { tierForActiveMembers } = require("./communityTiers");
+const { recurringPercentageForReferredCount } = require("./affiliateTiers");
 
 // offer.id (link de pagamento) → plano interno + ciclo de cobrança. Vem dos
 // 9 links que o Samuel mandou (3 planos × 3 ciclos). O slug do "Standard
@@ -198,12 +199,18 @@ async function recordManualAffiliateCommissionIfAny(data, order) {
   const customerEmail = email || String(org.cakto_customer_email || "").trim().toLowerCase();
   if (isSameEmail(customerEmail, affiliate.cakto_email)) return;
   const prior = await db.countAffiliateCommissionsForCustomer(affiliate.id, customerEmail);
-  // Recorrência NÃO é mais paga aqui (2026-09-19, pedido do Samuel): quem
-  // paga renovação é a comissão da COMUNIDADE (recordCommunityCommissionIfAny).
-  // Só a primeira cobrança paga do cliente gera comissão de afiliado.
-  if (prior > 0) return;
-  const commissionType = "first_sale";
-  const percentage = affiliate.first_sale_percentage;
+  // Recorrência voltou a pagar comissão de afiliado comum (2026-09-29,
+  // pedido do usuário — reverte a decisão de 2026-09-19 que tirava isso
+  // daqui e jogava só pra comissão da COMUNIDADE). 1ª cobrança paga = first
+  // sale (percentual fixo do afiliado); da 2ª em diante = recurring, com o
+  // percentual por NÍVEL (quanto mais clientes distintos ele já trouxe,
+  // maior — ver affiliateTiers.js), não mais um valor fixo cadastrado nele.
+  const commissionType = prior > 0 ? "recurring" : "first_sale";
+  let percentage = affiliate.first_sale_percentage;
+  if (commissionType === "recurring") {
+    const { referredCustomers } = await db.getAffiliateEarningsSummary(affiliate.id);
+    percentage = recurringPercentageForReferredCount(referredCustomers);
+  }
   const netBase = netFromOrder(order, saleAmount, await db.getAffiliateNetFactor(affiliate.id));
   const commissionValue = Math.round(netBase * (Number(percentage) / 100) * 100) / 100;
   const inserted = await db.createAffiliateCommission({
@@ -236,22 +243,27 @@ async function recordAffiliateCommissionIfAny(data, commissionType, resolved) {
       await recordManualAffiliateCommissionIfAny(data, order);
       return;
     }
-    // Recorrência NÃO é mais paga como comissão de afiliado (2026-09-19,
-    // pedido do Samuel): toda renovação é responsabilidade da comissão da
-    // COMUNIDADE (recordCommunityCommissionIfAny). Mas a 1ª cobrança de quem
+    // Recorrência voltou a pagar comissão de afiliado comum (2026-09-29,
+    // pedido do usuário — reverte a decisão de 2026-09-19 que jogava toda
+    // renovação só pra comissão da COMUNIDADE). Mas a 1ª cobrança de quem
     // veio de teste grátis chega como "renovação" — então, se esse afiliado
     // ainda não tem nenhuma comissão desse cliente, essa cobrança conta como
-    // PRIMEIRA VENDA; se já tem, é recorrência de verdade e não paga aqui.
+    // PRIMEIRA VENDA (percentual fixo dele); se já tem, é recorrência de
+    // verdade e paga pelo percentual de NÍVEL (ver affiliateTiers.js).
     const customerEmail = String(data.customer?.email || "").trim().toLowerCase();
     if (isSameEmail(customerEmail, affiliate.cakto_email)) return;
     let effectiveType = commissionType;
+    let percentage = affiliate.first_sale_percentage;
     if (effectiveType === "recurring") {
       const prior = await db.countAffiliateCommissionsForCustomer(affiliate.id, customerEmail);
-      if (prior > 0) return;
-      effectiveType = "first_sale";
+      if (prior > 0) {
+        const { referredCustomers } = await db.getAffiliateEarningsSummary(affiliate.id);
+        percentage = recurringPercentageForReferredCount(referredCustomers);
+      } else {
+        effectiveType = "first_sale";
+      }
     }
     commissionType = effectiveType;
-    const percentage = affiliate.first_sale_percentage;
     const { saleAmount, commissionValue } = affiliateCommissionFromOrder(
       { ...order, amount: order.amount ?? data.amount },
       percentage

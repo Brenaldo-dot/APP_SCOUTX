@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
+  Activity,
   Bell,
   Building2,
   ChevronDown,
@@ -63,6 +64,9 @@ const NAV_GROUPS = [
     labelKey: 'nav.inteligencia',
     items: [
       { to: '/produtos-quentes', labelKey: 'nav.produtosQuentes', Icon: Flame },
+      // Radar de Vendas: ainda em desenvolvimento, só aparece no servidor
+      // LOCAL (me.radarEnabled vem do /api/me; em produção é false).
+      { to: '/radar-vendas', labelKey: 'nav.radarVendas', Icon: Activity, onlyIf: 'radarEnabled' },
       { to: '/anuncios', labelKey: 'nav.anuncios', Icon: Megaphone },
       { to: '/alertas', labelKey: 'nav.alertas', Icon: Bell },
     ],
@@ -358,7 +362,7 @@ export default function Layout() {
           {hasAccess &&
             NAV_GROUPS.map((group) => (
               <NavGroup key={group.labelKey} label={t(group.labelKey)} collapsed={effectiveCollapsed}>
-                {group.items.map(({ to, labelKey, Icon, end }) => {
+                {group.items.filter((item) => !item.onlyIf || me?.[item.onlyIf]).map(({ to, labelKey, Icon, end }) => {
                   const unread = to === '/alertas' ? alertsUnreadCount : 0
                   return (
                     <NavLink key={to} to={to} end={end} title={effectiveCollapsed ? t(labelKey) : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
@@ -404,7 +408,7 @@ export default function Layout() {
                 )}
               </NavLink>
             )}
-            {TOOL_ITEMS.map(({ to, labelKey, Icon }) => (
+            {!me?.isAffiliate && TOOL_ITEMS.map(({ to, labelKey, Icon }) => (
               <NavLink key={to} to={to} title={effectiveCollapsed ? t(labelKey) : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
                 {({ isActive }) => (
                   <>
@@ -470,7 +474,10 @@ export default function Layout() {
               </NavLink>
             )}
 
-            {me?.isAdmin && (
+            {/* Comunidade em standby (pedido do usuário, 2026-09-29): tirada de
+                circulação por enquanto, sem apagar nada — só a condição
+                abaixo (false &&) precisa sumir pra voltar a aparecer. */}
+            {false && me?.isAdmin && (
               <NavLink to="/admin/comunidades" title={effectiveCollapsed ? t('nav.adminComunidades') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
                 {({ isActive }) => (
                   <>
@@ -493,8 +500,9 @@ export default function Layout() {
             )}
 
             {/* Comunidade e Indicação: qualquer usuário logado acessa, mesma
-                lógica de Suporte/Minha Conta abaixo. */}
-            {me && (
+                lógica de Suporte/Minha Conta abaixo. Comunidade em standby,
+                ver comentário acima. */}
+            {false && me && (
               <NavLink to="/comunidade" title={effectiveCollapsed ? t('nav.comunidade') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
                 {({ isActive }) => (
                   <>
@@ -504,7 +512,25 @@ export default function Layout() {
                 )}
               </NavLink>
             )}
-            {me && (
+            {/* Meu Painel: aparece pra QUALQUER conta logada cujo email bata
+                com um afiliado cadastrado (me.affiliateId), não só pra quem
+                tem a conta dedicada — pedido do usuário, 2026-09-29 (revisão:
+                admin/colaborador que também é afiliado precisa ver essa aba
+                JUNTO com o resto, sem perder acesso a nada). me.isAffiliate
+                (role dedicado) continua escondendo o resto do ScoutX só pra
+                quem não tem outro acesso nenhum (ver guards abaixo). */}
+            {me?.affiliateId && (
+              <NavLink to="/meu-painel" title={effectiveCollapsed ? 'Meu Painel' : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
+                {({ isActive }) => (
+                  <>
+                    <NavIcon Icon={Handshake} active={isActive} />
+                    {!effectiveCollapsed && 'Meu Painel'}
+                  </>
+                )}
+              </NavLink>
+            )}
+
+            {me && !me.isAffiliate && (
               <NavLink to="/indicacao" title={effectiveCollapsed ? t('nav.indicacao') : undefined} className={(state) => navLinkClass(state, effectiveCollapsed)}>
                 {({ isActive }) => (
                   <>
