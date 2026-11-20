@@ -342,6 +342,7 @@ const SCOUTX_LOGO_DATA_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAA
 function authPage({ title, subtitle, action, error, showNameField, confirmPassword }) {
   return `<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
 <title>ScoutX</title>
 <style>
   * { box-sizing: border-box; }
@@ -456,6 +457,9 @@ function authPage({ title, subtitle, action, error, showNameField, confirmPasswo
   }
   .pw-toggle:hover { color: #e5e7eb; background: rgba(255,255,255,0.06); }
   .pw-toggle svg { display: block; width: 19px; height: 19px; }
+  .support-link { text-align: center; margin: 18px 0 0; font-size: 12px; color: #9ca3af; }
+  .support-link a { color: #60a5fa; text-decoration: none; font-weight: 600; }
+  .support-link a:hover { text-decoration: underline; }
   .pw-toggle .eye-off { display: none; }
   .pw-toggle.is-visible .eye { display: none; }
   .pw-toggle.is-visible .eye-off { display: block; }
@@ -487,6 +491,7 @@ function authPage({ title, subtitle, action, error, showNameField, confirmPasswo
     }
     <button type="submit">${showNameField ? "Criar conta de administrador" : confirmPassword ? "Criar minha senha" : "Entrar"}</button>
   </form>
+  ${showNameField || confirmPassword ? "" : '<p class="support-link">Precisa de ajuda? <a href="https://wa.me/556199253506?text=Ol%C3%A1%21%20Preciso%20de%20ajuda%20para%20entrar%20no%20ScoutX." target="_blank" rel="noopener">Fale com o suporte</a></p>'}
 </div>
 <script src="/auth.js"></script>
 </body></html>`;
@@ -776,6 +781,7 @@ function createApp() {
   // prévia com "conexão recusada" (regressão achada pelo usuário). Continua
   // bloqueando qualquer OUTRO site de nos enquadrar, que era o objetivo real.
   app.use((req, res, next) => {
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "SAMEORIGIN");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
