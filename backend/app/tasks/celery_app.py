@@ -1,10 +1,13 @@
 """Celery app + agendamento (Celery Beat) — jobs diários automáticos."""
 
+import os
+
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import worker_process_init
+from celery.signals import setup_logging, worker_process_init
 
 from app.config import get_settings
+from app.logging_config import configure_logging
 
 settings = get_settings()
 
@@ -32,6 +35,15 @@ def _reset_db_pool_after_fork(**kwargs):
     from app.database import engine
 
     engine.dispose()
+
+# Com esse sinal conectado o Celery não configura logging sozinho (e o
+# --loglevel da linha de comando é ignorado): worker e beat passam a seguir
+# LOG_LEVEL e silenciar "Task received/succeeded" igual à API — ver
+# app/logging_config.py.
+@setup_logging.connect
+def _configure_celery_logging(**kwargs):
+    configure_logging(force=True)
+
 
 celery_app = Celery(
     "competitor_intel",
@@ -71,6 +83,16 @@ celery_app.conf.update(
         "app.tasks.ads_monitor.*": {"queue": "browser_heavy"},
         "app.tasks.ad_miner.*": {"queue": "browser_heavy"},
     },
+    # Memória (2026-11): o serviço passou de 1,9 GB em 10 dias sem restart.
+    # Os processos filhos do worker nunca eram reciclados — cada task de
+    # scraping sobe Playwright/Chromium e o driver Node dele, parseia HTML
+    # grande (BeautifulSoup) e carrega o catálogo inteiro de uma loja; o
+    # alocador do Python/glibc raramente devolve essa memória ao SO, então o
+    # RSS de cada filho só sobe. Reciclar o filho depois de N tasks ou ao
+    # passar de um teto de RSS (em KB, checado ao FIM de cada task — nunca
+    # mata uma task no meio) zera isso sem mudar nada no comportamento.
+    worker_max_tasks_per_child=int(os.getenv("CELERY_MAX_TASKS_PER_CHILD", "50")),
+    worker_max_memory_per_child=int(os.getenv("CELERY_MAX_MEMORY_PER_CHILD_KB", "400000")),
 )
 
 celery_app.conf.beat_schedule = {

@@ -12,8 +12,10 @@ from app import models  # noqa: F401  garante que todo modelo é registrado no B
 from app.api import ad_miner, ads, alerts, competitors, dashboard, ecosystem, products, settings as settings_api
 from app.config import get_settings
 from app.database import Base, engine
+from app.logging_config import configure_logging
 
-logging.basicConfig(level=logging.INFO)
+# Nível via LOG_LEVEL (padrão INFO) — ver app/logging_config.py.
+configure_logging()
 settings = get_settings()
 
 

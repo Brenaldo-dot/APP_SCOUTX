@@ -32,6 +32,10 @@ _scan_usage: dict[int, tuple[float, int]] = {}
 
 def _check_scan_rate_limit(user_id: int) -> None:
     now = time.time()
+    # Descarta janelas já vencidas — sem isso o dict só cresce (1 entrada por
+    # usuário que já escaneou algum dia, pra sempre, no processo da API).
+    for uid in [uid for uid, (start, _) in _scan_usage.items() if now - start > _SCAN_WINDOW_SECONDS]:
+        del _scan_usage[uid]
     window_start, count = _scan_usage.get(user_id, (now, 0))
     if now - window_start > _SCAN_WINDOW_SECONDS:
         window_start, count = now, 0
