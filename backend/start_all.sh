@@ -6,12 +6,21 @@
 # um processo morto rodando escondido atrás dos outros vivos.
 set -e
 
-uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" &
+# Nível de log de tudo abaixo (API, workers, beat) — padrão INFO. LOG_LEVEL=DEBUG
+# reativa as linhas por requisição/por task pra investigar algo pontual (ver
+# app/logging_config.py). O Celery ignora --loglevel quando o sinal
+# setup_logging está conectado (app/tasks/celery_app.py); fica aqui só pra
+# documentar/coerência caso alguém rode sem o sinal.
+LOG_LEVEL="${LOG_LEVEL:-INFO}"
+export LOG_LEVEL
+LOG_LEVEL_LOWER="${LOG_LEVEL,,}"
+
+uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" --log-level "$LOG_LEVEL_LOWER" &
 API_PID=$!
 
 # Worker "geral": cadastro, snapshot, raio-x — tudo HTTP/DB, leve, sem
 # Chromium. Concorrência alta é seguro aqui.
-celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4 -Q celery -n general@%h &
+celery -A app.tasks.celery_app worker --loglevel="$LOG_LEVEL" --concurrency=4 -Q celery -n general@%h &
 WORKER_PID=$!
 
 # Worker "browser_heavy" separado: ads_monitor e ad_miner abrem um Chromium
@@ -32,10 +41,10 @@ WORKER_PID=$!
 # dashboard sob carga real, é sinal de separar esse worker num serviço
 # Railway À PARTE (não dividir CPU com a API/worker geral) em vez de só
 # baixar esse número de novo.
-celery -A app.tasks.celery_app worker --loglevel=info --concurrency=3 -Q browser_heavy -n browser@%h &
+celery -A app.tasks.celery_app worker --loglevel="$LOG_LEVEL" --concurrency=3 -Q browser_heavy -n browser@%h &
 BROWSER_WORKER_PID=$!
 
-celery -A app.tasks.celery_app beat --loglevel=info &
+celery -A app.tasks.celery_app beat --loglevel="$LOG_LEVEL" &
 BEAT_PID=$!
 
 trap 'kill $API_PID $WORKER_PID $BROWSER_WORKER_PID $BEAT_PID 2>/dev/null' TERM INT

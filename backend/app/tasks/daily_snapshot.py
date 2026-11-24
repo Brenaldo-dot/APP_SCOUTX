@@ -8,12 +8,12 @@ from app.services.scoring_service import score_product
 from app.services.snapshot_service import run_daily_snapshot
 from app.services.volume_service import estimate_daily_volume
 from app.tasks.celery_app import celery_app
-from app.tasks.utils import run_async
+from app.tasks.utils import BatchSummary, run_async
 
 logger = logging.getLogger(__name__)
 
 
-def _snapshot_and_score(db, competitor: Competitor) -> None:
+def _snapshot_and_score(db, competitor: Competitor) -> int:
     run_async(run_daily_snapshot(db, competitor))
     estimate_daily_volume(db, competitor)
     active_products = (
@@ -43,23 +43,23 @@ def _snapshot_and_score(db, competitor: Competitor) -> None:
     else:
         competitor.classification = ScaleClassification.TESTING
     db.commit()
+    return len(active_products)
 
 
 @celery_app.task(name="app.tasks.daily_snapshot.run_daily_snapshot_all")
 def run_daily_snapshot_all() -> dict:
     db = SessionLocal()
-    results = {"ok": 0, "failed": 0}
     try:
         competitors = db.query(Competitor).filter(Competitor.status == CompetitorStatus.ACTIVE).all()
+        summary = BatchSummary(logger, "Snapshot de concorrentes", total=len(competitors))
         for competitor in competitors:
             try:
-                _snapshot_and_score(db, competitor)
-                results["ok"] += 1
+                summary.ok(produtos=_snapshot_and_score(db, competitor))
             except Exception:
                 logger.exception("Falha no snapshot diário de %s", competitor.domain)
                 db.rollback()
-                results["failed"] += 1
-        return results
+                summary.error()
+        return summary.finish()
     finally:
         db.close()
 

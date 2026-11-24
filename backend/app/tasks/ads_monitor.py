@@ -10,7 +10,7 @@ from app.scrapers import google_ads, meta_ads, tiktok_ads
 from app.services.ads_service import ingest_search_results
 from app.services.competitor_service import country_for_operation
 from app.tasks.celery_app import celery_app
-from app.tasks.utils import run_async
+from app.tasks.utils import BatchSummary, run_async
 
 logger = logging.getLogger(__name__)
 
@@ -18,18 +18,18 @@ logger = logging.getLogger(__name__)
 @celery_app.task(name="app.tasks.ads_monitor.run_ads_monitor_all")
 def run_ads_monitor_all() -> dict:
     db = SessionLocal()
-    results = {"ok": 0, "failed": 0}
     try:
         competitors = db.query(Competitor).filter(Competitor.status == CompetitorStatus.ACTIVE).all()
+        summary = BatchSummary(logger, "Monitor de anúncios", total=len(competitors))
         for competitor in competitors:
             try:
                 run_async(_monitor_competitor_ads(db, competitor))
-                results["ok"] += 1
+                summary.ok()
             except Exception:
                 logger.exception("Falha ao monitorar anúncios de %s", competitor.domain)
                 db.rollback()
-                results["failed"] += 1
-        return results
+                summary.error()
+        return summary.finish()
     finally:
         db.close()
 
