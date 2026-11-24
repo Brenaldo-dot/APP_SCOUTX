@@ -12,15 +12,19 @@ linhas de log por dia (>100/min). A maior parte não vinha do nosso código:
 Aqui o nível vem de LOG_LEVEL (padrão INFO) e essas fontes ruidosas ficam em
 WARNING, a não ser que LOG_LEVEL=DEBUG (aí tudo volta a aparecer, pra
 investigar algo pontual). O que importa de rotina sai como resumo por lote
-nas próprias tasks (ver app/tasks/*_all).
+nas próprias tasks (ver app/tasks/*_all). Exceção: httpx/httpcore nunca
+descem de WARNING (ver _ALWAYS_QUIET_LOGGERS).
 """
 
 import logging
 import os
 
+# httpx/httpcore ficam em WARNING SEMPRE, inclusive com LOG_LEVEL=DEBUG: a
+# linha "HTTP Request: POST <url>" deles inclui a URL completa, e a URL de um
+# webhook do Discord É a credencial (visto nos logs do Coolify em 2026-11).
+_ALWAYS_QUIET_LOGGERS = ("httpx", "httpcore")
+
 _NOISY_LOGGERS = (
-    "httpx",
-    "httpcore",
     "uvicorn.access",
     "celery.app.trace",  # "Task ... succeeded in Xs: {...}"
     "celery.worker.strategy",  # "Task ... received"
@@ -53,3 +57,5 @@ def configure_logging(force: bool = False) -> None:
     noisy_level = level if level <= logging.DEBUG else max(level, logging.WARNING)
     for name in _NOISY_LOGGERS:
         logging.getLogger(name).setLevel(noisy_level)
+    for name in _ALWAYS_QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(max(level, logging.WARNING))

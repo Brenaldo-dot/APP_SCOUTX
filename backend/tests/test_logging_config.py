@@ -17,7 +17,10 @@ def test_debug_level_reenables_everything(monkeypatch):
     monkeypatch.setenv("LOG_LEVEL", "debug")
     configure_logging(force=True)
     assert logging.getLogger().level == logging.DEBUG
-    assert logging.getLogger("httpx").isEnabledFor(logging.INFO)
+    assert logging.getLogger("uvicorn.access").isEnabledFor(logging.INFO)
+    assert logging.getLogger("celery.app.trace").isEnabledFor(logging.INFO)
+    # URL completa (com token de webhook) nunca vai pro log, nem em DEBUG.
+    assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
 
 
 def test_invalid_level_falls_back_to_info(monkeypatch):
