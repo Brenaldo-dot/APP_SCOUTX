@@ -1,8 +1,16 @@
-# Mega Minerador de Concorrentes COD
+<img alt="ScoutX: inteligência competitiva para operações COD" src="docs/assets/banner.png" width="100%">
 
-Inteligência competitiva para lojas Shopify no mercado de contra-entrega (COD)
-na Colômbia: monitora concorrentes diariamente e só mostra informação quando
-ela é confiável — dado errado é pior que nenhum dado.
+# ScoutX
+
+**Inteligência competitiva para lojas Shopify no mercado de contra-entrega (COD).** O ScoutX monitora concorrentes todo dia e só mostra informação quando ela é confiável: dado errado é pior que nenhum dado.
+
+| | O que faz |
+|---|---|
+| **`DASHBOARD`** | Visão geral dos concorrentes monitorados: produtos novos, mudanças e alertas do dia. |
+| **`PRODUTOS QUENTES`** | Score de 0 a 100 por produto, a partir de sinais reais de escala: **Frio** (0–30), **Morno** (31–55), **Quente** (56–79) e **Escalando** (80+). |
+| **`ANÚNCIOS`** | Anúncios ativos de cada concorrente nas bibliotecas públicas de anúncios, com anúncio vencedor e anúncio morto. |
+| **`ALERTAS`** | Mudança de preço, estoque, fornecedor e produto novo, avisada em tempo real. |
+| **`ESPIONAR LOJA`** | Raio-x de uma loja Shopify: catálogo, faixa de preço, stack tecnológica e estrutura. |
 
 ## Stack
 
